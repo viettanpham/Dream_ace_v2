@@ -1098,11 +1098,21 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'shop.shipyardBonusBadge': 'Xưởng tàu +{n} hàng',
   'shop.soldOut': 'ĐÃ BÁN',
   'shop.stockAvailable': 'Còn {avail}/{total} món',
+  'shop.cargoCount': 'Kho đồ: {count}/{max}',
+  'shop.cargoFullTag': 'Kho đầy ({count}/{max})',
+  'shop.cargoFullBtn': 'Kho đã đầy',
+  'shop.cargoFullHint':
+    'Kho chung đã đầy ({count}/{max}). Hãy bán bớt ở tab Bán từ Kho hoặc dọn đồ tại tab Gear trước khi mua thêm.',
+  'shop.tabWpShort': 'WP ({count})',
   'shop.wpRotatingTitle': 'Ưu Đãi Điểm Chiến Công Luân Phiên',
   'shop.wpRotatingDesc': '3–10 rương & vật phẩm tiêu hao ngẫu nhiên. Tự làm mới sau trận, mỗi tháng hoặc dùng WP làm mới.',
   'shop.wpRefreshBtn': 'Làm mới ({cost} WP)',
+  'shop.wpRefreshedMsg': 'Đã làm mới các ưu đãi luân phiên tại Chợ Điểm Chiến Công!',
   'shop.wpOpeningCardsTitle': 'Thẻ Mở Khóa Kỹ Năng Hệ',
   'shop.wpBoughtOfferFeedback': 'Đã mua {name} — mở Kho đồ → Tiêu hao để dùng.',
+  'shop.goToConsumables': 'Mở Kho Tiêu Hao →',
+  'shop.buyOfferBtn': 'Mua ({cost} WP)',
+  'shop.wpNoOffers': 'Hiện chưa có ưu đãi luân phiên nào.',
 
   // Bảng Quản Trị (Admin CP) & Chỉ báo
   'admin.btnLabel': 'ADMIN',

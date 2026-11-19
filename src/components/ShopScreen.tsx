@@ -1,16 +1,22 @@
-import { useMemo, useState } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  Anchor,
   Award,
   Check,
   ChevronRight,
+  Clock,
   Coins,
   KeyRound,
+  Package,
   RefreshCw,
   ShoppingBag,
+  Sparkles,
 } from 'lucide-react';
+import { BALANCE_CONFIG } from '../data/balance';
 import { MECH_CLASS_LIST, STAT_KEYS } from '../data/classes';
 import { EQUIPMENT_SLOTS, RARITY_META, SHOP_CONFIG } from '../data/items';
+import { SHOP_STOCK_CONFIG } from '../data/shopConfig';
 import { getSkillById, OPENING_CARDS_LIST } from '../data/skills';
 import {
   getEffectiveItemStats,
@@ -19,6 +25,7 @@ import {
   getSellPrice,
   validateEquipOnGear,
 } from '../engine/equipment';
+import { hasOperationalShipyard } from '../engine/shop';
 import {
   formatEquipValidationReason,
   formatItemTraitsList,
@@ -34,42 +41,125 @@ import {
   getStatShort,
   useI18n,
 } from '../i18n';
+import type { TranslationKey } from '../i18n/en';
 import { useGameStore } from '../store/useGameStore';
-import type { EquipmentSlot, ItemInstance, MechClassId } from '../types/game';
+import type {
+  EquipmentSlot,
+  ItemInstance,
+  Language,
+  MechClassId,
+  ShopItemListing,
+  WpMarketOffer,
+} from '../types/game';
 import { BottomSheet } from './BottomSheet';
+import {
+  ClassIcon,
+  ConsumableIcon,
+  getSlotAccentClass,
+  SlotIcon,
+} from './GameIcons';
 import { SkillIcon } from './SkillIcon';
 
 type ClassFilter = 'all' | 'usable' | 'universal' | MechClassId;
 
+type NoticeAction = 'gear' | 'skill' | 'consumables' | 'none';
+
 type MobileShopSheetState =
-  | { kind: 'buy'; item: ItemInstance }
+  | { kind: 'buy'; itemId: string }
   | { kind: 'sell'; item: ItemInstance }
   | { kind: 'wp'; cardId: string }
+  | { kind: 'wpOffer'; offerId: string }
   | null;
+
+function getWpOfferText(
+  lang: Language,
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string,
+  offer: WpMarketOffer
+): { name: string; desc: string } {
+  const rarityLabel = offer.minRarity
+    ? getRarityLabel(lang, offer.minRarity)
+    : '';
+  const slotLabel = offer.slot ? getSlotLabel(lang, offer.slot) : '';
+  const pct =
+    offer.bonusPct ?? SHOP_STOCK_CONFIG.wpOffers.enchantStone.bonusPct;
+  const battles =
+    offer.battlesCount ?? SHOP_STOCK_CONFIG.wpOffers.expBoost.battlesCount;
+  return {
+    name: t(`consumable.${offer.kind}.name` as TranslationKey, {
+      rarity: rarityLabel,
+      slot: slotLabel,
+      pct,
+      battles,
+    }),
+    desc: t(`consumable.${offer.kind}.desc` as TranslationKey, {
+      rarity: rarityLabel,
+      slot: slotLabel,
+      pct,
+      battles,
+    }),
+  };
+}
 
 export function ShopScreen() {
   const { lang, t } = useI18n();
   const pilot = useGameStore((s) => s.pilot);
   const shopStock = useGameStore((s) => s.shopStock);
+  const wpMarketOffers = useGameStore((s) => s.wpMarketOffers);
+  const battlesUntilRestock = useGameStore((s) => s.battlesUntilRestock);
   const shopSubTab = useGameStore((s) => s.shopSubTab);
   const setShopSubTab = useGameStore((s) => s.setShopSubTab);
   const buyShopItem = useGameStore((s) => s.buyShopItem);
   const refreshShopStock = useGameStore((s) => s.refreshShopStock);
+  const buyWpMarketOffer = useGameStore((s) => s.buyWpMarketOffer);
+  const refreshWpMarket = useGameStore((s) => s.refreshWpMarket);
   const sellItem = useGameStore((s) => s.sellItem);
   const buyOpeningCardAction = useGameStore((s) => s.buyOpeningCardAction);
   const setActiveTab = useGameStore((s) => s.setActiveTab);
+  const setInventoryFilterState = useGameStore(
+    (s) => s.setInventoryFilterState
+  );
 
   const [slotFilter, setSlotFilter] = useState<EquipmentSlot | 'all'>('all');
   const [classFilter, setClassFilter] = useState<ClassFilter>('all');
   const [wpClassFilter, setWpClassFilter] = useState<'all' | MechClassId>('all');
   const [noticeText, setNoticeText] = useState<string | null>(null);
-  const [noticeAction, setNoticeAction] = useState<'gear' | 'skill'>('gear');
+  const [noticeAction, setNoticeAction] = useState<NoticeAction>('gear');
   const [mobileSheet, setMobileSheet] = useState<MobileShopSheetState>(null);
 
   const activeGear = pilot.gears[pilot.activeGearId];
   const equippedOnActive = useMemo(
     () => getGearEquippedInstances(activeGear, pilot.inventory),
     [activeGear, pilot.inventory]
+  );
+
+  const shipyardActive = useMemo(() => hasOperationalShipyard(pilot), [pilot]);
+  const isInventoryFull =
+    pilot.inventory.length >= BALANCE_CONFIG.maxInventorySize;
+
+  const availableShopCount = useMemo(
+    () => shopStock.filter((item) => !item.soldOut).length,
+    [shopStock]
+  );
+
+  const slotStockCounts = useMemo(() => {
+    const counts = {} as Record<EquipmentSlot, { avail: number; total: number }>;
+    for (const slot of EQUIPMENT_SLOTS) {
+      counts[slot] = { avail: 0, total: 0 };
+    }
+    for (const item of shopStock) {
+      const bucket = counts[item.slot];
+      if (!bucket) continue;
+      bucket.total += 1;
+      if (!item.soldOut) {
+        bucket.avail += 1;
+      }
+    }
+    return counts;
+  }, [shopStock]);
+
+  const availableWpOffersCount = useMemo(
+    () => wpMarketOffers.filter((offer) => !offer.soldOut).length,
+    [wpMarketOffers]
   );
 
   const filteredStock = useMemo(() => {
@@ -100,6 +190,17 @@ export function ShopScreen() {
     [pilot.inventory, pilot.gears]
   );
 
+  const sellSlotCounts = useMemo(() => {
+    const counts = {} as Record<EquipmentSlot, number>;
+    for (const slot of EQUIPMENT_SLOTS) {
+      counts[slot] = 0;
+    }
+    for (const inst of unequippedInventory) {
+      counts[inst.slot] = (counts[inst.slot] ?? 0) + 1;
+    }
+    return counts;
+  }, [unequippedInventory]);
+
   const filteredSellInventory = useMemo(() => {
     return unequippedInventory.filter((inst) => {
       if (slotFilter !== 'all' && inst.slot !== slotFilter) return false;
@@ -116,7 +217,8 @@ export function ShopScreen() {
     });
   }, [wpClassFilter]);
 
-  const handleBuy = (item: ItemInstance) => {
+  const handleBuy = (item: ShopItemListing) => {
+    if (item.soldOut || isInventoryFull || pilot.credits < item.price) return;
     const res = buyShopItem(item.instanceId);
     if (res.ok) {
       setNoticeAction('gear');
@@ -133,7 +235,7 @@ export function ShopScreen() {
   const handleRefresh = () => {
     const res = refreshShopStock();
     if (res.ok) {
-      setNoticeAction('gear');
+      setNoticeAction('none');
       setNoticeText(t('shop.refreshedMsg'));
     }
   };
@@ -167,12 +269,49 @@ export function ShopScreen() {
     }
   };
 
-  const canRefresh = pilot.credits >= SHOP_CONFIG.refreshCost;
+  const handleBuyWpOffer = (offer: WpMarketOffer) => {
+    if (offer.soldOut || (pilot.warPoints ?? 0) < offer.wpCost) return;
+    const res = buyWpMarketOffer(offer.id);
+    if (res.ok) {
+      const { name } = getWpOfferText(lang, t, offer);
+      setNoticeAction('consumables');
+      setNoticeText(t('shop.wpBoughtOfferFeedback', { name }));
+      setMobileSheet(null);
+    }
+  };
+
+  const handleRefreshWp = () => {
+    const res = refreshWpMarket();
+    if (res.ok) {
+      setNoticeAction('none');
+      setNoticeText(t('shop.wpRefreshedMsg'));
+    }
+  };
+
+  const refreshCostCredits = SHOP_STOCK_CONFIG.refreshCostCredits;
+  const wpRefreshCostWp = SHOP_STOCK_CONFIG.wpRefreshCostWp;
+  const canRefresh = pilot.credits >= refreshCostCredits;
+  const canRefreshWp = (pilot.warPoints ?? 0) >= wpRefreshCostWp;
   const ownedCardsCount = pilot.ownedOpeningCards.length;
+
+  const activeSlotAvail =
+    slotFilter === 'all' ? availableShopCount : slotStockCounts[slotFilter].avail;
+  const activeSlotTotal =
+    slotFilter === 'all' ? shopStock.length : slotStockCounts[slotFilter].total;
+
+  const activeBuyItem =
+    mobileSheet?.kind === 'buy'
+      ? shopStock.find((it) => it.instanceId === mobileSheet.itemId) ?? null
+      : null;
 
   const activeWpCard =
     mobileSheet?.kind === 'wp'
       ? OPENING_CARDS_LIST.find((c) => c.id === mobileSheet.cardId) ?? null
+      : null;
+
+  const activeWpOffer =
+    mobileSheet?.kind === 'wpOffer'
+      ? wpMarketOffers.find((o) => o.id === mobileSheet.offerId) ?? null
       : null;
 
   return (
@@ -180,29 +319,85 @@ export function ShopScreen() {
       <div className="mx-auto max-w-[1400px] p-3 sm:p-5 space-y-3.5 sm:space-y-4">
         {/* Header Bar */}
         <div className="rounded-lg border border-slate-800/90 bg-[#0D131D]/95 p-3.5 sm:p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div>
-            <h1 className="font-display text-2xl font-bold tracking-wide text-slate-100">
-              {t('shop.title')}
-            </h1>
-            <p className="text-sm md:text-xs text-slate-400">
-              {t('shop.subtitle', {
-                refreshCost: SHOP_CONFIG.refreshCost,
-                ratio: Math.round(SHOP_CONFIG.sellPriceRatio * 100),
-              })}
-            </p>
+          <div className="space-y-1.5">
+            <div>
+              <h1 className="font-display text-2xl font-bold tracking-wide text-slate-100">
+                {t('shop.title')}
+              </h1>
+              <p className="text-sm md:text-xs text-slate-400">
+                {t('shop.subtitle', {
+                  refreshCost: refreshCostCredits,
+                  ratio: Math.round(SHOP_CONFIG.sellPriceRatio * 100),
+                })}
+              </p>
+            </div>
+
+            {/* Restock Countdown, Shipyard Bonus & Cargo Status Tags */}
+            <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+              <span
+                data-testid="shop-restock-countdown"
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-slate-700/80 bg-slate-900/90 text-slate-300"
+              >
+                <Clock className="w-3 h-3 text-sky-400 shrink-0" />
+                <span>
+                  {t('shop.restockCountdown', { n: battlesUntilRestock })}
+                </span>
+              </span>
+
+              {shipyardActive && (
+                <span
+                  data-testid="shop-shipyard-badge"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-emerald-500/50 bg-emerald-500/15 text-emerald-300 font-semibold"
+                >
+                  <Anchor className="w-3 h-3 shrink-0" />
+                  <span>
+                    {t('shop.shipyardBonusBadge', {
+                      n: SHOP_STOCK_CONFIG.shipyardStockBonus,
+                    })}
+                  </span>
+                </span>
+              )}
+
+              {shopSubTab === 'buy' && (
+                <span
+                  data-testid={
+                    isInventoryFull ? 'shop-cargo-full-tag' : 'shop-cargo-tag'
+                  }
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border font-mono-nums ${
+                    isInventoryFull
+                      ? 'border-rose-500/60 bg-rose-500/15 text-rose-200 font-semibold'
+                      : 'border-slate-700/80 bg-slate-900/90 text-slate-400'
+                  }`}
+                >
+                  <Package className="w-3 h-3 shrink-0" />
+                  <span>
+                    {isInventoryFull
+                      ? t('shop.cargoFullTag', {
+                          count: pilot.inventory.length,
+                          max: BALANCE_CONFIG.maxInventorySize,
+                        })
+                      : t('shop.cargoCount', {
+                          count: pilot.inventory.length,
+                          max: BALANCE_CONFIG.maxInventorySize,
+                        })}
+                  </span>
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             {shopSubTab === 'buy' && (
               <button
                 type="button"
+                data-testid="shop-refresh-btn"
                 disabled={!canRefresh}
                 onClick={handleRefresh}
                 className="min-h-[44px] md:min-h-0 md:h-9 px-3.5 inline-flex items-center gap-1.5 rounded-lg md:rounded border border-sky-500/50 bg-sky-500/15 hover:bg-sky-500/25 disabled:bg-slate-900 disabled:border-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-sky-200 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
                 <span>
-                  {t('shop.refreshStock', { cost: SHOP_CONFIG.refreshCost })}
+                  {t('shop.refreshStock', { cost: refreshCostCredits })}
                 </span>
               </button>
             )}
@@ -210,6 +405,7 @@ export function ShopScreen() {
             <div className="w-full md:w-auto grid grid-cols-3 md:flex items-center gap-1 p-1 rounded-lg bg-slate-900 border border-slate-800">
               <button
                 type="button"
+                data-testid="shop-tab-buy"
                 onClick={() => {
                   setShopSubTab('buy');
                   setNoticeText(null);
@@ -222,12 +418,13 @@ export function ShopScreen() {
               >
                 <ShoppingBag className="w-3.5 h-3.5 shrink-0" />
                 <span className="truncate">
-                  {t('shop.tabBuy', { count: shopStock.length })}
+                  {t('shop.tabBuy', { count: availableShopCount })}
                 </span>
               </button>
 
               <button
                 type="button"
+                data-testid="shop-tab-sell"
                 onClick={() => {
                   setShopSubTab('sell');
                   setNoticeText(null);
@@ -246,6 +443,7 @@ export function ShopScreen() {
 
               <button
                 type="button"
+                data-testid="shop-tab-wp"
                 onClick={() => {
                   setShopSubTab('warpoints');
                   setNoticeText(null);
@@ -257,7 +455,9 @@ export function ShopScreen() {
                 }`}
               >
                 <Award className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">WP ({ownedCardsCount})</span>
+                <span className="truncate">
+                  {t('shop.tabWpShort', { count: availableWpOffersCount })}
+                </span>
               </button>
             </div>
           </div>
@@ -267,96 +467,204 @@ export function ShopScreen() {
         {noticeText && (
           <div className="rounded border border-emerald-500/40 bg-emerald-500/10 px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-sm md:text-xs text-emerald-200">
             <span>{noticeText}</span>
+            {noticeAction !== 'none' && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (noticeAction === 'consumables') {
+                    setInventoryFilterState({ slot: 'consumables' });
+                    setActiveTab('gear');
+                  } else {
+                    setActiveTab(noticeAction === 'skill' ? 'skill' : 'gear');
+                  }
+                }}
+                className="min-h-[36px] font-semibold text-amber-300 hover:text-amber-200 cursor-pointer whitespace-nowrap"
+              >
+                {noticeAction === 'skill'
+                  ? t('shop.goToSkillTab')
+                  : noticeAction === 'consumables'
+                  ? t('shop.goToConsumables')
+                  : t('shop.equipInHangar')}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Non-blocking Full Inventory Banner in Buy tab */}
+        {shopSubTab === 'buy' && isInventoryFull && (
+          <div
+            data-testid="shop-cargo-full-banner"
+            className="rounded border border-rose-500/40 bg-rose-500/10 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs text-rose-200"
+          >
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>
+                {t('shop.cargoFullHint', {
+                  count: pilot.inventory.length,
+                  max: BALANCE_CONFIG.maxInventorySize,
+                })}
+              </span>
+            </div>
             <button
               type="button"
-              onClick={() =>
-                setActiveTab(noticeAction === 'skill' ? 'skill' : 'gear')
-              }
-              className="min-h-[36px] font-semibold text-amber-300 hover:text-amber-200 cursor-pointer whitespace-nowrap"
+              onClick={() => setShopSubTab('sell')}
+              className="font-semibold text-amber-300 hover:text-amber-200 cursor-pointer whitespace-nowrap"
             >
-              {noticeAction === 'skill'
-                ? t('shop.goToSkillTab')
-                : t('shop.equipInHangar')}
+              {t('shop.tabSell', { count: unequippedInventory.length })} →
             </button>
           </div>
         )}
 
-        {/* Filters for Buy / Sell (Horizontal scroll chips on phone) */}
+        {/* Filters for Buy / Sell (Wrapped chips with shared SlotIcon & ClassIcon) */}
         {shopSubTab !== 'warpoints' && (
           <div className="rounded-lg border border-slate-800/90 bg-[#0D131D]/95 p-3 sm:p-4 space-y-2.5">
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 tactical-scroll">
+            <div
+              data-testid="shop-slot-tabs"
+              className="flex flex-wrap items-center gap-1.5"
+              role="tablist"
+            >
               <button
                 type="button"
+                data-testid="shop-slot-tab-all"
                 onClick={() => setSlotFilter('all')}
-                className={`min-h-[44px] md:min-h-0 md:h-9 px-3 rounded-lg md:rounded border text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                className={`min-h-[44px] md:min-h-0 md:h-9 px-3 rounded-lg md:rounded border text-xs font-medium transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
                   slotFilter === 'all'
                     ? 'bg-slate-800 border-amber-400/80 text-slate-50'
                     : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
                 }`}
               >
-                {t('shop.allSlots')}
+                <SlotIcon slot="all" className="w-3.5 h-3.5 shrink-0" />
+                <span>{t('shop.allSlots')}</span>
+                <span className="font-mono-nums text-[11px] opacity-80">
+                  {shopSubTab === 'buy'
+                    ? `(${availableShopCount}/${shopStock.length})`
+                    : `(${unequippedInventory.length})`}
+                </span>
               </button>
-              {EQUIPMENT_SLOTS.map((slot) => (
-                <button
-                  key={slot}
-                  type="button"
-                  onClick={() => setSlotFilter(slot)}
-                  className={`min-h-[44px] md:min-h-0 md:h-9 px-3 rounded-lg md:rounded border text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                    slotFilter === slot
-                      ? 'bg-slate-800 border-amber-400/80 text-slate-50'
-                      : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <span className="md:hidden">{getSlotShort(lang, slot)}</span>
-                  <span className="hidden md:inline">
-                    {getSlotLabel(lang, slot)}
-                  </span>
-                </button>
-              ))}
-            </div>
 
-            {shopSubTab === 'buy' && (
-              <div className="flex items-center gap-1.5 overflow-x-auto pt-2 border-t border-slate-800/80 pb-1 tactical-scroll">
-                {(
-                  [
-                    { id: 'all', label: t('common.allClasses') },
-                    {
-                      id: 'usable',
-                      label: t('shop.usableNow', {
-                        className: getClassName(lang, activeGear.classId),
-                        level: activeGear.level,
-                      }),
-                    },
-                    { id: 'universal', label: t('shop.universal') },
-                    ...MECH_CLASS_LIST.map((c) => ({
-                      id: c.id as ClassFilter,
-                      label: t('shop.classLockedFilter', {
-                        className: getClassName(lang, c.id),
-                      }),
-                    })),
-                  ] as Array<{ id: ClassFilter; label: string }>
-                ).map((opt) => (
+              {EQUIPMENT_SLOTS.map((slot) => {
+                const counts = slotStockCounts[slot];
+                return (
                   <button
-                    key={opt.id}
+                    key={slot}
                     type="button"
-                    onClick={() => setClassFilter(opt.id)}
-                    className={`min-h-[44px] md:min-h-0 md:h-9 px-3 rounded-lg md:rounded border text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                      classFilter === opt.id
-                        ? 'bg-slate-800 border-sky-400/80 text-slate-50'
+                    data-testid={`shop-slot-tab-${slot}`}
+                    onClick={() => setSlotFilter(slot)}
+                    className={`min-h-[44px] md:min-h-0 md:h-9 px-3 rounded-lg md:rounded border text-xs font-medium transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+                      slotFilter === slot
+                        ? 'bg-slate-800 border-amber-400/80 text-slate-50'
                         : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    {opt.label}
+                    <SlotIcon slot={slot} className="w-3.5 h-3.5 shrink-0" />
+                    <span className="md:hidden">{getSlotShort(lang, slot)}</span>
+                    <span className="hidden md:inline">
+                      {getSlotLabel(lang, slot)}
+                    </span>
+                    <span className="font-mono-nums text-[11px] opacity-80">
+                      {shopSubTab === 'buy'
+                        ? `(${counts.avail}/${counts.total})`
+                        : `(${sellSlotCounts[slot]})`}
+                    </span>
                   </button>
-                ))}
+                );
+              })}
+            </div>
+
+            {shopSubTab === 'buy' && (
+              <div
+                data-testid="shop-class-tabs"
+                className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80"
+              >
+                <div className="flex flex-wrap items-center gap-1.5" role="tablist">
+                  {(
+                    [
+                      {
+                        id: 'all',
+                        label: t('common.allClasses'),
+                        icon: (
+                          <ClassIcon
+                            classId="all"
+                            className="w-3.5 h-3.5 shrink-0"
+                          />
+                        ),
+                      },
+                      {
+                        id: 'usable',
+                        label: t('shop.usableNow', {
+                          className: getClassName(lang, activeGear.classId),
+                          level: activeGear.level,
+                        }),
+                        icon: (
+                          <ClassIcon
+                            classId={activeGear.classId}
+                            className="w-3.5 h-3.5 shrink-0"
+                          />
+                        ),
+                      },
+                      {
+                        id: 'universal',
+                        label: t('shop.universal'),
+                        icon: (
+                          <ClassIcon
+                            classId="general"
+                            className="w-3.5 h-3.5 shrink-0"
+                          />
+                        ),
+                      },
+                      ...MECH_CLASS_LIST.map((c) => ({
+                        id: c.id as ClassFilter,
+                        label: t('shop.classLockedFilter', {
+                          className: getClassName(lang, c.id),
+                        }),
+                        icon: (
+                          <ClassIcon
+                            classId={c.id}
+                            className="w-3.5 h-3.5 shrink-0"
+                          />
+                        ),
+                      })),
+                    ] as Array<{
+                      id: ClassFilter;
+                      label: string;
+                      icon: ReactNode;
+                    }>
+                  ).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      data-testid={`shop-class-tab-${opt.id}`}
+                      onClick={() => setClassFilter(opt.id)}
+                      className={`min-h-[44px] md:min-h-0 md:h-9 px-3 rounded-lg md:rounded border text-xs font-medium transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+                        classFilter === opt.id
+                          ? 'bg-slate-800 border-sky-400/80 text-slate-50'
+                          : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      {opt.icon}
+                      <span>{opt.label}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <span
+                  data-testid="shop-active-slot-stock"
+                  className="text-[11px] font-mono-nums text-slate-400"
+                >
+                  {t('shop.stockAvailable', {
+                    avail: activeSlotAvail,
+                    total: activeSlotTotal,
+                  })}
+                </span>
               </div>
             )}
           </div>
         )}
 
-        {/* WAR POINT SHOP: OPENING CARDS */}
+        {/* WAR POINT SHOP: ROTATING RANDOM OFFERS + OPENING CARDS */}
         {shopSubTab === 'warpoints' && (
-          <div className="space-y-3.5">
+          <div className="space-y-4">
+            {/* WP Header Summary */}
             <div className="rounded-lg border border-purple-500/40 bg-[#100D1E]/95 p-3.5 sm:p-4 flex flex-wrap items-center justify-between gap-3">
               <div className="space-y-1 max-w-2xl">
                 <div className="flex items-center gap-2 text-purple-300 font-display text-lg font-bold">
@@ -384,195 +692,459 @@ export function ShopScreen() {
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 tactical-scroll">
-              <button
-                type="button"
-                onClick={() => setWpClassFilter('all')}
-                className={`min-h-[44px] md:min-h-0 md:h-9 px-3 rounded-lg md:rounded border text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                  wpClassFilter === 'all'
-                    ? 'bg-slate-800 border-purple-400/80 text-slate-50'
-                    : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {t('common.allClasses')}
-              </button>
-              {MECH_CLASS_LIST.map((cls) => (
+            {/* Section A: Rotating War Point Offers */}
+            <section
+              data-testid="shop-wp-rotating-section"
+              className="rounded-lg border border-purple-500/35 bg-[#0D131D]/95 p-3.5 sm:p-4 space-y-3"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-purple-400 shrink-0" />
+                    <h2 className="font-display text-lg font-bold tracking-wide text-slate-100">
+                      {t('shop.wpRotatingTitle')}
+                    </h2>
+                    <span
+                      data-testid="shop-wp-stock-badge"
+                      className="px-2 py-0.5 rounded border border-purple-500/40 bg-purple-500/15 text-purple-200 font-mono-nums text-[11px] font-semibold"
+                    >
+                      {t('shop.stockAvailable', {
+                        avail: availableWpOffersCount,
+                        total: wpMarketOffers.length,
+                      })}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    {t('shop.wpRotatingDesc')}
+                  </p>
+                </div>
+
                 <button
-                  key={cls.id}
                   type="button"
-                  onClick={() => setWpClassFilter(cls.id)}
-                  className={`min-h-[44px] md:min-h-0 md:h-9 px-3 rounded-lg md:rounded border text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                    wpClassFilter === cls.id
+                  data-testid="shop-wp-refresh-btn"
+                  disabled={!canRefreshWp}
+                  onClick={handleRefreshWp}
+                  className="min-h-[44px] md:min-h-0 md:h-9 px-3.5 inline-flex items-center gap-1.5 rounded-lg md:rounded border border-purple-500/50 bg-purple-500/15 hover:bg-purple-500/25 disabled:bg-slate-900 disabled:border-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-purple-200 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>
+                    {t('shop.wpRefreshBtn', { cost: wpRefreshCostWp })}
+                  </span>
+                </button>
+              </div>
+
+              {wpMarketOffers.length === 0 ? (
+                <div className="rounded border border-slate-800 bg-[#080C14] p-6 text-center text-xs text-slate-400">
+                  {t('shop.wpNoOffers')}
+                </div>
+              ) : (
+                <>
+                  {/* Mobile Rotating WP List (< md) */}
+                  <div className="md:hidden divide-y divide-slate-800/80 rounded-lg border border-slate-800 bg-[#080C14] overflow-hidden">
+                    {wpMarketOffers.map((offer) => {
+                      const { name } = getWpOfferText(lang, t, offer);
+                      const isSoldOut = Boolean(offer.soldOut);
+                      const canAffordWp = (pilot.warPoints ?? 0) >= offer.wpCost;
+                      return (
+                        <button
+                          key={offer.id}
+                          type="button"
+                          onClick={() =>
+                            setMobileSheet({ kind: 'wpOffer', offerId: offer.id })
+                          }
+                          className={`w-full min-h-[64px] px-3.5 py-3 flex items-center justify-between gap-3 text-left active:bg-slate-800/70 cursor-pointer ${
+                            isSoldOut ? 'opacity-60' : ''
+                          }`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div
+                              className={`w-10 h-10 rounded-lg border flex items-center justify-center shrink-0 ${
+                                offer.kind === 'equipment_crate' && offer.minRarity
+                                  ? `${RARITY_META[offer.minRarity].borderClass} ${RARITY_META[offer.minRarity].bgTintClass} ${RARITY_META[offer.minRarity].textClass}`
+                                  : 'border-purple-400/50 bg-purple-500/15 text-purple-300'
+                              }`}
+                            >
+                              <ConsumableIcon
+                                kind={offer.kind}
+                                className="w-5 h-5"
+                              />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-sm font-bold text-slate-100 truncate">
+                                {name}
+                              </div>
+                              <div className="text-xs text-slate-400 truncate flex items-center gap-1.5">
+                                {offer.slot && (
+                                  <SlotIcon
+                                    slot={offer.slot}
+                                    className="w-3 h-3 shrink-0"
+                                  />
+                                )}
+                                <span>
+                                  {offer.slot
+                                    ? getSlotLabel(lang, offer.slot)
+                                    : t('inv.tabConsumables')}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            {isSoldOut ? (
+                              <span
+                                data-testid="shop-sold-out-badge"
+                                className="px-2 py-0.5 rounded border border-slate-700 bg-slate-800 text-[10px] font-bold text-slate-300"
+                              >
+                                {t('shop.soldOut')}
+                              </span>
+                            ) : (
+                              <span
+                                className={`font-mono-nums text-sm font-bold ${
+                                  canAffordWp ? 'text-purple-300' : 'text-red-400'
+                                }`}
+                              >
+                                {offer.wpCost} WP
+                              </span>
+                            )}
+                            <ChevronRight className="w-4 h-4 text-slate-500" />
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Desktop Rotating WP Grid (>= md) */}
+                  <div className="hidden md:grid grid-cols-2 xl:grid-cols-3 gap-3">
+                    {wpMarketOffers.map((offer) => {
+                      const { name, desc } = getWpOfferText(lang, t, offer);
+                      const isSoldOut = Boolean(offer.soldOut);
+                      const canAffordWp = (pilot.warPoints ?? 0) >= offer.wpCost;
+                      const rarityStyle =
+                        offer.kind === 'equipment_crate' && offer.minRarity
+                          ? RARITY_META[offer.minRarity]
+                          : null;
+
+                      return (
+                        <div
+                          key={offer.id}
+                          data-testid={`wp-offer-card-${offer.id}`}
+                          className={`rounded-lg border p-3.5 flex flex-col justify-between gap-3 bg-[#080C14] ${
+                            isSoldOut
+                              ? 'border-slate-800 opacity-60'
+                              : rarityStyle
+                              ? rarityStyle.borderClass
+                              : 'border-purple-500/40'
+                          }`}
+                        >
+                          <div className="space-y-2">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-start gap-2.5 min-w-0">
+                                <div
+                                  className={`w-10 h-10 rounded-md border flex items-center justify-center shrink-0 ${
+                                    rarityStyle
+                                      ? `${rarityStyle.borderClass} ${rarityStyle.bgTintClass} ${rarityStyle.textClass}`
+                                      : 'border-purple-400/50 bg-purple-500/15 text-purple-300'
+                                  }`}
+                                >
+                                  <ConsumableIcon
+                                    kind={offer.kind}
+                                    className="w-5 h-5"
+                                  />
+                                </div>
+
+                                <div className="min-w-0">
+                                  <h3
+                                    className={`font-display text-base font-bold leading-tight ${
+                                      rarityStyle
+                                        ? rarityStyle.textClass
+                                        : 'text-slate-100'
+                                    }`}
+                                  >
+                                    {name}
+                                  </h3>
+                                  {offer.slot && (
+                                    <div className="inline-flex items-center gap-1 text-[11px] text-slate-400 mt-0.5">
+                                      <SlotIcon
+                                        slot={offer.slot}
+                                        className={`w-3 h-3 shrink-0 ${getSlotAccentClass(
+                                          offer.slot
+                                        )}`}
+                                      />
+                                      <span>{getSlotLabel(lang, offer.slot)}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {isSoldOut && (
+                                <span
+                                  data-testid="shop-sold-out-badge"
+                                  className="px-2 py-0.5 rounded border border-slate-700 bg-slate-800 text-[10px] font-bold text-slate-300 shrink-0"
+                                >
+                                  {t('shop.soldOut')}
+                                </span>
+                              )}
+                            </div>
+
+                            <p className="text-xs text-slate-400 leading-relaxed">
+                              {desc}
+                            </p>
+                          </div>
+
+                          <div className="pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-3">
+                            <div className="font-mono-nums text-sm font-bold text-purple-300 flex items-center gap-1">
+                              <Award className="w-4 h-4 text-purple-400" />
+                              <span>{offer.wpCost} WP</span>
+                            </div>
+
+                            <button
+                              type="button"
+                              disabled={isSoldOut || !canAffordWp}
+                              onClick={() => handleBuyWpOffer(offer)}
+                              className="h-9 px-3.5 rounded bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-semibold text-xs transition-colors cursor-pointer whitespace-nowrap"
+                            >
+                              {isSoldOut
+                                ? t('shop.soldOut')
+                                : canAffordWp
+                                ? t('shop.buyOfferBtn', { cost: offer.wpCost })
+                                : t('shop.insufficientWp', {
+                                    cost: offer.wpCost,
+                                  })}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </section>
+
+            {/* Section B: Class Skill Opening Cards */}
+            <section
+              data-testid="shop-wp-cards-section"
+              className="space-y-3"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 text-amber-400" />
+                  <h2 className="font-display text-lg font-bold tracking-wide text-slate-100">
+                    {t('shop.wpOpeningCardsTitle')}
+                  </h2>
+                  <span className="font-mono-nums text-xs text-slate-400">
+                    ({ownedCardsCount}/{OPENING_CARDS_LIST.length})
+                  </span>
+                </div>
+              </div>
+
+              {/* WP Class Filter Tabs (Wrapped with shared ClassIcon) */}
+              <div
+                data-testid="shop-wp-class-tabs"
+                className="flex flex-wrap items-center gap-1.5"
+                role="tablist"
+              >
+                <button
+                  type="button"
+                  data-testid="shop-wp-class-tab-all"
+                  onClick={() => setWpClassFilter('all')}
+                  className={`min-h-[44px] md:min-h-0 md:h-9 px-3 rounded-lg md:rounded border text-xs font-medium transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+                    wpClassFilter === 'all'
                       ? 'bg-slate-800 border-purple-400/80 text-slate-50'
                       : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  {getClassName(lang, cls.id)}
+                  <ClassIcon classId="all" className="w-3.5 h-3.5 shrink-0" />
+                  <span>{t('common.allClasses')}</span>
                 </button>
-              ))}
-            </div>
-
-            {/* Mobile List Rows (< md) */}
-            <div className="md:hidden divide-y divide-slate-800/80 rounded-lg border border-slate-800 bg-[#0D131D]/95 overflow-hidden">
-              {filteredOpeningCards.map((card) => {
-                const skill = getSkillById(card.skillId);
-                if (!skill) return null;
-                const isOwned = pilot.ownedOpeningCards.includes(card.id);
-                const isElite = card.category === 'elite';
-                return (
+                {MECH_CLASS_LIST.map((cls) => (
                   <button
-                    key={card.id}
+                    key={cls.id}
                     type="button"
-                    onClick={() => setMobileSheet({ kind: 'wp', cardId: card.id })}
-                    className="w-full min-h-[64px] px-3.5 py-3 flex items-center justify-between gap-3 text-left active:bg-slate-800/70 cursor-pointer"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div
-                        className={`w-10 h-10 rounded-lg border flex items-center justify-center shrink-0 ${
-                          isElite
-                            ? 'border-amber-400/60 bg-amber-500/15 text-amber-300'
-                            : 'border-purple-400/60 bg-purple-500/15 text-purple-300'
-                        }`}
-                      >
-                        <SkillIcon icon={skill.icon} className="w-5 h-5" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-sm font-bold text-slate-100 truncate">
-                          {getSkillName(lang, skill.id)}
-                        </div>
-                        <div className="text-xs text-slate-400 truncate">
-                          {getClassName(lang, card.classId)} ·{' '}
-                          {getSkillCategoryLabel(lang, card.category)} · Lv.
-                          {skill.unlockLevel}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {isOwned ? (
-                        <span className="text-xs font-bold text-emerald-400">
-                          {t('common.owned')}
-                        </span>
-                      ) : (
-                        <span className="font-mono-nums text-sm font-bold text-purple-300">
-                          {card.warPointCost} WP
-                        </span>
-                      )}
-                      <ChevronRight className="w-4 h-4 text-slate-500" />
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Desktop Opening Cards Grid (>= md) */}
-            <div className="hidden md:grid grid-cols-2 xl:grid-cols-3 gap-3.5">
-              {filteredOpeningCards.map((card) => {
-                const skill = getSkillById(card.skillId);
-                if (!skill) return null;
-                const isOwned = pilot.ownedOpeningCards.includes(card.id);
-                const canAfford = (pilot.warPoints ?? 0) >= card.warPointCost;
-                const isElite = card.category === 'elite';
-
-                return (
-                  <div
-                    key={card.id}
-                    className={`rounded-lg border p-4 flex flex-col justify-between gap-3 bg-[#0D131D]/95 ${
-                      isOwned
-                        ? 'border-emerald-500/50'
-                        : isElite
-                        ? 'border-amber-400/70'
-                        : 'border-purple-400/60'
+                    data-testid={`shop-wp-class-tab-${cls.id}`}
+                    onClick={() => setWpClassFilter(cls.id)}
+                    className={`min-h-[44px] md:min-h-0 md:h-9 px-3 rounded-lg md:rounded border text-xs font-medium transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+                      wpClassFilter === cls.id
+                        ? 'bg-slate-800 border-purple-400/80 text-slate-50'
+                        : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    <div className="space-y-2.5">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-start gap-2.5 min-w-0">
-                          <div
-                            className={`w-10 h-10 rounded-md border flex items-center justify-center shrink-0 ${
-                              isElite
-                                ? 'border-amber-400/60 bg-amber-500/15 text-amber-300'
-                                : 'border-purple-400/60 bg-purple-500/15 text-purple-300'
-                            }`}
-                          >
-                            <SkillIcon icon={skill.icon} className="w-5 h-5" />
+                    <ClassIcon
+                      classId={cls.id}
+                      className="w-3.5 h-3.5 shrink-0"
+                    />
+                    <span>{getClassName(lang, cls.id)}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Mobile Opening Cards List (< md) */}
+              <div className="md:hidden divide-y divide-slate-800/80 rounded-lg border border-slate-800 bg-[#0D131D]/95 overflow-hidden">
+                {filteredOpeningCards.map((card) => {
+                  const skill = getSkillById(card.skillId);
+                  if (!skill) return null;
+                  const isOwned = pilot.ownedOpeningCards.includes(card.id);
+                  const isElite = card.category === 'elite';
+                  return (
+                    <button
+                      key={card.id}
+                      type="button"
+                      onClick={() =>
+                        setMobileSheet({ kind: 'wp', cardId: card.id })
+                      }
+                      className="w-full min-h-[64px] px-3.5 py-3 flex items-center justify-between gap-3 text-left active:bg-slate-800/70 cursor-pointer"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div
+                          className={`w-10 h-10 rounded-lg border flex items-center justify-center shrink-0 ${
+                            isElite
+                              ? 'border-amber-400/60 bg-amber-500/15 text-amber-300'
+                              : 'border-purple-400/60 bg-purple-500/15 text-purple-300'
+                          }`}
+                        >
+                          <SkillIcon icon={skill.icon} className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-sm font-bold text-slate-100 truncate">
+                            {getSkillName(lang, skill.id)}
                           </div>
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
-                              <span
-                                className={`px-1.5 py-0.5 rounded font-bold border ${
-                                  isElite
-                                    ? 'border-amber-400/70 bg-amber-500/15 text-amber-300'
-                                    : 'border-purple-400/70 bg-purple-500/15 text-purple-300'
-                                }`}
-                              >
-                                {getSkillCategoryLabel(lang, card.category)}
-                              </span>
-                              <span className="text-slate-400">
-                                {getClassName(lang, card.classId)} ·{' '}
-                                {t('common.reqLevel', {
-                                  level: skill.unlockLevel,
-                                })}
-                              </span>
-                            </div>
-                            <h3 className="font-display text-lg font-bold text-slate-100 leading-tight mt-0.5">
-                              {t('shop.openingCardTitle', {
-                                skill: getSkillName(lang, skill.id),
-                              })}
-                            </h3>
+                          <div className="text-xs text-slate-400 truncate">
+                            {getClassName(lang, card.classId)} ·{' '}
+                            {getSkillCategoryLabel(lang, card.category)} · Lv.
+                            {skill.unlockLevel}
                           </div>
                         </div>
-
-                        <span className="font-mono-nums text-xs font-bold text-amber-400 shrink-0">
-                          {skill.spCost} SP
-                        </span>
                       </div>
-
-                      <p className="text-xs text-slate-300 leading-relaxed">
-                        {getSkillDesc(lang, skill.id)}
-                      </p>
-                    </div>
-
-                    <div className="pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-3">
-                      <div className="font-mono-nums text-sm font-bold text-purple-300 flex items-center gap-1">
-                        <Award className="w-4 h-4 text-purple-400" />
-                        <span>{card.warPointCost} WP</span>
-                      </div>
-
-                      {isOwned ? (
-                        <button
-                          type="button"
-                          onClick={() => setActiveTab('skill')}
-                          className="h-9 px-3.5 inline-flex items-center gap-1.5 rounded border border-emerald-500/50 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 font-semibold text-xs transition-colors cursor-pointer"
-                        >
-                          <Check className="w-3.5 h-3.5" />
-                          <span>{t('shop.cardOwnedBadge')}</span>
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={!canAfford}
-                          onClick={() =>
-                            handleBuyOpeningCard(card.id, skill.id)
-                          }
-                          className="h-9 px-3.5 inline-flex items-center gap-1.5 rounded bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-semibold text-xs transition-colors cursor-pointer"
-                        >
-                          <KeyRound className="w-3.5 h-3.5" />
-                          <span>
-                            {canAfford
-                              ? t('shop.buyCardBtn', {
-                                  cost: card.warPointCost,
-                                })
-                              : t('shop.insufficientWp', {
-                                  cost: card.warPointCost,
-                                })}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {isOwned ? (
+                          <span className="text-xs font-bold text-emerald-400">
+                            {t('common.owned')}
                           </span>
-                        </button>
-                      )}
+                        ) : (
+                          <span className="font-mono-nums text-sm font-bold text-purple-300">
+                            {card.warPointCost} WP
+                          </span>
+                        )}
+                        <ChevronRight className="w-4 h-4 text-slate-500" />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Desktop Opening Cards Grid (>= md) */}
+              <div className="hidden md:grid grid-cols-2 xl:grid-cols-3 gap-3.5">
+                {filteredOpeningCards.map((card) => {
+                  const skill = getSkillById(card.skillId);
+                  if (!skill) return null;
+                  const isOwned = pilot.ownedOpeningCards.includes(card.id);
+                  const canAfford = (pilot.warPoints ?? 0) >= card.warPointCost;
+                  const isElite = card.category === 'elite';
+
+                  return (
+                    <div
+                      key={card.id}
+                      className={`rounded-lg border p-4 flex flex-col justify-between gap-3 bg-[#0D131D]/95 ${
+                        isOwned
+                          ? 'border-emerald-500/50'
+                          : isElite
+                          ? 'border-amber-400/70'
+                          : 'border-purple-400/60'
+                      }`}
+                    >
+                      <div className="space-y-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-2.5 min-w-0">
+                            <div
+                              className={`w-10 h-10 rounded-md border flex items-center justify-center shrink-0 ${
+                                isElite
+                                  ? 'border-amber-400/60 bg-amber-500/15 text-amber-300'
+                                  : 'border-purple-400/60 bg-purple-500/15 text-purple-300'
+                              }`}
+                            >
+                              <SkillIcon icon={skill.icon} className="w-5 h-5" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                                <span
+                                  className={`px-1.5 py-0.5 rounded font-bold border ${
+                                    isElite
+                                      ? 'border-amber-400/70 bg-amber-500/15 text-amber-300'
+                                      : 'border-purple-400/70 bg-purple-500/15 text-purple-300'
+                                  }`}
+                                >
+                                  {getSkillCategoryLabel(lang, card.category)}
+                                </span>
+                                <span className="text-slate-400 inline-flex items-center gap-1">
+                                  <ClassIcon
+                                    classId={card.classId}
+                                    className="w-3 h-3 shrink-0"
+                                  />
+                                  {getClassName(lang, card.classId)} ·{' '}
+                                  {t('common.reqLevel', {
+                                    level: skill.unlockLevel,
+                                  })}
+                                </span>
+                              </div>
+                              <h3 className="font-display text-lg font-bold text-slate-100 leading-tight mt-0.5">
+                                {t('shop.openingCardTitle', {
+                                  skill: getSkillName(lang, skill.id),
+                                })}
+                              </h3>
+                            </div>
+                          </div>
+
+                          <span className="font-mono-nums text-xs font-bold text-amber-400 shrink-0">
+                            {skill.spCost} SP
+                          </span>
+                        </div>
+
+                        <p className="text-xs text-slate-300 leading-relaxed">
+                          {getSkillDesc(lang, skill.id)}
+                        </p>
+                      </div>
+
+                      <div className="pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-3">
+                        <div className="font-mono-nums text-sm font-bold text-purple-300 flex items-center gap-1">
+                          <Award className="w-4 h-4 text-purple-400" />
+                          <span>{card.warPointCost} WP</span>
+                        </div>
+
+                        {isOwned ? (
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab('skill')}
+                            className="h-9 px-3.5 inline-flex items-center gap-1.5 rounded border border-emerald-500/50 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 font-semibold text-xs transition-colors cursor-pointer"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>{t('shop.cardOwnedBadge')}</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={!canAfford}
+                            onClick={() =>
+                              handleBuyOpeningCard(card.id, skill.id)
+                            }
+                            className="h-9 px-3.5 inline-flex items-center gap-1.5 rounded bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-semibold text-xs transition-colors cursor-pointer"
+                          >
+                            <KeyRound className="w-3.5 h-3.5" />
+                            <span>
+                              {canAfford
+                                ? t('shop.buyCardBtn', {
+                                    cost: card.warPointCost,
+                                  })
+                                : t('shop.insufficientWp', {
+                                    cost: card.warPointCost,
+                                  })}
+                            </span>
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            </section>
           </div>
         )}
 
@@ -588,6 +1160,7 @@ export function ShopScreen() {
                 {/* Mobile Compact List Rows (< md) -> Buy in BottomSheet */}
                 <div className="md:hidden divide-y divide-slate-800/80 rounded-lg border border-slate-800 bg-[#0D131D]/95 overflow-hidden">
                   {filteredStock.map((item) => {
+                    const isSoldOut = Boolean(item.soldOut);
                     const validation = validateEquipOnGear(
                       item,
                       activeGear,
@@ -603,11 +1176,21 @@ export function ShopScreen() {
                       <button
                         key={item.instanceId}
                         type="button"
-                        onClick={() => setMobileSheet({ kind: 'buy', item })}
-                        className="w-full min-h-[68px] px-3.5 py-3 flex items-center justify-between gap-3 text-left active:bg-slate-800/70 cursor-pointer"
+                        onClick={() =>
+                          setMobileSheet({ kind: 'buy', itemId: item.instanceId })
+                        }
+                        className={`w-full min-h-[68px] px-3.5 py-3 flex items-center justify-between gap-3 text-left active:bg-slate-800/70 cursor-pointer ${
+                          isSoldOut ? 'opacity-60' : ''
+                        }`}
                       >
                         <div className="min-w-0 flex-1 space-y-0.5">
                           <div className="flex items-center gap-1.5">
+                            <SlotIcon
+                              slot={item.slot}
+                              className={`w-3.5 h-3.5 shrink-0 ${getSlotAccentClass(
+                                item.slot
+                              )}`}
+                            />
                             <span
                               className={`text-sm font-bold truncate ${
                                 RARITY_META[item.rarity].textClass
@@ -615,7 +1198,7 @@ export function ShopScreen() {
                             >
                               {getItemInstanceName(lang, item)}
                             </span>
-                            {!validation.canEquip && (
+                            {!validation.canEquip && !isSoldOut && (
                               <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                             )}
                           </div>
@@ -631,18 +1214,29 @@ export function ShopScreen() {
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
-                          <div className="text-right font-mono-nums">
-                            <div
-                              className={`text-sm font-bold ${
-                                pilot.credits >= item.price
-                                  ? 'text-amber-300'
-                                  : 'text-red-400'
-                              }`}
+                          {isSoldOut ? (
+                            <span
+                              data-testid="shop-sold-out-badge"
+                              className="px-2 py-0.5 rounded border border-slate-700 bg-slate-800 text-[10px] font-bold text-slate-300"
                             >
-                              {item.price.toLocaleString()}
+                              {t('shop.soldOut')}
+                            </span>
+                          ) : (
+                            <div className="text-right font-mono-nums">
+                              <div
+                                className={`text-sm font-bold ${
+                                  pilot.credits >= item.price
+                                    ? 'text-amber-300'
+                                    : 'text-red-400'
+                                }`}
+                              >
+                                {item.price.toLocaleString()}
+                              </div>
+                              <div className="text-[10px] text-slate-500">
+                                CR
+                              </div>
                             </div>
-                            <div className="text-[10px] text-slate-500">CR</div>
-                          </div>
+                          )}
                           <ChevronRight className="w-4 h-4 text-slate-500" />
                         </div>
                       </button>
@@ -653,6 +1247,7 @@ export function ShopScreen() {
                 {/* Desktop Multi-Column Card Grid (>= md) */}
                 <div className="hidden md:grid grid-cols-2 xl:grid-cols-3 gap-3.5">
                   {filteredStock.map((item) => {
+                    const isSoldOut = Boolean(item.soldOut);
                     const validation = validateEquipOnGear(
                       item,
                       activeGear,
@@ -663,6 +1258,7 @@ export function ShopScreen() {
                       validation
                     );
                     const canAfford = pilot.credits >= item.price;
+                    const canBuy = !isSoldOut && canAfford && !isInventoryFull;
                     const itemStats = getEffectiveItemStats(item);
                     const currentInSlot = equippedOnActive[item.slot];
                     const curSlotStats = currentInSlot
@@ -673,20 +1269,31 @@ export function ShopScreen() {
                     return (
                       <div
                         key={item.instanceId}
+                        data-testid={`shop-item-card-${item.instanceId}`}
                         className={`rounded-lg border bg-[#0D131D]/95 p-4 flex flex-col justify-between gap-3 ${
-                          RARITY_META[item.rarity].borderClass
+                          isSoldOut
+                            ? 'border-slate-800 opacity-60'
+                            : RARITY_META[item.rarity].borderClass
                         }`}
                       >
                         <div className="space-y-2">
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
-                              <h2
-                                className={`font-display text-xl font-bold leading-tight ${
-                                  RARITY_META[item.rarity].textClass
-                                }`}
-                              >
-                                {getItemInstanceName(lang, item)}
-                              </h2>
+                              <div className="flex items-center gap-1.5">
+                                <SlotIcon
+                                  slot={item.slot}
+                                  className={`w-4 h-4 shrink-0 ${getSlotAccentClass(
+                                    item.slot
+                                  )}`}
+                                />
+                                <h2
+                                  className={`font-display text-xl font-bold leading-tight truncate ${
+                                    RARITY_META[item.rarity].textClass
+                                  }`}
+                                >
+                                  {getItemInstanceName(lang, item)}
+                                </h2>
+                              </div>
                               <div className="mt-0.5 text-xs text-slate-400">
                                 {getSlotLabel(lang, item.slot)} ·{' '}
                                 {getRarityLabel(lang, item.rarity)} ·{' '}
@@ -705,17 +1312,27 @@ export function ShopScreen() {
                               </div>
                             </div>
 
-                            <span
-                              className={`font-mono-nums text-xs font-bold shrink-0 ${
-                                item.rollQuality >= 80
-                                  ? 'text-amber-400'
-                                  : item.rollQuality >= 50
-                                  ? 'text-emerald-400'
-                                  : 'text-slate-400'
-                              }`}
-                            >
-                              {item.rollQuality}%
-                            </span>
+                            <div className="flex flex-col items-end gap-1 shrink-0">
+                              {isSoldOut && (
+                                <span
+                                  data-testid="shop-sold-out-badge"
+                                  className="px-2 py-0.5 rounded border border-slate-700 bg-slate-800 text-[10px] font-bold text-slate-300"
+                                >
+                                  {t('shop.soldOut')}
+                                </span>
+                              )}
+                              <span
+                                className={`font-mono-nums text-xs font-bold ${
+                                  item.rollQuality >= 80
+                                    ? 'text-amber-400'
+                                    : item.rollQuality >= 50
+                                    ? 'text-emerald-400'
+                                    : 'text-slate-400'
+                                }`}
+                              >
+                                {item.rollQuality}%
+                              </span>
+                            </div>
                           </div>
 
                           <p className="text-xs text-slate-400 leading-relaxed">
@@ -795,11 +1412,16 @@ export function ShopScreen() {
 
                           <button
                             type="button"
-                            disabled={!canAfford}
+                            data-testid={`shop-buy-btn-${item.instanceId}`}
+                            disabled={!canBuy}
                             onClick={() => handleBuy(item)}
                             className="h-10 px-4 rounded bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-slate-950 font-semibold text-xs transition-colors cursor-pointer whitespace-nowrap"
                           >
-                            {canAfford
+                            {isSoldOut
+                              ? t('shop.soldOut')
+                              : isInventoryFull
+                              ? t('shop.cargoFullBtn')
+                              : canAfford
                               ? t('shop.buyBtn')
                               : t('shop.insufficientCr')}
                           </button>
@@ -891,24 +1513,37 @@ export function ShopScreen() {
         )}
       </div>
 
-      {/* Mobile Bottom Sheet for Shop Buy / Sell / WP Card */}
+      {/* Mobile Bottom Sheet for Shop Buy / Sell / WP Card / WP Offer */}
       <div className="md:hidden">
         <BottomSheet
           open={Boolean(mobileSheet)}
           onClose={() => setMobileSheet(null)}
           title={
-            mobileSheet?.kind === 'buy' || mobileSheet?.kind === 'sell'
+            mobileSheet?.kind === 'buy' && activeBuyItem
+              ? getItemInstanceName(lang, activeBuyItem, true)
+              : mobileSheet?.kind === 'sell'
               ? getItemInstanceName(lang, mobileSheet.item, true)
+              : activeWpOffer
+              ? getWpOfferText(lang, t, activeWpOffer).name
               : activeWpCard
               ? getSkillName(lang, activeWpCard.skillId)
               : ''
           }
           subtitle={
-            mobileSheet?.kind === 'buy' || mobileSheet?.kind === 'sell'
+            mobileSheet?.kind === 'buy' && activeBuyItem
+              ? `${getSlotLabel(lang, activeBuyItem.slot)} · ${getRarityLabel(
+                  lang,
+                  activeBuyItem.rarity
+                )} · ${t('common.tier', { tier: activeBuyItem.tier })}`
+              : mobileSheet?.kind === 'sell'
               ? `${getSlotLabel(lang, mobileSheet.item.slot)} · ${getRarityLabel(
                   lang,
                   mobileSheet.item.rarity
                 )} · ${t('common.tier', { tier: mobileSheet.item.tier })}`
+              : activeWpOffer
+              ? activeWpOffer.slot
+                ? getSlotLabel(lang, activeWpOffer.slot)
+                : t('inv.tabConsumables')
               : activeWpCard
               ? `${getClassName(lang, activeWpCard.classId)} · ${getSkillCategoryLabel(
                   lang,
@@ -917,178 +1552,241 @@ export function ShopScreen() {
               : undefined
           }
         >
-          {mobileSheet?.kind === 'buy' && (() => {
-            const item = mobileSheet.item;
-            const validation = validateEquipOnGear(
-              item,
-              activeGear,
-              pilot.gears
-            );
-            const reasonText = formatEquipValidationReason(lang, validation);
-            const canAfford = pilot.credits >= item.price;
-            const itemStats = getEffectiveItemStats(item);
-            const currentInSlot = equippedOnActive[item.slot];
-            const curSlotStats = currentInSlot
-              ? getEffectiveItemStats(currentInSlot)
-              : null;
-            const traits = formatItemTraitsList(lang, item);
+          {mobileSheet?.kind === 'buy' &&
+            activeBuyItem &&
+            (() => {
+              const item = activeBuyItem;
+              const isSoldOut = Boolean(item.soldOut);
+              const validation = validateEquipOnGear(
+                item,
+                activeGear,
+                pilot.gears
+              );
+              const reasonText = formatEquipValidationReason(lang, validation);
+              const canAfford = pilot.credits >= item.price;
+              const canBuy = !isSoldOut && canAfford && !isInventoryFull;
+              const itemStats = getEffectiveItemStats(item);
+              const currentInSlot = equippedOnActive[item.slot];
+              const curSlotStats = currentInSlot
+                ? getEffectiveItemStats(currentInSlot)
+                : null;
+              const traits = formatItemTraitsList(lang, item);
 
-            return (
-              <div className="space-y-3.5">
-                <p className="text-sm text-slate-300 leading-relaxed">
-                  {getItemInstanceDesc(lang, item)}
-                </p>
+              return (
+                <div className="space-y-3.5">
+                  {isSoldOut && (
+                    <div className="inline-flex px-2.5 py-1 rounded border border-slate-700 bg-slate-800 text-xs font-bold text-slate-300">
+                      {t('shop.soldOut')}
+                    </div>
+                  )}
 
-                <div className="rounded-lg border border-slate-800 bg-[#080C14] p-3 space-y-2">
-                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm font-mono-nums text-emerald-400 font-semibold">
-                    {STAT_KEYS.filter((k) => itemStats[k] > 0).map((key) => (
-                      <span key={key}>
-                        +{itemStats[key]} {getStatShort(lang, key)}
+                  <p className="text-sm text-slate-300 leading-relaxed">
+                    {getItemInstanceDesc(lang, item)}
+                  </p>
+
+                  <div className="rounded-lg border border-slate-800 bg-[#080C14] p-3 space-y-2">
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm font-mono-nums text-emerald-400 font-semibold">
+                      {STAT_KEYS.filter((k) => itemStats[k] > 0).map((key) => (
+                        <span key={key}>
+                          +{itemStats[key]} {getStatShort(lang, key)}
+                        </span>
+                      ))}
+                    </div>
+                    {traits.length > 0 && (
+                      <div className="flex flex-wrap gap-x-2.5 text-xs text-amber-300 pt-1.5 border-t border-slate-800">
+                        {traits.map((tr, i) => (
+                          <span key={i}>{tr}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-lg border border-slate-800 bg-[#080C14] p-3 text-xs space-y-1">
+                    <div className="text-slate-400">
+                      {t('shop.compareVs', {
+                        gear: getClassName(lang, activeGear.classId),
+                      })}
+                    </div>
+                    {!curSlotStats ? (
+                      <div className="text-emerald-400 font-medium">
+                        {t('shop.emptySlotGain')}
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-x-3 font-mono-nums text-sm">
+                        {STAT_KEYS.map((k) => {
+                          const diff = itemStats[k] - curSlotStats[k];
+                          if (diff === 0) return null;
+                          return (
+                            <span
+                              key={k}
+                              className={
+                                diff > 0
+                                  ? 'text-emerald-400 font-semibold'
+                                  : 'text-red-400 font-semibold'
+                              }
+                            >
+                              {getStatShort(lang, k)}{' '}
+                              {diff > 0 ? `+${diff}` : diff}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {!validation.canEquip && reasonText && (
+                    <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      <span>
+                        {t('shop.cannotEquipNow', { reason: reasonText })}
+                      </span>
+                    </div>
+                  )}
+
+                  {isInventoryFull && !isSoldOut && (
+                    <div className="flex items-center gap-2 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg px-3 py-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      <span>
+                        {t('shop.cargoFullTag', {
+                          count: pilot.inventory.length,
+                          max: BALANCE_CONFIG.maxInventorySize,
+                        })}
+                      </span>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    disabled={!canBuy}
+                    onClick={() => handleBuy(item)}
+                    className="w-full min-h-[48px] px-4 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-slate-950 font-bold text-sm cursor-pointer"
+                  >
+                    {isSoldOut
+                      ? t('shop.soldOut')
+                      : isInventoryFull
+                      ? t('shop.cargoFullBtn')
+                      : canAfford
+                      ? `${t('shop.buyBtn')} (${item.price.toLocaleString()} CR)`
+                      : `${t('shop.insufficientCr')} (${item.price.toLocaleString()} CR)`}
+                  </button>
+                </div>
+              );
+            })()}
+
+          {mobileSheet?.kind === 'sell' &&
+            (() => {
+              const inst = mobileSheet.item;
+              const sellPrice = getSellPrice(inst);
+              const effStats = getEffectiveItemStats(inst);
+              return (
+                <div className="space-y-4">
+                  <p className="text-sm text-slate-300">
+                    {getItemInstanceDesc(lang, inst)}
+                  </p>
+                  <div className="rounded-lg border border-slate-800 bg-[#080C14] p-3 flex flex-wrap gap-x-3 gap-y-1 text-sm font-mono-nums text-slate-100">
+                    {STAT_KEYS.filter((k) => effStats[k] > 0).map((k) => (
+                      <span key={k}>
+                        +{effStats[k]} {getStatShort(lang, k)}
                       </span>
                     ))}
                   </div>
-                  {traits.length > 0 && (
-                    <div className="flex flex-wrap gap-x-2.5 text-xs text-amber-300 pt-1.5 border-t border-slate-800">
-                      {traits.map((tr, i) => (
-                        <span key={i}>{tr}</span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="rounded-lg border border-slate-800 bg-[#080C14] p-3 text-xs space-y-1">
-                  <div className="text-slate-400">
-                    {t('shop.compareVs', {
-                      gear: getClassName(lang, activeGear.classId),
-                    })}
-                  </div>
-                  {!curSlotStats ? (
-                    <div className="text-emerald-400 font-medium">
-                      {t('shop.emptySlotGain')}
-                    </div>
-                  ) : (
-                    <div className="flex flex-wrap gap-x-3 font-mono-nums text-sm">
-                      {STAT_KEYS.map((k) => {
-                        const diff = itemStats[k] - curSlotStats[k];
-                        if (diff === 0) return null;
-                        return (
-                          <span
-                            key={k}
-                            className={
-                              diff > 0
-                                ? 'text-emerald-400 font-semibold'
-                                : 'text-red-400 font-semibold'
-                            }
-                          >
-                            {getStatShort(lang, k)}{' '}
-                            {diff > 0 ? `+${diff}` : diff}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {!validation.canEquip && reasonText && (
-                  <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
-                    <AlertTriangle className="w-4 h-4 shrink-0" />
-                    <span>
-                      {t('shop.cannotEquipNow', { reason: reasonText })}
-                    </span>
-                  </div>
-                )}
-
-                <button
-                  type="button"
-                  disabled={!canAfford}
-                  onClick={() => handleBuy(item)}
-                  className="w-full min-h-[48px] px-4 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-slate-950 font-bold text-sm cursor-pointer"
-                >
-                  {canAfford
-                    ? `${t('shop.buyBtn')} (${item.price.toLocaleString()} CR)`
-                    : `${t('shop.insufficientCr')} (${item.price.toLocaleString()} CR)`}
-                </button>
-              </div>
-            );
-          })()}
-
-          {mobileSheet?.kind === 'sell' && (() => {
-            const inst = mobileSheet.item;
-            const sellPrice = getSellPrice(inst);
-            const effStats = getEffectiveItemStats(inst);
-            return (
-              <div className="space-y-4">
-                <p className="text-sm text-slate-300">
-                  {getItemInstanceDesc(lang, inst)}
-                </p>
-                <div className="rounded-lg border border-slate-800 bg-[#080C14] p-3 flex flex-wrap gap-x-3 gap-y-1 text-sm font-mono-nums text-slate-100">
-                  {STAT_KEYS.filter((k) => effStats[k] > 0).map((k) => (
-                    <span key={k}>
-                      +{effStats[k]} {getStatShort(lang, k)}
-                    </span>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleSell(inst)}
-                  className="w-full min-h-[48px] px-4 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm cursor-pointer"
-                >
-                  {t('shop.sellBtn')} (+{sellPrice.toLocaleString()} CR)
-                </button>
-              </div>
-            );
-          })()}
-
-          {mobileSheet?.kind === 'wp' && activeWpCard && (() => {
-            const skill = getSkillById(activeWpCard.skillId);
-            if (!skill) return null;
-            const isOwned = pilot.ownedOpeningCards.includes(activeWpCard.id);
-            const canAfford = (pilot.warPoints ?? 0) >= activeWpCard.warPointCost;
-            return (
-              <div className="space-y-4">
-                <p className="text-sm text-slate-300 leading-relaxed">
-                  {getSkillDesc(lang, skill.id)}
-                </p>
-                <div className="flex items-center justify-between text-xs text-slate-400 font-mono-nums">
-                  <span>
-                    {t('common.reqLevel', { level: skill.unlockLevel })}
-                  </span>
-                  <span className="text-amber-400 font-bold">
-                    {skill.spCost} SP
-                  </span>
-                </div>
-                {isOwned ? (
                   <button
                     type="button"
-                    onClick={() => {
-                      setMobileSheet(null);
-                      setActiveTab('skill');
-                    }}
-                    className="w-full min-h-[48px] px-4 rounded-lg border border-emerald-500/50 bg-emerald-500/15 text-emerald-300 font-bold text-sm cursor-pointer"
+                    onClick={() => handleSell(inst)}
+                    className="w-full min-h-[48px] px-4 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm cursor-pointer"
                   >
-                    {t('shop.goToSkillTab')}
+                    {t('shop.sellBtn')} (+{sellPrice.toLocaleString()} CR)
                   </button>
-                ) : (
+                </div>
+              );
+            })()}
+
+          {mobileSheet?.kind === 'wpOffer' &&
+            activeWpOffer &&
+            (() => {
+              const offer = activeWpOffer;
+              const { desc } = getWpOfferText(lang, t, offer);
+              const isSoldOut = Boolean(offer.soldOut);
+              const canAffordWp = (pilot.warPoints ?? 0) >= offer.wpCost;
+              return (
+                <div className="space-y-4">
+                  {isSoldOut && (
+                    <div className="inline-flex px-2.5 py-1 rounded border border-slate-700 bg-slate-800 text-xs font-bold text-slate-300">
+                      {t('shop.soldOut')}
+                    </div>
+                  )}
+                  <p className="text-sm text-slate-300 leading-relaxed">
+                    {desc}
+                  </p>
                   <button
                     type="button"
-                    disabled={!canAfford}
-                    onClick={() =>
-                      handleBuyOpeningCard(activeWpCard.id, skill.id)
-                    }
+                    disabled={isSoldOut || !canAffordWp}
+                    onClick={() => handleBuyWpOffer(offer)}
                     className="w-full min-h-[48px] px-4 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-bold text-sm cursor-pointer"
                   >
-                    {canAfford
-                      ? t('shop.buyCardBtn', {
-                          cost: activeWpCard.warPointCost,
-                        })
-                      : t('shop.insufficientWp', {
-                          cost: activeWpCard.warPointCost,
-                        })}
+                    {isSoldOut
+                      ? t('shop.soldOut')
+                      : canAffordWp
+                      ? t('shop.buyOfferBtn', { cost: offer.wpCost })
+                      : t('shop.insufficientWp', { cost: offer.wpCost })}
                   </button>
-                )}
-              </div>
-            );
-          })()}
+                </div>
+              );
+            })()}
+
+          {mobileSheet?.kind === 'wp' &&
+            activeWpCard &&
+            (() => {
+              const skill = getSkillById(activeWpCard.skillId);
+              if (!skill) return null;
+              const isOwned = pilot.ownedOpeningCards.includes(activeWpCard.id);
+              const canAfford =
+                (pilot.warPoints ?? 0) >= activeWpCard.warPointCost;
+              return (
+                <div className="space-y-4">
+                  <p className="text-sm text-slate-300 leading-relaxed">
+                    {getSkillDesc(lang, skill.id)}
+                  </p>
+                  <div className="flex items-center justify-between text-xs text-slate-400 font-mono-nums">
+                    <span>
+                      {t('common.reqLevel', { level: skill.unlockLevel })}
+                    </span>
+                    <span className="text-amber-400 font-bold">
+                      {skill.spCost} SP
+                    </span>
+                  </div>
+                  {isOwned ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMobileSheet(null);
+                        setActiveTab('skill');
+                      }}
+                      className="w-full min-h-[48px] px-4 rounded-lg border border-emerald-500/50 bg-emerald-500/15 text-emerald-300 font-bold text-sm cursor-pointer"
+                    >
+                      {t('shop.goToSkillTab')}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={!canAfford}
+                      onClick={() =>
+                        handleBuyOpeningCard(activeWpCard.id, skill.id)
+                      }
+                      className="w-full min-h-[48px] px-4 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-bold text-sm cursor-pointer"
+                    >
+                      {canAfford
+                        ? t('shop.buyCardBtn', {
+                            cost: activeWpCard.warPointCost,
+                          })
+                        : t('shop.insufficientWp', {
+                            cost: activeWpCard.warPointCost,
+                          })}
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
         </BottomSheet>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
 import {
   ArrowUpCircle,
   Award,
@@ -454,7 +454,11 @@ export function SkillView() {
             {t('skill.catalogTitle', { gear: activeGearName })}
           </h2>
 
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 tactical-scroll">
+          <div
+            data-testid="skill-filter-tabs"
+            className="flex flex-wrap items-center gap-1.5"
+            role="tablist"
+          >
             {(
               [
                 {
@@ -462,6 +466,7 @@ export function SkillView() {
                   label: t('skill.filterAll', {
                     count: activeCatalogSkills.length,
                   }),
+                  icon: <ClassIcon classId="all" className="w-3.5 h-3.5 shrink-0" />,
                 },
                 {
                   id: 'class',
@@ -469,30 +474,44 @@ export function SkillView() {
                     className: activeGearName,
                     count: classOnlyCount,
                   }),
+                  icon: (
+                    <ClassIcon
+                      classId={activeGear.classId}
+                      className="w-3.5 h-3.5 shrink-0"
+                    />
+                  ),
                 },
                 {
                   id: 'general',
                   label: t('skill.filterGeneral', { count: generalCount }),
+                  icon: (
+                    <ClassIcon classId="general" className="w-3.5 h-3.5 shrink-0" />
+                  ),
                 },
                 {
                   id: 'special_elite',
                   label: t('skill.filterSpecialElite', {
                     count: specialEliteCount,
                   }),
+                  icon: (
+                    <Award className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  ),
                 },
-              ] as Array<{ id: SkillFilter; label: string }>
+              ] as Array<{ id: SkillFilter; label: string; icon: ReactNode }>
             ).map((opt) => (
               <button
                 key={opt.id}
                 type="button"
+                data-testid={`skill-filter-tab-${opt.id}`}
                 onClick={() => setFilter(opt.id)}
-                className={`min-h-[44px] md:min-h-0 md:h-8 px-3 rounded-lg md:rounded border text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                className={`min-h-[44px] md:min-h-0 md:h-8 px-3 rounded-lg md:rounded border text-xs font-medium transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
                   filter === opt.id
                     ? 'bg-slate-800 border-amber-400/80 text-slate-50'
                     : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
                 }`}
               >
-                {opt.label}
+                {opt.icon}
+                <span>{opt.label}</span>
               </button>
             ))}
           </div>

@@ -1096,11 +1096,21 @@ export const EN_TRANSLATIONS = {
   'shop.shipyardBonusBadge': 'Shipyard +{n} stock',
   'shop.soldOut': 'SOLD OUT',
   'shop.stockAvailable': '{avail}/{total} available',
+  'shop.cargoCount': 'Cargo: {count}/{max}',
+  'shop.cargoFullTag': 'Cargo Full ({count}/{max})',
+  'shop.cargoFullBtn': 'Cargo Full',
+  'shop.cargoFullHint':
+    'Shared cargo is full ({count}/{max}). Sell or clear space in Gear Tab before purchasing more modules.',
+  'shop.tabWpShort': 'WP ({count})',
   'shop.wpRotatingTitle': 'Rotating War Point Offers',
   'shop.wpRotatingDesc': 'Random 3–10 tactical crates & consumables. Restocks after battles, monthly, or via manual WP refresh.',
   'shop.wpRefreshBtn': 'Refresh ({cost} WP)',
+  'shop.wpRefreshedMsg': 'War Point Market refreshed with new rotating offers!',
   'shop.wpOpeningCardsTitle': 'Class Skill Opening Cards',
   'shop.wpBoughtOfferFeedback': 'Purchased {name} — check Inventory → Consumables.',
+  'shop.goToConsumables': 'Open Consumables →',
+  'shop.buyOfferBtn': 'Buy ({cost} WP)',
+  'shop.wpNoOffers': 'No rotating War Point offers available.',
 
   // Complete Admin CP & TopHud Indicators
   'admin.btnLabel': 'ADMIN',
