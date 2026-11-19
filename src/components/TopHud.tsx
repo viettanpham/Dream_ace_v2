@@ -1,20 +1,21 @@
 import { Volume2, VolumeX } from 'lucide-react';
 import { getExpForNextLevel } from '../engine/stats';
-import { useI18n } from '../i18n';
+import { getClassName, useI18n } from '../i18n';
 import { useGameStore } from '../store/useGameStore';
 import { LanguageToggle } from './LanguageToggle';
 
 export function TopHud() {
-  const { t } = useI18n();
+  const { lang, t } = useI18n();
   const screen = useGameStore((s) => s.screen);
-  const player = useGameStore((s) => s.player);
+  const pilot = useGameStore((s) => s.pilot);
   const muted = useGameStore((s) => s.muted);
   const setScreen = useGameStore((s) => s.setScreen);
   const returnToHangar = useGameStore((s) => s.returnToHangar);
   const toggleMute = useGameStore((s) => s.toggleMute);
 
-  const expNeeded = getExpForNextLevel(player.level);
-  const expPct = Math.min(100, Math.round((player.exp / expNeeded) * 100));
+  const activeGear = pilot.gears[pilot.activeGearId];
+  const expNeeded = getExpForNextLevel(activeGear.level);
+  const expPct = Math.min(100, Math.round((activeGear.exp / expNeeded) * 100));
 
   return (
     <header className="h-14 shrink-0 border-b border-slate-800/90 bg-[#0A0F18]/95 px-4 sm:px-6 flex items-center justify-between gap-4">
@@ -27,22 +28,22 @@ export function TopHud() {
         {t('app.title')}
       </button>
 
-      {/* Center: Pilot Name [Lv X] + Credits (matching wireframe bar) */}
+      {/* Center: Pilot Name + Active Gear [Lv X] + Shared Credits */}
       <div className="flex items-center gap-4 sm:gap-7 text-xs sm:text-sm text-slate-300 min-w-0">
         <div className="flex items-center gap-2 whitespace-nowrap min-w-0">
           <span className="hidden sm:inline text-slate-400">
             {t('common.pilot')}:
           </span>
-          <span className="font-semibold text-slate-100 truncate max-w-[110px] sm:max-w-none">
-            {player.name || 'Vance'}
+          <span className="font-semibold text-slate-100 truncate max-w-[96px] sm:max-w-none">
+            {pilot.name || 'Vance'}
           </span>
           <span className="font-mono-nums font-semibold text-amber-400">
-            [{t('common.levelShort')}
-            {player.level}]
+            [{getClassName(lang, activeGear.classId)} {t('common.levelShort')}
+            {activeGear.level}]
           </span>
           <div
             className="hidden md:block w-16 h-1.5 bg-slate-800 rounded-sm overflow-hidden"
-            title={`${player.exp} / ${expNeeded} EXP`}
+            title={`${activeGear.exp} / ${expNeeded} EXP`}
           >
             <div
               className="h-full bg-amber-400 meter-fill"
@@ -56,7 +57,7 @@ export function TopHud() {
             {t('common.credits')}
           </span>
           <span className="font-mono-nums font-semibold text-amber-300">
-            {player.credits.toLocaleString()}
+            {pilot.credits.toLocaleString()}
           </span>
           <span className="text-[11px] text-slate-500 sm:hidden">CR</span>
         </div>
@@ -81,7 +82,7 @@ export function TopHud() {
           onClick={toggleMute}
           aria-label={muted ? t('common.unmuteTitle') : t('common.muteTitle')}
           title={muted ? t('common.unmuteTitle') : t('common.muteTitle')}
-          className="h-9 w-9 flex items-center justify-center rounded border border-slate-800 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-slate-100 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+          className="h-9 w-9 flex items-center justify-center rounded border border-slate-800 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-slate-100 transition-colors cursor-pointer"
         >
           {muted ? (
             <VolumeX className="w-4 h-4" />

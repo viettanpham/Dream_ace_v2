@@ -1,40 +1,17 @@
-export const PROGRESSION_CONFIG = {
-  startingLevel: 1,
-  maxLevel: 50,
-  initialStatPoints: 3,
-  statPointsPerLevel: 3,
-  startingCredits: 250,
-  baseExpToLevel: 100,
-  expGrowthLinear: 45,
-  expGrowthQuadratic: 18,
-  baseVictoryExp: 72,
-  expPerEnemyLevel: 18,
-  baseVictoryCredits: 140,
-  creditsPerEnemyLevel: 32,
-  defeatExpRatio: 0.28,
-  defeatCreditsRatio: 0.2,
-} as const;
+import { BALANCE_CONFIG, COMBAT_FORMULAS } from './balance';
 
-export const COMBAT_FORMULAS = {
-  hpPerDefense: 8,
-  hpPerLevel: 22,
-  shieldPerShieldStat: 6,
-  shieldPerLevel: 8,
-  spPerSpirit: 2,
-  spPerLevel: 2,
-  speedFuelWeight: 0.85,
-  speedEvasionWeight: 0.55,
-  dodgePerEvasion: 0.75,
-  maxDodgeChance: 42,
-  baseCritChance: 8,
-  critPerEvasion: 0.4,
-  maxCritChance: 38,
-  critDamageMultiplier: 1.5,
-  defenseMitigationDivisor: 65,
-  defendDamageMultiplier: 0.5,
-  attackSpGain: 5,
-  defendSpGain: 12,
-  defendShieldRestoreRatio: 0.16,
-  damageVarianceMin: 0.92,
-  damageVarianceMax: 1.08,
+export { BALANCE_CONFIG, COMBAT_FORMULAS };
+
+/**
+ * Compatibility facade forwarding progression constants from the single centralized balance.ts config.
+ */
+export const PROGRESSION_CONFIG = {
+  startingLevel: BALANCE_CONFIG.startingLevel,
+  maxLevel: BALANCE_CONFIG.maxLevel,
+  initialStatPoints: BALANCE_CONFIG.initialStatPoints,
+  statPointsPerLevel: BALANCE_CONFIG.statPointsPerLevel,
+  startingCredits: BALANCE_CONFIG.startingCredits,
+  expBase: BALANCE_CONFIG.expBase,
+  expExponent: BALANCE_CONFIG.expExponent,
+  rewardMultDefault: BALANCE_CONFIG.rewardMultDefault,
 } as const;

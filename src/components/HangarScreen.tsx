@@ -1,7 +1,7 @@
 import { useGameStore } from '../store/useGameStore';
+import { GarageView } from './GarageView';
 import { GearView } from './GearView';
 import { MapView } from './MapView';
-import { PilotView } from './PilotView';
 import { ShopScreen } from './ShopScreen';
 import { SidebarNav } from './SidebarNav';
 import { SkillView } from './SkillView';
@@ -14,7 +14,7 @@ export function HangarScreen() {
       <SidebarNav />
       <main className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
         {activeTab === 'gear' && <GearView />}
-        {activeTab === 'pilot' && <PilotView />}
+        {activeTab === 'garage' && <GarageView />}
         {activeTab === 'skill' && <SkillView />}
         {activeTab === 'shop' && <ShopScreen />}
         {activeTab === 'map' && <MapView />}

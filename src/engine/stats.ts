@@ -1,23 +1,46 @@
-import { EMPTY_STAT_BLOCK, MECH_CLASSES, STAT_KEYS } from '../data/classes';
-import { COMBAT_FORMULAS, PROGRESSION_CONFIG } from '../data/progression';
+import { BALANCE_CONFIG, COMBAT_FORMULAS } from '../data/balance';
+import {
+  EMPTY_STAT_BLOCK,
+  MECH_CLASSES,
+  MECH_CLASS_LIST,
+  STAT_KEYS,
+} from '../data/classes';
+import { EMPTY_EQUIPPED_SLOT_IDS } from '../data/items';
+import { SECTORS_CATALOG } from '../data/maps';
 import type {
   DerivedStats,
+  GearUnit,
+  ItemInstance,
+  ItemSpecialTraits,
   MechClassId,
-  PlayerCharacter,
+  PilotAccount,
   StatBlock,
 } from '../types/game';
+import { sumGearEquipmentStats, sumGearSpecialTraits } from './equipment';
 
 /**
- * Computes effective 6-stat block from a mech class definition, level,
+ * EXP required to advance from `level` to `level + 1`.
+ * Formula: Math.round(60 * level^1.4)
+ */
+export function getExpForNextLevel(level: number): number {
+  const lvl = Math.max(1, level);
+  return Math.round(
+    BALANCE_CONFIG.expBase * Math.pow(lvl, BALANCE_CONFIG.expExponent)
+  );
+}
+
+/**
+ * Computes effective 6-stat block from a Gear class definition, level,
  * committed allocated points, optional pending preview allocations,
- * and optional flat equipment bonuses.
+ * and optional flat equipment bonuses + item evasion modifiers.
  */
 export function calculateEffectiveStats(
   classId: MechClassId,
   level: number,
   allocatedPoints: StatBlock,
   pendingPoints: StatBlock = EMPTY_STAT_BLOCK,
-  equipmentBonuses: StatBlock = EMPTY_STAT_BLOCK
+  equipmentBonuses: StatBlock = EMPTY_STAT_BLOCK,
+  specialTraits?: ItemSpecialTraits
 ): StatBlock {
   const cls = MECH_CLASSES[classId];
   const levelBonus = Math.max(0, level - 1);
@@ -25,26 +48,30 @@ export function calculateEffectiveStats(
   const result = { ...EMPTY_STAT_BLOCK };
   for (const key of STAT_KEYS) {
     const totalPts = (allocatedPoints[key] || 0) + (pendingPoints[key] || 0);
-    // Natural small chassis scaling per level + class-specific per-point gain
     const naturalGrowth = Math.floor(levelBonus * (cls.perPointGain[key] * 0.35));
     const equipBonus = equipmentBonuses[key] || 0;
-    result[key] =
+    let total =
       cls.baseStats[key] +
       naturalGrowth +
       totalPts * cls.perPointGain[key] +
       equipBonus;
+    if (key === 'evasion' && specialTraits?.evasionMod) {
+      total = Math.max(1, total + specialTraits.evasionMod);
+    }
+    result[key] = total;
   }
   return result;
 }
 
 /**
- * Derives combat metrics (HP, Shield, SP, Turn Speed, Dodge, Crit, Skill Power)
- * from the 6 effective stats and level.
+ * Derives combat metrics (HP, Shield, SP, Turn Speed, Dodge, Crit, Skill Power, and item traits)
+ * from the 6 effective stats, level, and equipped special traits.
  */
 export function calculateDerivedStats(
   classId: MechClassId,
   level: number,
-  stats: StatBlock
+  stats: StatBlock,
+  specialTraits?: ItemSpecialTraits
 ): DerivedStats {
   const cls = MECH_CLASSES[classId];
   const lvl = Math.max(1, level);
@@ -75,14 +102,15 @@ export function calculateDerivedStats(
 
   const dodgeChance = Math.min(
     COMBAT_FORMULAS.maxDodgeChance,
-    Math.round(stats.evasion * COMBAT_FORMULAS.dodgePerEvasion)
+    Math.max(0, Math.round(stats.evasion * COMBAT_FORMULAS.dodgePerEvasion))
   );
 
   const critChance = Math.min(
     COMBAT_FORMULAS.maxCritChance,
     Math.round(
       COMBAT_FORMULAS.baseCritChance +
-        stats.evasion * COMBAT_FORMULAS.critPerEvasion
+        stats.evasion * COMBAT_FORMULAS.critPerEvasion +
+        (specialTraits?.critBonusPct ?? 0)
     )
   );
 
@@ -98,15 +126,43 @@ export function calculateDerivedStats(
     dodgeChance,
     critChance,
     skillPower,
+    armorPiercePct: Math.min(50, specialTraits?.armorPiercePct ?? 0),
+    splashPct: Math.min(40, specialTraits?.splashPct ?? 0),
+    spRegenPerTurn: specialTraits?.spRegenPerTurn ?? 0,
   };
 }
 
-export function getExpForNextLevel(level: number): number {
-  const lvl = Math.max(1, level);
-  return (
-    PROGRESSION_CONFIG.baseExpToLevel +
-    (lvl - 1) * PROGRESSION_CONFIG.expGrowthLinear +
-    (lvl - 1) * (lvl - 1) * PROGRESSION_CONFIG.expGrowthQuadratic
+/**
+ * Unified Power Rating for a Gear shown in Garage & Gear tabs.
+ */
+export function calculateGearPowerRating(
+  gear: GearUnit,
+  inventory: ItemInstance[]
+): number {
+  const equipBonuses = sumGearEquipmentStats(gear, inventory);
+  const traits = sumGearSpecialTraits(gear, inventory);
+  const stats = calculateEffectiveStats(
+    gear.classId,
+    gear.level,
+    gear.allocatedPoints,
+    EMPTY_STAT_BLOCK,
+    equipBonuses,
+    traits
+  );
+  const derived = calculateDerivedStats(gear.classId, gear.level, stats, traits);
+  const skillLv =
+    gear.skillLevels[MECH_CLASSES[gear.classId].signatureSkillId] ?? 1;
+
+  return Math.round(
+    derived.maxHp * 0.35 +
+      derived.maxShield * 0.45 +
+      derived.attackPower * 4.2 +
+      derived.defenseRating * 2.8 +
+      derived.speed * 2.4 +
+      derived.skillPower * 2.2 +
+      derived.critChance * 2.5 +
+      derived.armorPiercePct * 2.0 +
+      (skillLv - 1) * 45
   );
 }
 
@@ -116,59 +172,161 @@ export function getTotalSpentPoints(allocatedPoints: StatBlock): number {
 
 export function getTotalAvailablePointsForLevel(level: number): number {
   return (
-    PROGRESSION_CONFIG.initialStatPoints +
-    Math.max(0, level - 1) * PROGRESSION_CONFIG.statPointsPerLevel
+    BALANCE_CONFIG.initialStatPoints +
+    Math.max(0, level - 1) * BALANCE_CONFIG.statPointsPerLevel
   );
 }
 
-export interface LevelUpResult {
-  updatedPlayer: PlayerCharacter;
+export function createDefaultGearUnit(
+  classId: MechClassId,
+  owned: boolean
+): GearUnit {
+  const signatureSkillId = MECH_CLASSES[classId].signatureSkillId;
+  return {
+    classId,
+    owned,
+    level: BALANCE_CONFIG.startingLevel,
+    exp: 0,
+    unspentPoints: BALANCE_CONFIG.initialStatPoints,
+    allocatedPoints: { ...EMPTY_STAT_BLOCK },
+    equipped: { ...EMPTY_EQUIPPED_SLOT_IDS },
+    skillLevels: { [signatureSkillId]: 1 },
+    battlesWon: 0,
+    battlesFought: 0,
+  };
+}
+
+export function createDefaultPilotAccount(
+  name = 'Vance',
+  starterClassId: MechClassId = 'striker',
+  starterItems: ItemInstance[] = []
+): PilotAccount {
+  const gears = {} as Record<MechClassId, GearUnit>;
+  for (const cls of MECH_CLASS_LIST) {
+    gears[cls.id] = createDefaultGearUnit(cls.id, cls.id === starterClassId);
+  }
+
+  return {
+    name,
+    credits: BALANCE_CONFIG.startingCredits,
+    inventory: starterItems,
+    gears,
+    activeGearId: starterClassId,
+    unlockedSectorIds: [SECTORS_CATALOG[0].id],
+  };
+}
+
+export interface GearLevelUpResult {
+  updatedGear: GearUnit;
   leveledUp: boolean;
   previousLevel: number;
   newLevel: number;
   statPointsGained: number;
 }
 
-export function applyRewardsToPlayer(
-  player: PlayerCharacter,
+/**
+ * Applies battle EXP (and optional battle count) to a SINGLE GearUnit only.
+ * Each level-up grants +3 stat points strictly to this Gear.
+ */
+export function applyExpToGear(
+  gear: GearUnit,
   expGained: number,
-  creditsGained: number,
-  won: boolean
-): LevelUpResult {
-  let level = player.level;
-  let exp = player.exp + expGained;
-  let unspentPoints = player.unspentPoints;
+  recordBattle?: { won: boolean }
+): GearLevelUpResult {
+  let level = gear.level;
+  let exp = gear.exp + Math.max(0, Math.round(expGained));
+  let unspentPoints = gear.unspentPoints;
   let statPointsGained = 0;
 
-  while (level < PROGRESSION_CONFIG.maxLevel) {
+  while (level < BALANCE_CONFIG.maxLevel) {
     const needed = getExpForNextLevel(level);
     if (exp >= needed) {
       exp -= needed;
       level += 1;
-      unspentPoints += PROGRESSION_CONFIG.statPointsPerLevel;
-      statPointsGained += PROGRESSION_CONFIG.statPointsPerLevel;
+      unspentPoints += BALANCE_CONFIG.statPointsPerLevel;
+      statPointsGained += BALANCE_CONFIG.statPointsPerLevel;
     } else {
       break;
     }
   }
 
-  const updatedPlayer: PlayerCharacter = {
-    ...player,
+  if (level >= BALANCE_CONFIG.maxLevel) {
+    exp = 0;
+  }
+
+  const updatedGear: GearUnit = {
+    ...gear,
     level,
     exp,
-    credits: player.credits + creditsGained,
     unspentPoints,
-    battlesFought: player.battlesFought + 1,
-    battlesWon: player.battlesWon + (won ? 1 : 0),
+    battlesFought: gear.battlesFought + (recordBattle ? 1 : 0),
+    battlesWon: gear.battlesWon + (recordBattle?.won ? 1 : 0),
   };
 
   return {
-    updatedPlayer,
-    leveledUp: level > player.level,
-    previousLevel: player.level,
+    updatedGear,
+    leveledUp: level > gear.level,
+    previousLevel: gear.level,
     newLevel: level,
     statPointsGained,
   };
+}
+
+/**
+ * Commits pending stat points strictly to a single GearUnit.
+ */
+export function allocateGearStats(
+  gear: GearUnit,
+  pending: Partial<StatBlock>
+): GearUnit {
+  const totalPending = STAT_KEYS.reduce(
+    (sum, key) => sum + Math.max(0, Math.floor(pending[key] ?? 0)),
+    0
+  );
+  if (totalPending <= 0 || totalPending > gear.unspentPoints) {
+    return gear;
+  }
+
+  const nextAllocated: StatBlock = { ...gear.allocatedPoints };
+  for (const key of STAT_KEYS) {
+    nextAllocated[key] =
+      (nextAllocated[key] || 0) + Math.max(0, Math.floor(pending[key] ?? 0));
+  }
+
+  return {
+    ...gear,
+    allocatedPoints: nextAllocated,
+    unspentPoints: gear.unspentPoints - totalPending,
+  };
+}
+
+/**
+ * Resets a single GearUnit's allocated points back into its own unspentPoints pool.
+ */
+export function resetGearStatAllocations(gear: GearUnit): GearUnit {
+  const totalAvailable =
+    getTotalSpentPoints(gear.allocatedPoints) + gear.unspentPoints;
+  return {
+    ...gear,
+    allocatedPoints: { ...EMPTY_STAT_BLOCK },
+    unspentPoints: Math.max(
+      getTotalAvailablePointsForLevel(gear.level),
+      totalAvailable
+    ),
+  };
+}
+
+/**
+ * Estimates how many similar victories are needed for this Gear to reach its next level.
+ */
+export function estimateBattlesToNextLevel(
+  gear: GearUnit,
+  expPerVictory: number
+): number {
+  if (gear.level >= BALANCE_CONFIG.maxLevel) return 0;
+  const remaining = Math.max(0, getExpForNextLevel(gear.level) - gear.exp);
+  if (remaining === 0) return 0;
+  return Math.max(1, Math.ceil(remaining / Math.max(1, expPerVictory)));
 }
 
 /**
@@ -176,13 +334,13 @@ export function applyRewardsToPlayer(
  */
 export function generateNpcAllocations(
   classId: MechClassId,
-  level: number
+  level: number,
+  rng: () => number = Math.random
 ): StatBlock {
   const cls = MECH_CLASSES[classId];
   const totalPoints = getTotalAvailablePointsForLevel(level);
   const block: StatBlock = { ...EMPTY_STAT_BLOCK };
 
-  // Build weighted pool based on class per-point gains
   const weightedKeys: Array<keyof StatBlock> = [];
   for (const key of STAT_KEYS) {
     const weight = Math.max(1, cls.perPointGain[key]);
@@ -192,7 +350,7 @@ export function generateNpcAllocations(
   }
 
   for (let i = 0; i < totalPoints; i++) {
-    const pick = weightedKeys[Math.floor(Math.random() * weightedKeys.length)];
+    const pick = weightedKeys[Math.floor(rng() * weightedKeys.length)];
     block[pick] += 1;
   }
 

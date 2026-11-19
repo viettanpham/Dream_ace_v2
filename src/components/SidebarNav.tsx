@@ -3,7 +3,7 @@ import {
   Rocket,
   ShoppingBag,
   Sparkles,
-  User,
+  Warehouse,
   Wrench,
 } from 'lucide-react';
 import { useI18n } from '../i18n';
@@ -14,14 +14,14 @@ const SIDEBAR_ITEMS: Array<{
   id: BaseTab;
   labelKey:
     | 'sidebar.gear'
-    | 'sidebar.pilot'
+    | 'sidebar.garage'
     | 'sidebar.skill'
     | 'sidebar.shop'
     | 'sidebar.map';
   icon: typeof Wrench;
 }> = [
   { id: 'gear', labelKey: 'sidebar.gear', icon: Wrench },
-  { id: 'pilot', labelKey: 'sidebar.pilot', icon: User },
+  { id: 'garage', labelKey: 'sidebar.garage', icon: Warehouse },
   { id: 'skill', labelKey: 'sidebar.skill', icon: Sparkles },
   { id: 'shop', labelKey: 'sidebar.shop', icon: ShoppingBag },
   { id: 'map', labelKey: 'sidebar.map', icon: Map },
@@ -30,9 +30,12 @@ const SIDEBAR_ITEMS: Array<{
 export function SidebarNav() {
   const { t } = useI18n();
   const activeTab = useGameStore((s) => s.activeTab);
-  const unspentPoints = useGameStore((s) => s.player.unspentPoints);
+  const pilot = useGameStore((s) => s.pilot);
   const setActiveTab = useGameStore((s) => s.setActiveTab);
   const startBattle = useGameStore((s) => s.startBattle);
+
+  const activeGear = pilot.gears[pilot.activeGearId];
+  const unspentPoints = activeGear.unspentPoints;
 
   return (
     <aside className="shrink-0 border-b md:border-b-0 md:border-r border-slate-800/90 bg-[#090D15]/95 md:w-44 flex md:flex-col justify-between gap-2 p-2 md:p-3 overflow-x-auto md:overflow-visible">
@@ -64,7 +67,7 @@ export function SidebarNav() {
                 <span>{t(item.labelKey)}</span>
               </span>
 
-              {item.id === 'pilot' && unspentPoints > 0 && (
+              {item.id === 'garage' && unspentPoints > 0 && (
                 <span className="font-mono-nums text-[11px] font-bold text-emerald-400">
                   +{unspentPoints}
                 </span>
@@ -74,7 +77,7 @@ export function SidebarNav() {
         })}
       </nav>
 
-      {/* Quick Sortie Launch CTA at bottom of sidebar */}
+      {/* Quick Sortie Launch CTA */}
       <div className="shrink-0 md:pt-3 md:border-t md:border-slate-800/80 flex items-center">
         <button
           type="button"

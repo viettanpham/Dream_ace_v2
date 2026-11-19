@@ -1,16 +1,20 @@
 import { useCallback } from 'react';
+import { AFFIX_SUFFIX_MAP, getItemTemplate } from '../data/items';
 import { useGameStore } from '../store/useGameStore';
 import type {
   CombatLogEntry,
   CombatLogTag,
+  EnemyArchetype,
   EquipmentSlot,
   EquipValidationResult,
+  ItemInstance,
   ItemRarity,
   Language,
   MechClassId,
   SectorDifficulty,
   SkillTargetType,
   StatKey,
+  StatusEffectType,
 } from '../types/game';
 import { EN_TRANSLATIONS, type TranslationKey } from './en';
 import { VI_TRANSLATIONS } from './vi';
@@ -120,12 +124,85 @@ export function getRarityLabel(lang: Language, rarity: ItemRarity): string {
   return translate(lang, `rarity.${rarity}` as TranslationKey);
 }
 
-export function getItemName(lang: Language, itemId: string): string {
-  return translate(lang, `item.${itemId}.name` as TranslationKey);
+export function getStatusLabel(
+  lang: Language,
+  status: StatusEffectType
+): string {
+  return translate(lang, `status.${status}` as TranslationKey);
 }
 
-export function getItemDesc(lang: Language, itemId: string): string {
-  return translate(lang, `item.${itemId}.desc` as TranslationKey);
+export function getArchetypeLabel(
+  lang: Language,
+  archetype: EnemyArchetype
+): string {
+  return translate(lang, `archetype.${archetype}` as TranslationKey);
+}
+
+/**
+ * Formats randomized ItemInstance name: Template Name + Affix-based Suffix (+Enchant).
+ */
+export function getItemInstanceName(
+  lang: Language,
+  instance: ItemInstance,
+  includeEnchant = false
+): string {
+  const tpl = getItemTemplate(instance.templateId);
+  const baseName = tpl
+    ? lang === 'vi'
+      ? tpl.nameVi
+      : tpl.nameEn
+    : instance.templateId;
+  const suffixMeta = instance.suffixId
+    ? AFFIX_SUFFIX_MAP[instance.suffixId]
+    : null;
+  const suffixText = suffixMeta
+    ? lang === 'vi'
+      ? ` ${suffixMeta.vi}`
+      : ` ${suffixMeta.en}`
+    : '';
+  const enchantText =
+    includeEnchant && instance.enchantLevel > 0
+      ? ` +${instance.enchantLevel}`
+      : '';
+  return `${baseName}${suffixText}${enchantText}`;
+}
+
+export function getItemInstanceDesc(
+  lang: Language,
+  instance: ItemInstance
+): string {
+  const tpl = getItemTemplate(instance.templateId);
+  if (!tpl) return '';
+  return lang === 'vi' ? tpl.descVi : tpl.descEn;
+}
+
+export function formatItemTraitsList(
+  lang: Language,
+  instance: ItemInstance
+): string[] {
+  const tr = instance.specialTraits;
+  if (!tr) return [];
+  const list: string[] = [];
+  if (tr.critBonusPct) {
+    list.push(translate(lang, 'trait.crit', { val: tr.critBonusPct }));
+  }
+  if (tr.armorPiercePct) {
+    list.push(translate(lang, 'trait.pierce', { val: tr.armorPiercePct }));
+  }
+  if (tr.splashPct) {
+    list.push(translate(lang, 'trait.splash', { val: tr.splashPct }));
+  }
+  if (tr.spRegenPerTurn) {
+    list.push(translate(lang, 'trait.spRegen', { val: tr.spRegenPerTurn }));
+  }
+  if (tr.evasionMod) {
+    list.push(
+      translate(lang, 'trait.evasionMod', {
+        val: tr.evasionMod > 0 ? `+${tr.evasionMod}` : tr.evasionMod,
+      })
+    );
+  }
+  return list;
 }
 
 export function getLogTagLabel(lang: Language, tag: CombatLogTag): string {
@@ -145,6 +222,13 @@ export function formatEquipValidationReason(
     parts.push(
       translate(lang, 'common.reqClass', {
         className: getClassName(lang, validation.requiredClass),
+      })
+    );
+  }
+  if (validation.equippedOnOtherGear !== null) {
+    parts.push(
+      translate(lang, 'common.equippedOnGear', {
+        gear: getClassName(lang, validation.equippedOnOtherGear),
       })
     );
   }
@@ -228,6 +312,42 @@ export function formatCombatLogMessage(
     return translate(lang, 'log.destroyed', {
       target: String(p.target ?? ''),
       className: getClassName(lang, classId),
+    });
+  }
+
+  if (entry.templateKey === 'log.statusApplied') {
+    const status = String(p.status ?? 'burn') as StatusEffectType;
+    return translate(lang, 'log.statusApplied', {
+      target: String(p.target ?? ''),
+      status: getStatusLabel(lang, status),
+      turns: Number(p.turns ?? 2),
+    });
+  }
+
+  if (entry.templateKey === 'log.burnTick') {
+    return translate(lang, 'log.burnTick', {
+      target: String(p.target ?? ''),
+      damage: Number(p.damage ?? 0),
+    });
+  }
+
+  if (entry.templateKey === 'log.statusCleansed') {
+    return translate(lang, 'log.statusCleansed', {
+      actor: String(p.actor ?? ''),
+    });
+  }
+
+  if (entry.templateKey === 'log.splashDamage') {
+    return translate(lang, 'log.splashDamage', {
+      actor: String(p.actor ?? ''),
+      target: String(p.target ?? ''),
+      damage: Number(p.damage ?? 0),
+    });
+  }
+
+  if (entry.templateKey === 'log.retreat') {
+    return translate(lang, 'log.retreat', {
+      actor: String(p.actor ?? ''),
     });
   }
 

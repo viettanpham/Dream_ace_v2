@@ -1,4 +1,4 @@
-import type { MechClassId } from '../types/game';
+import type { EnemyArchetype, MechClassId, StatusEffectType } from '../types/game';
 
 export interface PilotNamePool {
   firstNames: string[];
@@ -38,20 +38,78 @@ export const ALLY_PILOT_POOL: PilotNamePool = {
   ],
 };
 
-export interface EnemyArchetypeConfig {
-  prefix: string[];
-  suffixByClass: Record<MechClassId, string[]>;
+export interface EnemyArchetypeDefinition {
+  id: EnemyArchetype;
+  classId: MechClassId;
+  names: string[];
+  bossNames: string[];
+  hpMult: number;
+  shieldMult: number;
+  attackMult: number;
+  speedMult: number;
+  inflictsStatus?: StatusEffectType;
+  statusChance?: number;
 }
 
-/**
- * Enemy starfighter raiders and alien drones (no humanoid robots).
- */
-export const ENEMY_ARCHETYPES: EnemyArchetypeConfig = {
-  prefix: ['Void', 'Crimson', 'Obsidian', 'Dread', 'Nebula', 'Phantom', 'Solar', 'Xeno'],
-  suffixByClass: {
-    striker: ['Bomber', 'Corsair', 'Raider-Wing'],
-    interceptor: ['Dart-Drone', 'Wasp-Fighter', 'Stalker-Craft'],
-    siege: ['Gunship', 'Corvette', 'Dread-Cruiser'],
-    support: ['Relay-Drone', 'Swarm-Probe', 'Aegis-Pod'],
+export const ENEMY_ARCHETYPE_DEFS: Record<
+  EnemyArchetype,
+  EnemyArchetypeDefinition
+> = {
+  drone: {
+    id: 'drone',
+    classId: 'interceptor',
+    names: ['Dart-Drone', 'Wasp-Drone', 'Pulse-Drone'],
+    bossNames: ['Apex Swarm-Drone'],
+    hpMult: 0.78,
+    shieldMult: 0.85,
+    attackMult: 0.95,
+    speedMult: 1.28,
+    inflictsStatus: 'slow',
+    statusChance: 0.45,
+  },
+  gunship: {
+    id: 'gunship',
+    classId: 'siege',
+    names: ['Iron Gunship', 'Bastion Corvette', 'Heavy Gunship'],
+    bossNames: ['Dreadnought Boss'],
+    hpMult: 1.38,
+    shieldMult: 1.3,
+    attackMult: 1.05,
+    speedMult: 0.82,
+    inflictsStatus: 'shield_break',
+    statusChance: 0.45,
+  },
+  sniper: {
+    id: 'sniper',
+    classId: 'striker',
+    names: ['Void Sniper', 'Rail-Hunter', 'Crimson Marksman'],
+    bossNames: ['Eclipse Rail-Ace'],
+    hpMult: 0.88,
+    shieldMult: 0.9,
+    attackMult: 1.24,
+    speedMult: 1.08,
+    inflictsStatus: 'burn',
+    statusChance: 0.5,
+  },
+  repair_ship: {
+    id: 'repair_ship',
+    classId: 'support',
+    names: ['Repair Tender', 'Aegis Frigate', 'Nano-Repair Ship'],
+    bossNames: ['Command Carrier'],
+    hpMult: 1.05,
+    shieldMult: 1.25,
+    attackMult: 0.8,
+    speedMult: 0.98,
   },
 };
+
+export const ENEMY_PREFIXES = [
+  'Void',
+  'Crimson',
+  'Obsidian',
+  'Dread',
+  'Nebula',
+  'Phantom',
+  'Solar',
+  'Xeno',
+];

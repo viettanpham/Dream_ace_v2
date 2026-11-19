@@ -1,23 +1,32 @@
+import { BALANCE_CONFIG, COMBAT_FORMULAS } from '../data/balance';
 import { EMPTY_STAT_BLOCK, MECH_CLASSES, MECH_CLASS_LIST } from '../data/classes';
 import { getSectorById } from '../data/maps';
-import { ALLY_PILOT_POOL, ENEMY_ARCHETYPES } from '../data/pilots';
-import { COMBAT_FORMULAS, PROGRESSION_CONFIG } from '../data/progression';
-import { getSkillById } from '../data/skills';
+import {
+  ALLY_PILOT_POOL,
+  ENEMY_ARCHETYPE_DEFS,
+  ENEMY_PREFIXES,
+} from '../data/pilots';
+import { getScaledSkillStats, getSkillById } from '../data/skills';
 import type {
   ActionType,
+  ActiveStatusEffect,
+  AdminConfig,
   BattleState,
   CombatFxEvent,
   CombatFxKind,
   CombatLogEntry,
   CombatSide,
   CombatUnit,
+  EnemyArchetype,
   FloatingPopup,
+  ItemSpecialTraits,
   MechClassId,
-  PlayerCharacter,
+  PilotAccount,
   StatBlock,
+  StatusEffectType,
   UnitAnimState,
 } from '../types/game';
-import { sumEquippedStatBonuses } from './equipment';
+import { sumGearEquipmentStats, sumGearSpecialTraits } from './equipment';
 import {
   calculateDerivedStats,
   calculateEffectiveStats,
@@ -30,15 +39,13 @@ function nextId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${uidCounter}`;
 }
 
-function randomItem<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
+function randomItem<T>(arr: T[], rng: () => number = Math.random): T {
+  return arr[Math.floor(rng() * arr.length)];
 }
 
-function randomVariance(): number {
+function randomVariance(rng: () => number = Math.random): number {
   const { damageVarianceMin, damageVarianceMax } = COMBAT_FORMULAS;
-  return (
-    damageVarianceMin + Math.random() * (damageVarianceMax - damageVarianceMin)
-  );
+  return damageVarianceMin + rng() * (damageVarianceMax - damageVarianceMin);
 }
 
 function getSlotIndex(units: CombatUnit[], unitId: string): number {
@@ -49,6 +56,28 @@ function getSlotIndex(units: CombatUnit[], unitId: string): number {
   return Math.max(0, idx);
 }
 
+export function hasStatus(unit: CombatUnit, type: StatusEffectType): boolean {
+  return unit.statuses.some((s) => s.type === type && s.turnsRemaining > 0);
+}
+
+export function getEffectiveUnitSpeed(unit: CombatUnit): number {
+  const base = unit.derived.speed;
+  if (hasStatus(unit, 'slow')) {
+    return Math.max(1, Math.round(base * (1 - BALANCE_CONFIG.slowSpeedPenalty)));
+  }
+  return base;
+}
+
+function addOrRefreshStatus(
+  statuses: ActiveStatusEffect[],
+  type: StatusEffectType,
+  duration: number,
+  sourceName?: string
+): ActiveStatusEffect[] {
+  const filtered = statuses.filter((s) => s.type !== type);
+  return [...filtered, { type, turnsRemaining: duration, sourceName }];
+}
+
 function buildCombatUnit(params: {
   id: string;
   name: string;
@@ -56,18 +85,49 @@ function buildCombatUnit(params: {
   side: CombatSide;
   isPlayer: boolean;
   classId: MechClassId;
+  archetype?: EnemyArchetype;
+  isBoss?: boolean;
   level: number;
-  allocatedPoints: ReturnType<typeof generateNpcAllocations>;
+  skillLevel?: number;
+  allocatedPoints: StatBlock;
   equipmentBonuses?: StatBlock;
+  specialTraits?: ItemSpecialTraits;
 }): CombatUnit {
   const stats = calculateEffectiveStats(
     params.classId,
     params.level,
     params.allocatedPoints,
     EMPTY_STAT_BLOCK,
-    params.equipmentBonuses ?? EMPTY_STAT_BLOCK
+    params.equipmentBonuses ?? EMPTY_STAT_BLOCK,
+    params.specialTraits
   );
-  const derived = calculateDerivedStats(params.classId, params.level, stats);
+  const baseDerived = calculateDerivedStats(
+    params.classId,
+    params.level,
+    stats,
+    params.specialTraits
+  );
+
+  // Apply Enemy Archetype & Boss stat tuning
+  const archDef = params.archetype
+    ? ENEMY_ARCHETYPE_DEFS[params.archetype]
+    : null;
+  const bossHpMult = params.isBoss ? 1.85 : 1;
+  const bossAtkMult = params.isBoss ? 1.25 : 1;
+
+  const derived = archDef
+    ? {
+        ...baseDerived,
+        maxHp: Math.round(baseDerived.maxHp * archDef.hpMult * bossHpMult),
+        maxShield: Math.round(
+          baseDerived.maxShield * archDef.shieldMult * (params.isBoss ? 1.5 : 1)
+        ),
+        attackPower: Math.round(
+          baseDerived.attackPower * archDef.attackMult * bossAtkMult
+        ),
+        speed: Math.max(1, Math.round(baseDerived.speed * archDef.speedMult)),
+      }
+    : baseDerived;
 
   return {
     id: params.id,
@@ -76,7 +136,10 @@ function buildCombatUnit(params: {
     side: params.side,
     isPlayer: params.isPlayer,
     classId: params.classId,
+    archetype: params.archetype,
+    isBoss: Boolean(params.isBoss),
     level: params.level,
+    skillLevel: params.skillLevel ?? 1,
     stats,
     derived,
     hp: derived.maxHp,
@@ -84,6 +147,7 @@ function buildCombatUnit(params: {
     sp: derived.maxSp,
     isDefending: false,
     alive: true,
+    statuses: [],
     animState: 'idle',
   };
 }
@@ -91,9 +155,8 @@ function buildCombatUnit(params: {
 export function sortTurnOrder(units: CombatUnit[]): string[] {
   return [...units]
     .sort((a, b) => {
-      if (b.derived.speed !== a.derived.speed) {
-        return b.derived.speed - a.derived.speed;
-      }
+      const spdDiff = getEffectiveUnitSpeed(b) - getEffectiveUnitSpeed(a);
+      if (spdDiff !== 0) return spdDiff;
       if (a.isPlayer !== b.isPlayer) return a.isPlayer ? -1 : 1;
       if (a.side !== b.side) return a.side === 'ally' ? -1 : 1;
       return a.id.localeCompare(b.id);
@@ -102,47 +165,61 @@ export function sortTurnOrder(units: CombatUnit[]): string[] {
 }
 
 export function createInitialBattleState(
-  player: PlayerCharacter,
-  sectorId: string
+  pilot: PilotAccount,
+  sectorId: string,
+  rng: () => number = Math.random
 ): BattleState {
   const sector = getSectorById(sectorId);
+  const activeGear = pilot.gears[pilot.activeGearId];
   const classIds = MECH_CLASS_LIST.map((c) => c.id);
 
-  // 1. Player Fighter Gear (includes equipped ship part bonuses + enchant scaling)
-  const playerEquipBonuses = sumEquippedStatBonuses(player.equipped);
+  // 1. Player's Deployed Gear (per-Gear level, stats, equipment, and skill level)
+  const playerEquipBonuses = sumGearEquipmentStats(activeGear, pilot.inventory);
+  const playerTraits = sumGearSpecialTraits(activeGear, pilot.inventory);
+  const sigSkillId = MECH_CLASSES[activeGear.classId].signatureSkillId;
+  const playerSkillLevel = activeGear.skillLevels[sigSkillId] ?? 1;
+
   const playerUnit = buildCombatUnit({
     id: 'ally_player',
-    name: player.name.trim() || 'Vance',
+    name: pilot.name.trim() || 'Vance',
     callsign: 'Lead-1',
     side: 'ally',
     isPlayer: true,
-    classId: player.classId,
-    level: player.level,
-    allocatedPoints: player.allocatedPoints,
+    classId: activeGear.classId,
+    level: activeGear.level,
+    skillLevel: playerSkillLevel,
+    allocatedPoints: activeGear.allocatedPoints,
     equipmentBonuses: playerEquipBonuses,
+    specialTraits: playerTraits,
   });
 
-  // 2. Three random AI Ally Pilots
+  // 2. Three random AI Ally Pilots scaled to active Gear level
   const usedNames = new Set<string>([playerUnit.name]);
   const usedCallsigns = new Set<string>([playerUnit.callsign]);
   const allyUnits: CombatUnit[] = [playerUnit];
 
   for (let i = 0; i < 3; i++) {
-    let pilotName = randomItem(ALLY_PILOT_POOL.firstNames);
-    while (usedNames.has(pilotName)) {
-      pilotName = randomItem(ALLY_PILOT_POOL.firstNames);
-    }
+    const remainingNames = ALLY_PILOT_POOL.firstNames.filter(
+      (n) => !usedNames.has(n)
+    );
+    const pilotName =
+      remainingNames.length > 0
+        ? randomItem(remainingNames, rng)
+        : `Wingman-${i + 1}`;
     usedNames.add(pilotName);
 
-    let callsign = randomItem(ALLY_PILOT_POOL.callsigns);
-    while (usedCallsigns.has(callsign)) {
-      callsign = randomItem(ALLY_PILOT_POOL.callsigns);
-    }
+    const remainingCallsigns = ALLY_PILOT_POOL.callsigns.filter(
+      (c) => !usedCallsigns.has(c)
+    );
+    const callsign =
+      remainingCallsigns.length > 0
+        ? randomItem(remainingCallsigns, rng)
+        : `Wing-${i + 1}`;
     usedCallsigns.add(callsign);
 
-    const allyClass: MechClassId = randomItem(classIds);
-    const levelJitter = Math.floor(Math.random() * 3) - 1;
-    const allyLevel = Math.max(1, player.level + levelJitter);
+    const allyClass: MechClassId = randomItem(classIds, rng);
+    const levelJitter = Math.floor(rng() * 3) - 1;
+    const allyLevel = Math.max(1, activeGear.level + levelJitter);
 
     allyUnits.push(
       buildCombatUnit({
@@ -153,40 +230,56 @@ export function createInitialBattleState(
         isPlayer: false,
         classId: allyClass,
         level: allyLevel,
-        allocatedPoints: generateNpcAllocations(allyClass, allyLevel),
+        skillLevel: Math.min(5, Math.max(1, Math.ceil(allyLevel / 4))),
+        allocatedPoints: generateNpcAllocations(allyClass, allyLevel, rng),
       })
     );
   }
 
-  // 3. Four Hostile Starfighters & Alien Drones
+  // 3. Four Hostile Starfighters with Distinct Tactical Archetypes
+  const archetypeRoster: EnemyArchetype[] = [
+    'gunship',
+    'sniper',
+    'drone',
+    'repair_ship',
+  ];
   const enemyUnits: CombatUnit[] = [];
-  const shuffledEnemyClasses = [...classIds].sort(() => Math.random() - 0.5);
 
   for (let i = 0; i < sector.enemyCount; i++) {
-    const enemyClass = shuffledEnemyClasses[i % shuffledEnemyClasses.length];
-    const prefix = randomItem(ENEMY_ARCHETYPES.prefix);
-    const suffix = randomItem(ENEMY_ARCHETYPES.suffixByClass[enemyClass]);
+    const archetype = archetypeRoster[i % archetypeRoster.length];
+    const archDef = ENEMY_ARCHETYPE_DEFS[archetype];
+    const isBoss = sector.hasBoss && i === 0;
+    const prefix = randomItem(ENEMY_PREFIXES, rng);
+    const baseName = isBoss
+      ? randomItem(archDef.bossNames, rng)
+      : randomItem(archDef.names, rng);
     const enemyLevel = Math.max(
       1,
-      player.level +
+      activeGear.level +
         sector.levelOffset +
-        (i === 0
+        (isBoss
+          ? 1
+          : i === 0
           ? 0
-          : Math.floor(Math.random() * 2) - (sector.levelOffset === 0 ? 1 : 0))
+          : Math.floor(rng() * 2) - (sector.levelOffset === 0 ? 1 : 0))
     );
 
     enemyUnits.push(
       buildCombatUnit({
         id: `enemy_${i + 1}`,
-        name: `${prefix} ${suffix}`,
-        callsign: `Hostile-${i + 1}`,
+        name: `${prefix} ${baseName}`,
+        callsign: isBoss ? 'BOSS' : `Hostile-${i + 1}`,
         side: 'enemy',
         isPlayer: false,
-        classId: enemyClass,
+        classId: archDef.classId,
+        archetype,
+        isBoss,
         level: Math.max(1, enemyLevel),
+        skillLevel: Math.min(5, Math.max(1, Math.ceil(enemyLevel / 4))),
         allocatedPoints: generateNpcAllocations(
-          enemyClass,
-          Math.max(1, enemyLevel)
+          archDef.classId,
+          Math.max(1, enemyLevel),
+          rng
         ),
       })
     );
@@ -210,6 +303,7 @@ export function createInitialBattleState(
 
   return {
     sectorId: sector.id,
+    deployedGearId: activeGear.classId,
     units,
     turnOrder,
     activeTurnIndex: 0,
@@ -248,7 +342,9 @@ function applyDamageToUnit(
   bonusCrit: number,
   round: number,
   actionMeta: { skillId: string; hitIndex: number; totalHits: number },
-  tag: 'ATTACK' | 'SKILL'
+  tag: 'ATTACK' | 'SKILL',
+  adminConfig?: AdminConfig,
+  rng: () => number = Math.random
 ): {
   targetAfter: CombatUnit;
   logs: CombatLogEntry[];
@@ -257,13 +353,34 @@ function applyDamageToUnit(
   destroyed: boolean;
   evaded: boolean;
   hitShieldOnly: boolean;
+  damageDealt: number;
 } {
   const logs: CombatLogEntry[] = [];
   const popups: FloatingPopup[] = [];
 
-  // Roll evasion
-  const dodgeRoll = Math.random() * 100;
-  if (dodgeRoll < target.derived.dodgeChance) {
+  // Admin God Mode: Player takes 0 damage
+  if (adminConfig?.godMode && target.isPlayer) {
+    popups.push({
+      id: nextId('pop'),
+      unitId: target.id,
+      text: 'GOD 0',
+      tone: 'shield',
+    });
+    return {
+      targetAfter: { ...target, animState: 'shielded' },
+      logs,
+      popups,
+      anim: 'shielded',
+      destroyed: false,
+      evaded: false,
+      hitShieldOnly: true,
+      damageDealt: 0,
+    };
+  }
+
+  // Roll evasion (bypassed if admin oneHitKills on player)
+  const isOneHit = Boolean(adminConfig?.oneHitKills && attacker.isPlayer);
+  if (!isOneHit && rng() * 100 < target.derived.dodgeChance) {
     popups.push({
       id: nextId('pop'),
       unitId: target.id,
@@ -293,36 +410,44 @@ function applyDamageToUnit(
       destroyed: false,
       evaded: true,
       hitShieldOnly: false,
+      damageDealt: 0,
     };
   }
 
-  // Roll critical hit
-  const totalCritChance = Math.min(65, attacker.derived.critChance + bonusCrit);
-  const isCrit = Math.random() * 100 < totalCritChance;
+  const totalCritChance = Math.min(75, attacker.derived.critChance + bonusCrit);
+  const isCrit = isOneHit || rng() * 100 < totalCritChance;
 
+  const totalPierce = Math.min(
+    0.85,
+    defensePierce + attacker.derived.armorPiercePct / 100
+  );
   const effectiveDefense = Math.max(
     0,
-    target.derived.defenseRating * (1 - defensePierce)
+    target.derived.defenseRating * (1 - totalPierce)
   );
   const mitigation =
     COMBAT_FORMULAS.defenseMitigationDivisor /
     (COMBAT_FORMULAS.defenseMitigationDivisor + effectiveDefense);
 
-  let finalDamage = Math.round(rawPower * mitigation * randomVariance());
-  if (isCrit) {
+  let finalDamage = isOneHit
+    ? 99999
+    : Math.round(rawPower * mitigation * randomVariance(rng));
+  if (!isOneHit && isCrit) {
     finalDamage = Math.round(finalDamage * COMBAT_FORMULAS.critDamageMultiplier);
   }
-  if (target.isDefending) {
+  if (!isOneHit && target.isDefending) {
     finalDamage = Math.round(finalDamage * COMBAT_FORMULAS.defendDamageMultiplier);
   }
   finalDamage = Math.max(6, finalDamage);
 
+  // Shield Break status disables shield absorption for its duration!
+  const shieldDisabled = hasStatus(target, 'shield_break');
   let nextShield = target.shield;
   let nextHp = target.hp;
   let shieldAbsorbed = 0;
   let hullDamage = 0;
 
-  if (nextShield > 0) {
+  if (!shieldDisabled && nextShield > 0) {
     shieldAbsorbed = Math.min(nextShield, finalDamage);
     nextShield -= shieldAbsorbed;
     hullDamage = finalDamage - shieldAbsorbed;
@@ -398,6 +523,7 @@ function applyDamageToUnit(
       hp: nextHp,
       alive: !destroyed,
       isDefending: destroyed ? false : target.isDefending,
+      statuses: destroyed ? [] : target.statuses,
       animState: anim,
     },
     logs,
@@ -406,6 +532,66 @@ function applyDamageToUnit(
     destroyed,
     evaded: false,
     hitShieldOnly,
+    damageDealt: finalDamage,
+  };
+}
+
+function tryInflictStatus(
+  target: CombatUnit,
+  statusType: StatusEffectType,
+  duration: number,
+  chance: number,
+  actorName: string,
+  round: number,
+  rng: () => number
+): {
+  targetAfter: CombatUnit;
+  logs: CombatLogEntry[];
+  popups: FloatingPopup[];
+} {
+  if (!target.alive || rng() > chance) {
+    return { targetAfter: target, logs: [], popups: [] };
+  }
+
+  const label =
+    statusType === 'burn'
+      ? 'BURN'
+      : statusType === 'shield_break'
+      ? 'SHD BREAK'
+      : 'SLOW';
+
+  return {
+    targetAfter: {
+      ...target,
+      statuses: addOrRefreshStatus(
+        target.statuses,
+        statusType,
+        duration,
+        actorName
+      ),
+    },
+    logs: [
+      {
+        id: nextId('log'),
+        round,
+        actorName,
+        tag: 'STATUS',
+        templateKey: 'log.statusApplied',
+        params: {
+          target: target.name,
+          status: statusType,
+          turns: duration,
+        },
+      },
+    ],
+    popups: [
+      {
+        id: nextId('pop'),
+        unitId: target.id,
+        text: label,
+        tone: 'status',
+      },
+    ],
   };
 }
 
@@ -414,10 +600,12 @@ export function resolveUnitAction(
   actorId: string,
   action: ActionType,
   targetId: string | null,
-  round: number
+  round: number,
+  adminConfig?: AdminConfig,
+  rng: () => number = Math.random
 ): ActionResolution {
-  const actor = units.find((u) => u.id === actorId);
-  if (!actor || !actor.alive) {
+  const originalActor = units.find((u) => u.id === actorId);
+  if (!originalActor || !originalActor.alive) {
     return {
       updatedUnits: units,
       logEntries: [],
@@ -428,11 +616,12 @@ export function resolveUnitAction(
     };
   }
 
-  const cls = MECH_CLASSES[actor.classId];
-  const skill = getSkillById(cls.signatureSkillId);
-  const fromSlotIndex = getSlotIndex(units, actor.id);
+  const cls = MECH_CLASSES[originalActor.classId];
+  const baseSkill = getSkillById(cls.signatureSkillId);
+  const scaledSkill = getScaledSkillStats(baseSkill, originalActor.skillLevel);
+  const fromSlotIndex = getSlotIndex(units, originalActor.id);
 
-  // Clone units and reset transient animations (preserving destroyed)
+  // Clone units and reset transient animations
   const nextUnits: CombatUnit[] = units.map((u) => ({
     ...u,
     isDefending: u.id === actorId ? false : u.isDefending,
@@ -444,19 +633,100 @@ export function resolveUnitAction(
   const popups: FloatingPopup[] = [];
   const destroyedUnitIds: string[] = [];
 
+  // ---- Start-of-turn passive SP regen (from item traits) & Burn DoT + status ticks ----
+  let actor = nextUnits[actorIdx];
+  if (actor.derived.spRegenPerTurn > 0) {
+    actor = {
+      ...actor,
+      sp: Math.min(actor.derived.maxSp, actor.sp + actor.derived.spRegenPerTurn),
+    };
+  }
+
+  if (hasStatus(actor, 'burn')) {
+    const burnDmg =
+      adminConfig?.godMode && actor.isPlayer
+        ? 0
+        : Math.max(5, Math.round(actor.derived.maxHp * BALANCE_CONFIG.burnDamageRatio));
+    const nextHp = Math.max(0, actor.hp - burnDmg);
+    const burnedOut = nextHp <= 0;
+    actor = {
+      ...actor,
+      hp: nextHp,
+      alive: !burnedOut,
+      animState: burnedOut ? 'destroyed' : 'hit',
+    };
+    if (burnDmg > 0) {
+      popups.push({
+        id: nextId('pop'),
+        unitId: actor.id,
+        text: `BURN -${burnDmg}`,
+        tone: 'status',
+      });
+      logs.push({
+        id: nextId('log'),
+        round,
+        actorName: actor.name,
+        actorSide: actor.side,
+        tag: 'STATUS',
+        templateKey: 'log.burnTick',
+        params: { target: actor.name, damage: burnDmg },
+      });
+    }
+    if (burnedOut) {
+      destroyedUnitIds.push(actor.id);
+      logs.push({
+        id: nextId('log'),
+        round,
+        actorName: actor.name,
+        actorSide: actor.side,
+        tag: 'KO',
+        templateKey: 'log.destroyed',
+        params: { target: actor.name, classId: actor.classId },
+      });
+    }
+  }
+
+  // Tick down active status durations on this actor
+  actor = {
+    ...actor,
+    statuses: actor.alive
+      ? actor.statuses
+          .map((s) => ({ ...s, turnsRemaining: s.turnsRemaining - 1 }))
+          .filter((s) => s.turnsRemaining > 0)
+      : [],
+  };
+  nextUnits[actorIdx] = actor;
+
+  // If Burn destroyed the actor before it could act, end its turn immediately
+  if (!actor.alive) {
+    return {
+      updatedUnits: nextUnits,
+      logEntries: logs,
+      popups,
+      fxEvent: null,
+      destroyedUnitIds,
+      soundCue: 'destroy',
+    };
+  }
+
   // 1. DEFEND ACTION (Energy Shield Bubble)
   if (action === 'defend') {
     const spRecovered = Math.min(
       actor.derived.maxSp - actor.sp,
       COMBAT_FORMULAS.defendSpGain
     );
-    const shieldRecovered = Math.min(
-      actor.derived.maxShield - actor.shield,
-      Math.round(actor.derived.maxShield * COMBAT_FORMULAS.defendShieldRestoreRatio)
-    );
+    const shieldBlocked = hasStatus(actor, 'shield_break');
+    const shieldRecovered = shieldBlocked
+      ? 0
+      : Math.min(
+          actor.derived.maxShield - actor.shield,
+          Math.round(
+            actor.derived.maxShield * COMBAT_FORMULAS.defendShieldRestoreRatio
+          )
+        );
 
     nextUnits[actorIdx] = {
-      ...nextUnits[actorIdx],
+      ...actor,
       isDefending: true,
       sp: actor.sp + spRecovered,
       shield: actor.shield + shieldRecovered,
@@ -469,7 +739,7 @@ export function resolveUnitAction(
       text:
         shieldRecovered > 0
           ? `SHIELD +${shieldRecovered}`
-          : `SHIELD +${spRecovered} SP`,
+          : `DEFEND +${spRecovered} SP`,
       tone: 'buff',
     });
 
@@ -497,18 +767,19 @@ export function resolveUnitAction(
     };
   }
 
-  // 2. SKILL ACTION
-  if (action === 'skill' && actor.sp >= skill.spCost) {
+  // 2. SKILL ACTION (scaled by skill level 1..5)
+  if (action === 'skill' && actor.sp >= scaledSkill.spCost) {
     nextUnits[actorIdx] = {
-      ...nextUnits[actorIdx],
-      sp: Math.max(0, actor.sp - skill.spCost),
-      animState: skill.targetType === 'all_allies' ? 'casting' : 'attacking',
+      ...actor,
+      sp: Math.max(0, actor.sp - scaledSkill.spCost),
+      animState: baseSkill.targetType === 'all_allies' ? 'casting' : 'attacking',
     };
 
-    // Support / Repair Beam Skill
-    if (skill.targetType === 'all_allies') {
+    // Support / Repair Beam Skill (restores Shield & HP + cleanses statuses)
+    if (baseSkill.targetType === 'all_allies') {
       const spiritBonus = 1 + actor.stats.spirit * 0.008;
       let totalRestored = 0;
+      let cleansedAny = false;
       const healedSlotIndices: number[] = [];
 
       for (let i = 0; i < nextUnits.length; i++) {
@@ -517,19 +788,30 @@ export function resolveUnitAction(
 
         healedSlotIndices.push(getSlotIndex(units, ally.id));
 
+        const hadStatuses = ally.statuses.length > 0;
+        const nextStatuses = baseSkill.cleansesStatus ? [] : ally.statuses;
+        if (baseSkill.cleansesStatus && hadStatuses) cleansedAny = true;
+
         const shdGain = Math.min(
           ally.derived.maxShield - ally.shield,
-          Math.round(ally.derived.maxShield * skill.shieldRestoreRatio * spiritBonus)
+          Math.round(
+            ally.derived.maxShield *
+              scaledSkill.shieldRestoreRatio *
+              spiritBonus
+          )
         );
         const hpGain = Math.min(
           ally.derived.maxHp - ally.hp,
-          Math.round(ally.derived.maxHp * skill.hpRestoreRatio * spiritBonus)
+          Math.round(
+            ally.derived.maxHp * scaledSkill.hpRestoreRatio * spiritBonus
+          )
         );
 
         nextUnits[i] = {
           ...ally,
           shield: ally.shield + shdGain,
           hp: ally.hp + hpGain,
+          statuses: nextStatuses,
           animState: ally.id === actor.id ? 'casting' : 'shielded',
         };
 
@@ -537,6 +819,7 @@ export function resolveUnitAction(
         const labelParts: string[] = [];
         if (shdGain > 0) labelParts.push(`+${shdGain} SHD`);
         if (hpGain > 0) labelParts.push(`+${hpGain} HP`);
+        if (baseSkill.cleansesStatus && hadStatuses) labelParts.push('CLEANSE');
 
         popups.push({
           id: nextId('pop'),
@@ -555,11 +838,23 @@ export function resolveUnitAction(
         templateKey: 'log.healSquad',
         params: {
           actor: actor.name,
-          skillId: skill.id,
-          spCost: skill.spCost,
+          skillId: baseSkill.id,
+          spCost: scaledSkill.spCost,
           total: totalRestored,
         },
       });
+
+      if (cleansedAny) {
+        logs.push({
+          id: nextId('log'),
+          round,
+          actorName: actor.name,
+          actorSide: actor.side,
+          tag: 'STATUS',
+          templateKey: 'log.statusCleansed',
+          params: { actor: actor.name },
+        });
+      }
 
       return {
         updatedUnits: nextUnits,
@@ -579,11 +874,11 @@ export function resolveUnitAction(
       };
     }
 
-    // AoE Railgun Skill (Siege)
-    if (skill.targetType === 'all_enemies') {
+    // AoE Railgun Skill (Siege -> applies Shield Break)
+    if (baseSkill.targetType === 'all_enemies') {
       const rawPower =
         (actor.derived.attackPower * 1.45 + actor.derived.skillPower * 0.85) *
-        skill.powerMultiplier;
+        scaledSkill.powerMultiplier;
       const targetSlotIndices: number[] = [];
 
       for (let i = 0; i < nextUnits.length; i++) {
@@ -595,16 +890,34 @@ export function resolveUnitAction(
           nextUnits[actorIdx],
           enemy,
           rawPower,
-          skill.defensePierce,
-          skill.bonusCrit,
+          baseSkill.defensePierce,
+          baseSkill.bonusCrit,
           round,
-          { skillId: skill.id, hitIndex: 1, totalHits: 1 },
-          'SKILL'
+          { skillId: baseSkill.id, hitIndex: 1, totalHits: 1 },
+          'SKILL',
+          adminConfig,
+          rng
         );
-        nextUnits[i] = res.targetAfter;
+        let targetAfter = res.targetAfter;
         logs.push(...res.logs);
         popups.push(...res.popups);
-        if (res.destroyed) destroyedUnitIds.push(enemy.id);
+        if (res.destroyed) {
+          destroyedUnitIds.push(enemy.id);
+        } else if (!res.evaded && baseSkill.appliesStatus) {
+          const st = tryInflictStatus(
+            targetAfter,
+            baseSkill.appliesStatus,
+            baseSkill.statusDuration ?? 2,
+            scaledSkill.statusChance || 0.75,
+            actor.name,
+            round,
+            rng
+          );
+          targetAfter = st.targetAfter;
+          logs.push(...st.logs);
+          popups.push(...st.popups);
+        }
+        nextUnits[i] = targetAfter;
       }
 
       return {
@@ -625,7 +938,7 @@ export function resolveUnitAction(
       };
     }
 
-    // Single-target Skill (Striker bomb/missile salvo, Interceptor twin laser strafe)
+    // Single-target Skill (Striker Burn / Interceptor Slow)
     const opponents = nextUnits.filter((u) => u.side !== actor.side && u.alive);
     const chosenTarget =
       opponents.find((u) => u.id === targetId) ?? opponents[0];
@@ -638,9 +951,9 @@ export function resolveUnitAction(
 
       const rawPerHit =
         (actor.derived.attackPower * 1.65 + actor.derived.skillPower * 0.8) *
-        skill.powerMultiplier;
+        scaledSkill.powerMultiplier;
 
-      for (let h = 0; h < skill.hits; h++) {
+      for (let h = 0; h < baseSkill.hits; h++) {
         const currentTarget = nextUnits[targetIdx];
         if (!currentTarget.alive) break;
 
@@ -648,11 +961,13 @@ export function resolveUnitAction(
           nextUnits[actorIdx],
           currentTarget,
           rawPerHit,
-          skill.defensePierce,
-          skill.bonusCrit,
+          baseSkill.defensePierce,
+          baseSkill.bonusCrit,
           round,
-          { skillId: skill.id, hitIndex: h + 1, totalHits: skill.hits },
-          'SKILL'
+          { skillId: baseSkill.id, hitIndex: h + 1, totalHits: baseSkill.hits },
+          'SKILL',
+          adminConfig,
+          rng
         );
         nextUnits[targetIdx] = res.targetAfter;
         logs.push(...res.logs);
@@ -660,6 +975,26 @@ export function resolveUnitAction(
         if (res.destroyed) destroyedUnitIds.push(chosenTarget.id);
         if (!res.evaded) allEvaded = false;
         lastHitShieldOnly = res.hitShieldOnly;
+      }
+
+      // Apply skill status effect once if target survived and wasn't completely evaded
+      if (
+        !allEvaded &&
+        nextUnits[targetIdx].alive &&
+        baseSkill.appliesStatus
+      ) {
+        const st = tryInflictStatus(
+          nextUnits[targetIdx],
+          baseSkill.appliesStatus,
+          baseSkill.statusDuration ?? 2,
+          scaledSkill.statusChance || 0.8,
+          actor.name,
+          round,
+          rng
+        );
+        nextUnits[targetIdx] = st.targetAfter;
+        logs.push(...st.logs);
+        popups.push(...st.popups);
       }
 
       const fxKind: CombatFxKind =
@@ -691,13 +1026,13 @@ export function resolveUnitAction(
     }
   }
 
-  // 3. BASIC ATTACK ACTION (Laser bolts / missile volley)
+  // 3. BASIC ATTACK ACTION (includes item Splash trait & enemy archetype status effects)
   const spGain = Math.min(
     actor.derived.maxSp - actor.sp,
     COMBAT_FORMULAS.attackSpGain
   );
   nextUnits[actorIdx] = {
-    ...nextUnits[actorIdx],
+    ...actor,
     sp: actor.sp + spGain,
     animState: 'attacking',
   };
@@ -728,12 +1063,102 @@ export function resolveUnitAction(
     0,
     round,
     { skillId: '', hitIndex: 1, totalHits: 1 },
-    'ATTACK'
+    'ATTACK',
+    adminConfig,
+    rng
   );
   nextUnits[targetIdx] = res.targetAfter;
   logs.push(...res.logs);
   popups.push(...res.popups);
   if (res.destroyed) destroyedUnitIds.push(chosenTarget.id);
+
+  // Enemy Archetype basic attack status chance
+  if (!res.evaded && nextUnits[targetIdx].alive && actor.archetype) {
+    const archDef = ENEMY_ARCHETYPE_DEFS[actor.archetype];
+    if (archDef.inflictsStatus && archDef.statusChance) {
+      const st = tryInflictStatus(
+        nextUnits[targetIdx],
+        archDef.inflictsStatus,
+        2,
+        archDef.statusChance * 0.55,
+        actor.name,
+        round,
+        rng
+      );
+      nextUnits[targetIdx] = st.targetAfter;
+      logs.push(...st.logs);
+      popups.push(...st.popups);
+    }
+  }
+
+  // Splash damage trait (from Missile Pod / Nova Beam / Singularity Core)
+  const fxTargetSlots = [targetSlotIdx];
+  if (!res.evaded && actor.derived.splashPct > 0 && res.damageDealt > 0) {
+    const splashDmg = Math.max(
+      4,
+      Math.round((res.damageDealt * actor.derived.splashPct) / 100)
+    );
+    const otherOpponent = nextUnits.find(
+      (u) => u.side !== actor.side && u.alive && u.id !== chosenTarget.id
+    );
+    if (otherOpponent) {
+      const oIdx = nextUnits.findIndex((u) => u.id === otherOpponent.id);
+      fxTargetSlots.push(getSlotIndex(units, otherOpponent.id));
+      const shieldDisabled = hasStatus(otherOpponent, 'shield_break');
+      const actualSplash =
+        adminConfig?.godMode && otherOpponent.isPlayer ? 0 : splashDmg;
+      let nextShd = otherOpponent.shield;
+      let nextHp = otherOpponent.hp;
+      if (!shieldDisabled && nextShd > 0) {
+        const abs = Math.min(nextShd, actualSplash);
+        nextShd -= abs;
+        nextHp = Math.max(0, nextHp - (actualSplash - abs));
+      } else {
+        nextHp = Math.max(0, nextHp - actualSplash);
+      }
+      const splashKo = nextHp <= 0;
+      nextUnits[oIdx] = {
+        ...otherOpponent,
+        shield: nextShd,
+        hp: nextHp,
+        alive: !splashKo,
+        animState: splashKo ? 'destroyed' : 'hit',
+      };
+      if (actualSplash > 0) {
+        popups.push({
+          id: nextId('pop'),
+          unitId: otherOpponent.id,
+          text: `SPLASH -${actualSplash}`,
+          tone: 'damage',
+        });
+        logs.push({
+          id: nextId('log'),
+          round,
+          actorName: actor.name,
+          actorSide: actor.side,
+          tag: 'ATTACK',
+          templateKey: 'log.splashDamage',
+          params: {
+            actor: actor.name,
+            target: otherOpponent.name,
+            damage: actualSplash,
+          },
+        });
+      }
+      if (splashKo) {
+        destroyedUnitIds.push(otherOpponent.id);
+        logs.push({
+          id: nextId('log'),
+          round,
+          actorName: otherOpponent.name,
+          actorSide: otherOpponent.side,
+          tag: 'KO',
+          templateKey: 'log.destroyed',
+          params: { target: otherOpponent.name, classId: otherOpponent.classId },
+        });
+      }
+    }
+  }
 
   return {
     updatedUnits: nextUnits,
@@ -741,30 +1166,36 @@ export function resolveUnitAction(
     popups,
     fxEvent: {
       id: nextId('fx'),
-      kind: actor.classId === 'striker' ? 'missile' : 'laser',
+      kind:
+        actor.classId === 'striker' || actor.derived.splashPct > 0
+          ? 'missile'
+          : 'laser',
       fromSide: actor.side,
       fromSlotIndex,
       toSide: chosenTarget.side,
-      toSlotIndices: [targetSlotIdx],
+      toSlotIndices: fxTargetSlots,
       accentHex: actor.side === 'ally' ? '#38BDF8' : '#F97316',
     },
     destroyedUnitIds,
-    soundCue: res.destroyed
-      ? 'destroy'
-      : res.evaded
-      ? 'evade'
-      : res.hitShieldOnly
-      ? 'shield'
-      : 'laser',
+    soundCue:
+      destroyedUnitIds.length > 0
+        ? 'destroy'
+        : res.evaded
+        ? 'evade'
+        : res.hitShieldOnly
+        ? 'shield'
+        : 'laser',
   };
 }
 
 export function chooseAiDecision(
   actor: CombatUnit,
-  units: CombatUnit[]
+  units: CombatUnit[],
+  rng: () => number = Math.random
 ): { action: ActionType; targetId: string | null } {
   const cls = MECH_CLASSES[actor.classId];
-  const skill = getSkillById(cls.signatureSkillId);
+  const baseSkill = getSkillById(cls.signatureSkillId);
+  const scaledSkill = getScaledSkillStats(baseSkill, actor.skillLevel);
   const allies = units.filter((u) => u.side === actor.side && u.alive);
   const enemies = units.filter((u) => u.side !== actor.side && u.alive);
 
@@ -772,33 +1203,47 @@ export function chooseAiDecision(
     return { action: 'defend', targetId: null };
   }
 
-  if (skill.targetType === 'all_allies' && actor.sp >= skill.spCost) {
+  // Repair Ship / Support archetype strongly prioritizes healing injured allies
+  if (baseSkill.targetType === 'all_allies' && actor.sp >= scaledSkill.spCost) {
     const injuredCount = allies.filter(
-      (a) => a.hp < a.derived.maxHp * 0.78 || a.shield < a.derived.maxShield * 0.45
+      (a) =>
+        a.hp < a.derived.maxHp * 0.85 ||
+        a.shield < a.derived.maxShield * 0.5 ||
+        a.statuses.length > 0
     ).length;
     if (injuredCount >= 1) {
       return { action: 'skill', targetId: null };
     }
   }
 
-  const sortedEnemies = [...enemies].sort(
-    (a, b) => a.hp + a.shield - (b.hp + b.shield)
-  );
-  const target =
-    Math.random() < 0.6 ? sortedEnemies[0] : randomItem(enemies);
+  // Sniper archetype ALWAYS targets lowest HP opponent!
+  let target: CombatUnit;
+  if (actor.archetype === 'sniper') {
+    target = [...enemies].sort((a, b) => a.hp - b.hp)[0];
+  } else {
+    const sortedEnemies = [...enemies].sort(
+      (a, b) => a.hp + a.shield - (b.hp + b.shield)
+    );
+    target = rng() < 0.6 ? sortedEnemies[0] : randomItem(enemies, rng);
+  }
 
-  if (skill.targetType !== 'all_allies' && actor.sp >= skill.spCost) {
+  if (baseSkill.targetType !== 'all_allies' && actor.sp >= scaledSkill.spCost) {
     const skillChance =
-      skill.targetType === 'all_enemies' && enemies.length >= 2 ? 0.72 : 0.55;
-    if (Math.random() < skillChance) {
+      actor.archetype === 'sniper' || actor.archetype === 'gunship'
+        ? 0.7
+        : baseSkill.targetType === 'all_enemies' && enemies.length >= 2
+        ? 0.72
+        : 0.55;
+    if (rng() < skillChance) {
       return { action: 'skill', targetId: target.id };
     }
   }
 
   if (
-    actor.hp < actor.derived.maxHp * 0.28 &&
-    actor.sp < skill.spCost &&
-    Math.random() < 0.35
+    actor.archetype === 'gunship' &&
+    actor.hp < actor.derived.maxHp * 0.35 &&
+    actor.sp < scaledSkill.spCost &&
+    rng() < 0.45
   ) {
     return { action: 'defend', targetId: null };
   }
@@ -806,43 +1251,85 @@ export function chooseAiDecision(
   return { action: 'attack', targetId: target.id };
 }
 
+/**
+ * Pure per-enemy base reward formula (before global REWARD_MULT).
+ * EXP per enemy = 25 + 8 * enemyLevel (x5 for bosses)
+ * Credits per enemy = 60 + 20 * enemyLevel (x5 for bosses)
+ */
+export function calculateSingleEnemyReward(
+  enemyLevel: number,
+  isBoss = false
+): { exp: number; credits: number } {
+  const lv = Math.max(1, enemyLevel);
+  const bossMult = isBoss ? BALANCE_CONFIG.bossRewardMultiplier : 1;
+  return {
+    exp: (BALANCE_CONFIG.enemyExpBase + BALANCE_CONFIG.enemyExpPerLevel * lv) * bossMult,
+    credits:
+      (BALANCE_CONFIG.enemyCreditsBase + BALANCE_CONFIG.enemyCreditsPerLevel * lv) *
+      bossMult,
+  };
+}
+
+/**
+ * Rebalanced Battle Rewards:
+ * - Full victory pool = sum(enemyReward) * rewardMult
+ * - Victory = 100% of full victory pool
+ * - Defeat / Retreat = 50% of rewards of enemies destroyed + 20% flat consolation of full victory
+ */
 export function calculateBattleRewards(
   units: CombatUnit[],
-  sectorId: string,
-  won: boolean
-): { expGained: number; creditsGained: number } {
-  const sector = getSectorById(sectorId);
+  won: boolean,
+  rewardMult: number = BALANCE_CONFIG.rewardMultDefault
+): {
+  expGained: number;
+  creditsGained: number;
+  fullVictoryExp: number;
+  fullVictoryCredits: number;
+} {
   const enemies = units.filter((u) => u.side === 'enemy');
-  const avgEnemyLevel =
-    enemies.length > 0
-      ? enemies.reduce((sum, e) => sum + e.level, 0) / enemies.length
-      : 1;
 
-  const baseExp =
-    (PROGRESSION_CONFIG.baseVictoryExp +
-      avgEnemyLevel * PROGRESSION_CONFIG.expPerEnemyLevel) *
-    sector.expMultiplier;
+  let fullExpRaw = 0;
+  let fullCreditsRaw = 0;
+  let destroyedExpRaw = 0;
+  let destroyedCreditsRaw = 0;
 
-  const baseCredits =
-    (PROGRESSION_CONFIG.baseVictoryCredits +
-      avgEnemyLevel * PROGRESSION_CONFIG.creditsPerEnemyLevel) *
-    sector.creditsMultiplier;
+  for (const enemy of enemies) {
+    const r = calculateSingleEnemyReward(enemy.level, Boolean(enemy.isBoss));
+    fullExpRaw += r.exp;
+    fullCreditsRaw += r.credits;
+    if (!enemy.alive) {
+      destroyedExpRaw += r.exp;
+      destroyedCreditsRaw += r.credits;
+    }
+  }
+
+  const fullVictoryExp = Math.round(fullExpRaw * rewardMult);
+  const fullVictoryCredits = Math.round(fullCreditsRaw * rewardMult);
 
   if (won) {
     return {
-      expGained: Math.round(baseExp),
-      creditsGained: Math.round(baseCredits),
+      expGained: Math.round(fullVictoryExp * BALANCE_CONFIG.victoryRewardRatio),
+      creditsGained: Math.round(
+        fullVictoryCredits * BALANCE_CONFIG.victoryRewardRatio
+      ),
+      fullVictoryExp,
+      fullVictoryCredits,
     };
   }
 
-  const destroyedCount = enemies.filter((e) => !e.alive).length;
-  const partialBonus = 1 + destroyedCount * 0.12;
+  const destroyedExp =
+    destroyedExpRaw * rewardMult * BALANCE_CONFIG.defeatDestroyedRatio;
+  const destroyedCredits =
+    destroyedCreditsRaw * rewardMult * BALANCE_CONFIG.defeatDestroyedRatio;
+
+  const consolationExp = fullVictoryExp * BALANCE_CONFIG.defeatConsolationRatio;
+  const consolationCredits =
+    fullVictoryCredits * BALANCE_CONFIG.defeatConsolationRatio;
+
   return {
-    expGained: Math.round(
-      baseExp * PROGRESSION_CONFIG.defeatExpRatio * partialBonus
-    ),
-    creditsGained: Math.round(
-      baseCredits * PROGRESSION_CONFIG.defeatCreditsRatio * partialBonus
-    ),
+    expGained: Math.round(destroyedExp + consolationExp),
+    creditsGained: Math.round(destroyedCredits + consolationCredits),
+    fullVictoryExp,
+    fullVictoryCredits,
   };
 }

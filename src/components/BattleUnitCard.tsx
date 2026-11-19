@@ -1,5 +1,11 @@
-import { Shield } from 'lucide-react';
-import { getClassName, useI18n } from '../i18n';
+import { Flame, Shield, ShieldOff, Skull, Snowflake } from 'lucide-react';
+import { getEffectiveUnitSpeed, hasStatus } from '../engine/combat';
+import {
+  getArchetypeLabel,
+  getClassName,
+  getStatusLabel,
+  useI18n,
+} from '../i18n';
 import type { CombatUnit, FloatingPopup } from '../types/game';
 import { FighterSvg } from './FighterSvg';
 
@@ -9,11 +15,13 @@ interface BattleUnitCardProps {
   isTargeted: boolean;
   canTarget: boolean;
   exploding: boolean;
+  skipAnimations: boolean;
   popups: FloatingPopup[];
   onSelect?: () => void;
 }
 
-function getAnimClass(unit: CombatUnit): string {
+function getAnimClass(unit: CombatUnit, skip: boolean): string {
+  if (skip) return '';
   switch (unit.animState) {
     case 'attacking':
       return unit.side === 'ally' ? 'anim-lunge-right' : 'anim-lunge-left';
@@ -44,6 +52,8 @@ function getPopupColor(tone: FloatingPopup['tone']): string {
       return 'text-slate-200';
     case 'buff':
       return 'text-sky-200';
+    case 'status':
+      return 'text-orange-300';
   }
 }
 
@@ -53,6 +63,7 @@ export function BattleUnitCard({
   isTargeted,
   canTarget,
   exploding,
+  skipAnimations,
   popups,
   onSelect,
 }: BattleUnitCardProps) {
@@ -68,6 +79,9 @@ export function BattleUnitCard({
       : 0;
 
   const isEnemy = unit.side === 'enemy';
+  const shieldBroken = hasStatus(unit, 'shield_break');
+  const effectiveSpeed = getEffectiveUnitSpeed(unit);
+
   const hpBarColor =
     hpRatio <= 0.25
       ? 'bg-red-500'
@@ -93,6 +107,8 @@ export function BattleUnitCard({
     ? 'border-amber-400 bg-[#141D2C] shadow-[0_0_0_1px_rgba(251,191,36,0.35)]'
     : isTargeted
     ? 'border-red-400/90 bg-[#1B1319] shadow-[0_0_0_1px_rgba(248,113,113,0.35)]'
+    : unit.isBoss
+    ? 'border-amber-500/60 bg-[#16111B]/95 hover:border-amber-400'
     : 'border-slate-800/90 bg-[#0E141F]/95 hover:border-slate-700';
 
   const interactiveProps =
@@ -115,27 +131,27 @@ export function BattleUnitCard({
       {...interactiveProps}
       className={`relative rounded-lg border p-3 transition-colors select-none ${cardBorder} ${
         canTarget && unit.alive ? 'cursor-pointer' : ''
-      } ${getAnimClass(unit)}`}
+      } ${getAnimClass(unit, skipAnimations)}`}
     >
-      {/* Floating Combat Popups */}
-      {popups.map((pop, idx) => (
-        <div
-          key={pop.id}
-          style={{ top: `${12 + idx * 18}px` }}
-          className={`pointer-events-none absolute left-1/2 z-20 font-display text-lg font-bold tracking-wider drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] whitespace-nowrap anim-popup ${getPopupColor(
-            pop.tone
-          )}`}
-        >
-          {pop.text}
-        </div>
-      ))}
+      {/* Floating Popups (skipped when skipAnimations active) */}
+      {!skipAnimations &&
+        popups.map((pop, idx) => (
+          <div
+            key={pop.id}
+            style={{ top: `${12 + idx * 18}px` }}
+            className={`pointer-events-none absolute left-1/2 z-20 font-display text-lg font-bold tracking-wider drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] whitespace-nowrap anim-popup ${getPopupColor(
+              pop.tone
+            )}`}
+          >
+            {pop.text}
+          </div>
+        ))}
 
       <div
         className={`flex items-center gap-3 ${
           isEnemy ? 'flex-row-reverse text-right' : 'flex-row text-left'
         }`}
       >
-        {/* Space Fighter / Drone Sprite */}
         <div className="relative shrink-0">
           <FighterSvg
             classId={unit.classId}
@@ -144,27 +160,42 @@ export function BattleUnitCard({
             size="md"
             destroyed={!unit.alive}
             defending={unit.isDefending}
-            impactFlash={unit.animState === 'hit'}
-            exploding={exploding}
+            impactFlash={!skipAnimations && unit.animState === 'hit'}
+            exploding={!skipAnimations && exploding}
           />
         </div>
 
-        {/* Unit Info & Animated Bars */}
-        <div className="flex-1 min-w-0 space-y-2">
+        <div className="flex-1 min-w-0 space-y-1.5">
           <div
             className={`flex items-baseline justify-between gap-2 ${
               isEnemy ? 'flex-row-reverse' : 'flex-row'
             }`}
           >
             <div className="min-w-0">
-              <div className="font-display text-lg font-bold leading-none text-slate-100 truncate">
-                {unit.name}
+              <div
+                className={`font-display text-lg font-bold leading-none text-slate-100 truncate flex items-center gap-1.5 ${
+                  isEnemy ? 'justify-end' : 'justify-start'
+                }`}
+              >
+                {unit.isBoss && (
+                  <Skull className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                )}
+                <span className="truncate">{unit.name}</span>
               </div>
               <div className="mt-0.5 text-[11px] text-slate-400 truncate">
-                {getClassName(lang, unit.classId)} · {t('common.levelShort')}
+                {unit.archetype
+                  ? getArchetypeLabel(lang, unit.archetype)
+                  : getClassName(lang, unit.classId)}{' '}
+                · {t('common.levelShort')}
                 <span className="font-mono-nums">{unit.level}</span> · SPD{' '}
-                <span className="font-mono-nums text-slate-300">
-                  {unit.derived.speed}
+                <span
+                  className={`font-mono-nums ${
+                    hasStatus(unit, 'slow')
+                      ? 'text-cyan-400 font-semibold'
+                      : 'text-slate-300'
+                  }`}
+                >
+                  {effectiveSpeed}
                 </span>
               </div>
             </div>
@@ -189,6 +220,38 @@ export function BattleUnitCard({
             </div>
           </div>
 
+          {/* Active Status Effects Row */}
+          {unit.alive && unit.statuses.length > 0 && (
+            <div
+              className={`flex flex-wrap items-center gap-1.5 ${
+                isEnemy ? 'justify-end' : 'justify-start'
+              }`}
+            >
+              {unit.statuses.map((st) => (
+                <span
+                  key={st.type}
+                  title={t(`status.${st.type}.desc`)}
+                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono-nums font-semibold border ${
+                    st.type === 'burn'
+                      ? 'border-orange-500/50 bg-orange-500/15 text-orange-300'
+                      : st.type === 'shield_break'
+                      ? 'border-red-500/50 bg-red-500/15 text-red-300'
+                      : 'border-cyan-500/50 bg-cyan-500/15 text-cyan-300'
+                  }`}
+                >
+                  {st.type === 'burn' && <Flame className="w-2.5 h-2.5" />}
+                  {st.type === 'shield_break' && (
+                    <ShieldOff className="w-2.5 h-2.5" />
+                  )}
+                  {st.type === 'slow' && <Snowflake className="w-2.5 h-2.5" />}
+                  <span>
+                    {getStatusLabel(lang, st.type)} {st.turnsRemaining}t
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
+
           {/* HP Bar */}
           <div className="space-y-1">
             <div className="flex items-center justify-between text-[11px] font-mono-nums">
@@ -198,12 +261,16 @@ export function BattleUnitCard({
               </span>
             </div>
             <div className="relative h-2 w-full rounded-sm bg-slate-900 overflow-hidden">
+              {!skipAnimations && (
+                <div
+                  className="absolute inset-0 bg-white/30 meter-trail"
+                  style={{ transform: `scaleX(${hpRatio})` }}
+                />
+              )}
               <div
-                className="absolute inset-0 bg-white/30 meter-trail"
-                style={{ transform: `scaleX(${hpRatio})` }}
-              />
-              <div
-                className={`absolute inset-0 ${hpBarColor} meter-fill`}
+                className={`absolute inset-0 ${hpBarColor} ${
+                  skipAnimations ? '' : 'meter-fill'
+                }`}
                 style={{ transform: `scaleX(${hpRatio})` }}
               />
             </div>
@@ -213,18 +280,24 @@ export function BattleUnitCard({
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-0.5">
               <div className="flex items-center justify-between text-[10px] font-mono-nums">
-                <span className="text-sky-400/90">SHD</span>
-                <span className="text-sky-200">
+                <span
+                  className={
+                    shieldBroken ? 'text-red-400 line-through' : 'text-sky-400/90'
+                  }
+                >
+                  SHD
+                </span>
+                <span
+                  className={shieldBroken ? 'text-red-300' : 'text-sky-200'}
+                >
                   {unit.shield}/{unit.derived.maxShield}
                 </span>
               </div>
               <div className="relative h-1.5 w-full rounded-sm bg-slate-900 overflow-hidden">
                 <div
-                  className="absolute inset-0 bg-sky-200/30 meter-trail"
-                  style={{ transform: `scaleX(${shieldRatio})` }}
-                />
-                <div
-                  className="absolute inset-0 bg-sky-400 meter-fill"
+                  className={`absolute inset-0 ${
+                    shieldBroken ? 'bg-red-500/50' : 'bg-sky-400'
+                  } ${skipAnimations ? '' : 'meter-fill'}`}
                   style={{ transform: `scaleX(${shieldRatio})` }}
                 />
               </div>
@@ -239,7 +312,9 @@ export function BattleUnitCard({
               </div>
               <div className="relative h-1.5 w-full rounded-sm bg-slate-900 overflow-hidden">
                 <div
-                  className="absolute inset-0 bg-amber-400 meter-fill"
+                  className={`absolute inset-0 bg-amber-400 ${
+                    skipAnimations ? '' : 'meter-fill'
+                  }`}
                   style={{ transform: `scaleX(${spRatio})` }}
                 />
               </div>

@@ -1,12 +1,22 @@
 import { useEffect, useRef } from 'react';
-import { Crosshair, FastForward, Package, Shield, Sparkles } from 'lucide-react';
+import {
+  Crosshair,
+  Flag,
+  Package,
+  Shield,
+  Sparkles,
+  ZapOff,
+} from 'lucide-react';
+import { BALANCE_CONFIG } from '../data/balance';
 import { MECH_CLASSES, STAT_KEYS } from '../data/classes';
-import { getItemDefinition, RARITY_META } from '../data/items';
-import { getSkillById } from '../data/skills';
+import { RARITY_META } from '../data/items';
+import { getScaledSkillStats, getSkillById } from '../data/skills';
+import { getEffectiveUnitSpeed } from '../engine/combat';
+import { getEffectiveItemStats } from '../engine/equipment';
 import {
   formatCombatLogMessage,
   getClassName,
-  getItemName,
+  getItemInstanceName,
   getLogTagLabel,
   getRarityLabel,
   getSectorName,
@@ -18,8 +28,10 @@ import {
   useI18n,
 } from '../i18n';
 import { useGameStore } from '../store/useGameStore';
-import type { CombatFxEvent, CombatLogEntry } from '../types/game';
+import type { BattleSpeed, CombatFxEvent, CombatLogEntry } from '../types/game';
 import { BattleUnitCard } from './BattleUnitCard';
+
+const BATTLE_SPEEDS: BattleSpeed[] = [1, 2, 3, 5, 10];
 
 function getLogTagStyle(tag: CombatLogEntry['tag']): string {
   switch (tag) {
@@ -33,6 +45,8 @@ function getLogTagStyle(tag: CombatLogEntry['tag']): string {
       return 'text-emerald-400';
     case 'DEFEND':
       return 'text-sky-300';
+    case 'STATUS':
+      return 'text-orange-400';
     case 'EVADE':
       return 'text-slate-300';
     case 'SKILL':
@@ -44,14 +58,10 @@ function getLogTagStyle(tag: CombatLogEntry['tag']): string {
   }
 }
 
-/**
- * Pure CSS/SVG space projectile overlay: laser bolts, missile trails, railgun beams, and repair beams
- * travelling across the 4v4 battlefield from attacker slot to target slot(s).
- */
 function BattleFxOverlay({ fxEvents }: { fxEvents: CombatFxEvent[] }) {
   if (fxEvents.length === 0) return null;
 
-  const slotY = (idx: number) => 15 + idx * 23.5; // % heights aligned with the 4 unit rows
+  const slotY = (idx: number) => 15 + idx * 23.5;
 
   return (
     <svg
@@ -172,7 +182,6 @@ function BattleFxOverlay({ fxEvents }: { fxEvents: CombatFxEvent[] }) {
           );
         }
 
-        // Default: Twin Laser Bolts
         return (
           <g key={fx.id}>
             {fx.toSlotIndices.map((tIdx) => {
@@ -213,18 +222,22 @@ export function BattleScreen() {
   const { lang, t } = useI18n();
   const battle = useGameStore((s) => s.battle);
   const battleSpeed = useGameStore((s) => s.battleSpeed);
+  const skipAnimations = useGameStore((s) => s.skipAnimations);
   const selectTarget = useGameStore((s) => s.selectTarget);
   const performPlayerAction = useGameStore((s) => s.performPlayerAction);
   const performAiTurn = useGameStore((s) => s.performAiTurn);
+  const retreatBattle = useGameStore((s) => s.retreatBattle);
   const clearExpiredPopups = useGameStore((s) => s.clearExpiredPopups);
   const clearExpiredFx = useGameStore((s) => s.clearExpiredFx);
   const clearExplodedUnits = useGameStore((s) => s.clearExplodedUnits);
   const returnToHangar = useGameStore((s) => s.returnToHangar);
   const startBattle = useGameStore((s) => s.startBattle);
-  const toggleBattleSpeed = useGameStore((s) => s.toggleBattleSpeed);
+  const setBattleSpeed = useGameStore((s) => s.setBattleSpeed);
+  const toggleSkipAnimations = useGameStore((s) => s.toggleSkipAnimations);
   const toggleMute = useGameStore((s) => s.toggleMute);
 
   const logEndRef = useRef<HTMLDivElement | null>(null);
+  const bypassFx = skipAnimations || battleSpeed === 10;
 
   const activeUnitId = battle ? battle.turnOrder[battle.activeTurnIndex] : null;
   const activeUnit =
@@ -235,43 +248,41 @@ export function BattleScreen() {
 
   // Auto-scroll combat log
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [battle?.log.length]);
+    logEndRef.current?.scrollIntoView({ behavior: bypassFx ? 'auto' : 'smooth' });
+  }, [battle?.log.length, bypassFx]);
 
-  // Clean up floating popups
   useEffect(() => {
     if (!battle || battle.popups.length === 0) return;
     const ids = battle.popups.map((p) => p.id);
     const timer = window.setTimeout(() => {
       clearExpiredPopups(ids);
-    }, 980);
+    }, 900);
     return () => window.clearTimeout(timer);
   }, [battle?.popups, clearExpiredPopups]);
 
-  // Clean up laser/missile FX trails
   useEffect(() => {
     if (!battle || battle.fxEvents.length === 0) return;
     const ids = battle.fxEvents.map((f) => f.id);
     const timer = window.setTimeout(() => {
       clearExpiredFx(ids);
-    }, 520);
+    }, 480);
     return () => window.clearTimeout(timer);
   }, [battle?.fxEvents, clearExpiredFx]);
 
-  // Clean up ship explosion particle bursts
   useEffect(() => {
     if (!battle || battle.explodedUnitIds.length === 0) return;
     const ids = [...battle.explodedUnitIds];
     const timer = window.setTimeout(() => {
       clearExplodedUnits(ids);
-    }, 680);
+    }, 640);
     return () => window.clearTimeout(timer);
   }, [battle?.explodedUnitIds, clearExplodedUnits]);
 
-  // Automatic AI turn scheduler
+  // Automatic AI turn scheduler with 1x, 2x, 3x, 5x, 10x speed delays
   useEffect(() => {
     if (!battle || battle.summary || isPlayerTurn) return;
-    const delayMs = battleSpeed === 2 ? 420 : 780;
+    const baseDelay = BALANCE_CONFIG.battleSpeedDelays[battleSpeed] ?? 760;
+    const delayMs = skipAnimations ? Math.min(baseDelay, 60) : baseDelay;
     const timer = window.setTimeout(() => {
       performAiTurn();
     }, delayMs);
@@ -282,6 +293,7 @@ export function BattleScreen() {
     battle?.summary,
     isPlayerTurn,
     battleSpeed,
+    skipAnimations,
     performAiTurn,
   ]);
 
@@ -289,6 +301,7 @@ export function BattleScreen() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!battle) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key.toLowerCase() === 'm') {
         toggleMute();
         return;
@@ -297,14 +310,15 @@ export function BattleScreen() {
 
       const playerUnit = battle.units.find((u) => u.isPlayer);
       if (!playerUnit) return;
-      const skill = getSkillById(
+      const baseSkill = getSkillById(
         MECH_CLASSES[playerUnit.classId].signatureSkillId
       );
+      const scaledSkill = getScaledSkillStats(baseSkill, playerUnit.skillLevel);
 
       if (e.key === '1') {
         e.preventDefault();
         performPlayerAction('attack');
-      } else if (e.key === '2' && playerUnit.sp >= skill.spCost) {
+      } else if (e.key === '2' && playerUnit.sp >= scaledSkill.spCost) {
         e.preventDefault();
         performPlayerAction('skill');
       } else if (e.key === '3') {
@@ -333,11 +347,19 @@ export function BattleScreen() {
   const allies = battle.units.filter((u) => u.side === 'ally');
   const enemies = battle.units.filter((u) => u.side === 'enemy');
   const playerUnit = allies.find((u) => u.isPlayer);
-  const playerSkill = playerUnit
+  const playerBaseSkill = playerUnit
     ? getSkillById(MECH_CLASSES[playerUnit.classId].signatureSkillId)
     : null;
+  const playerScaledSkill =
+    playerUnit && playerBaseSkill
+      ? getScaledSkillStats(playerBaseSkill, playerUnit.skillLevel)
+      : null;
+
   const canUseSkill = Boolean(
-    isPlayerTurn && playerUnit && playerSkill && playerUnit.sp >= playerSkill.spCost
+    isPlayerTurn &&
+      playerUnit &&
+      playerScaledSkill &&
+      playerUnit.sp >= playerScaledSkill.spCost
   );
 
   const selectedTarget = enemies.find((e) => e.id === battle.selectedTargetId);
@@ -355,15 +377,15 @@ export function BattleScreen() {
 
   return (
     <div className="relative flex-1 min-h-0 flex flex-col bg-tactical-grid overflow-hidden">
-      {/* TOP TURN ORDER RIBBON */}
-      <div className="shrink-0 border-b border-slate-800/80 bg-[#0A0F18]/90 px-4 sm:px-6 py-2 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3 overflow-x-auto min-w-0 py-0.5">
+      {/* TOP TURN ORDER RIBBON + BATTLE SPEED (1x..10x) + SKIP ANIM */}
+      <div className="shrink-0 border-b border-slate-800/80 bg-[#0A0F18]/90 px-4 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3 overflow-x-auto min-w-0 py-0.5 flex-1">
           <div className="shrink-0 flex items-center gap-2 text-xs">
             <span className="font-display text-sm font-bold tracking-wide text-amber-400 whitespace-nowrap">
               {t('battle.round', { round: battle.round })}
             </span>
-            <span className="text-slate-600" aria-hidden="true">·</span>
-            <span className="text-slate-400 whitespace-nowrap">
+            <span className="text-slate-600">·</span>
+            <span className="text-slate-400 whitespace-nowrap hidden sm:inline">
               {t('battle.turnOrder')}
             </span>
           </div>
@@ -376,7 +398,7 @@ export function BattleScreen() {
               return (
                 <div
                   key={id}
-                  className={`px-2.5 py-1 rounded border text-[11px] whitespace-nowrap flex items-center gap-1.5 ${
+                  className={`px-2 py-1 rounded border text-[11px] whitespace-nowrap flex items-center gap-1.5 ${
                     isCurrent
                       ? 'border-amber-400 bg-amber-500/15 text-amber-200 font-semibold'
                       : unit.side === 'ally'
@@ -390,7 +412,7 @@ export function BattleScreen() {
                       : unit.name}
                   </span>
                   <span className="font-mono-nums text-[10px] opacity-75">
-                    {unit.derived.speed}
+                    {getEffectiveUnitSpeed(unit)}
                   </span>
                 </div>
               );
@@ -398,24 +420,63 @@ export function BattleScreen() {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={toggleBattleSpeed}
-          className="h-8 px-2.5 shrink-0 inline-flex items-center gap-1.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-xs font-mono-nums text-slate-200 cursor-pointer"
-          title={t('battle.toggleSpeed')}
-        >
-          <FastForward className="w-3.5 h-3.5 text-amber-400" />
-          <span>{battleSpeed}x</span>
-        </button>
+        {/* Speed Controls: 1x 2x 3x 5x 10x + Skip Anim + Retreat */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <div
+            className="inline-flex items-center rounded border border-slate-800 bg-slate-950 p-0.5"
+            role="group"
+            aria-label="Battle speed"
+          >
+            {BATTLE_SPEEDS.map((spd) => (
+              <button
+                key={spd}
+                type="button"
+                onClick={() => setBattleSpeed(spd)}
+                className={`h-7 px-2 rounded text-[11px] font-mono-nums font-semibold transition-colors cursor-pointer ${
+                  battleSpeed === spd
+                    ? 'bg-amber-500 text-slate-950'
+                    : 'text-slate-400 hover:text-slate-100'
+                }`}
+              >
+                {spd}x
+              </button>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={toggleSkipAnimations}
+            aria-pressed={skipAnimations}
+            className={`h-8 px-2.5 inline-flex items-center gap-1 rounded border text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${
+              skipAnimations
+                ? 'border-sky-400 bg-sky-500/20 text-sky-200'
+                : 'border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <ZapOff className="w-3 h-3" />
+            <span>{t('battle.skipAnim')}</span>
+          </button>
+
+          {!battle.summary && (
+            <button
+              type="button"
+              onClick={retreatBattle}
+              className="h-8 px-2.5 inline-flex items-center gap-1 rounded border border-red-500/40 bg-red-500/10 hover:bg-red-500/20 text-red-300 text-[11px] font-medium cursor-pointer whitespace-nowrap"
+            >
+              <Flag className="w-3 h-3" />
+              <span>{t('battle.retreat')}</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* MAIN 4v4 SPACE BATTLEFIELD ARENA */}
       <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 py-4">
         <div className="relative mx-auto max-w-[1400px] h-full grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
-          {/* Laser / Missile / Railgun / Repair Beam Overlay */}
-          <BattleFxOverlay fxEvents={battle.fxEvents} />
+          {/* Bypass projectile SVG overlay when 10x or skipAnimations */}
+          {!bypassFx && <BattleFxOverlay fxEvents={battle.fxEvents} />}
 
-          {/* Allied Fighter Wing (Left) */}
+          {/* Allied Fighter Wing */}
           <div className="space-y-2.5 relative z-10">
             <div className="flex items-center justify-between text-xs px-1">
               <span className="font-display text-sm font-semibold tracking-wider text-sky-400 uppercase">
@@ -437,13 +498,14 @@ export function BattleScreen() {
                   isTargeted={false}
                   canTarget={false}
                   exploding={battle.explodedUnitIds.includes(unit.id)}
+                  skipAnimations={bypassFx}
                   popups={battle.popups.filter((p) => p.unitId === unit.id)}
                 />
               ))}
             </div>
           </div>
 
-          {/* Hostile Ships & Alien Drones (Right) */}
+          {/* Hostile Wing (Drone, Gunship, Sniper, Repair Ship / Boss) */}
           <div className="space-y-2.5 relative z-10">
             <div className="flex items-center justify-between text-xs px-1">
               <span className="font-display text-sm font-semibold tracking-wider text-red-400 uppercase">
@@ -465,6 +527,7 @@ export function BattleScreen() {
                   isTargeted={battle.selectedTargetId === unit.id && unit.alive}
                   canTarget={isPlayerTurn && unit.alive}
                   exploding={battle.explodedUnitIds.includes(unit.id)}
+                  skipAnimations={bypassFx}
                   popups={battle.popups.filter((p) => p.unitId === unit.id)}
                   onSelect={() => selectTarget(unit.id)}
                 />
@@ -477,7 +540,6 @@ export function BattleScreen() {
       {/* BOTTOM COMMAND DOCK & COMBAT LOG */}
       <div className="shrink-0 border-t border-slate-800/90 bg-[#0A0F18]/98 px-4 sm:px-6 py-3">
         <div className="mx-auto max-w-[1400px] grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
-          {/* Player Command Deck (7 cols) */}
           <div className="lg:col-span-7 flex flex-col justify-between gap-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
               {isPlayerTurn ? (
@@ -512,7 +574,6 @@ export function BattleScreen() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              {/* Attack / Fire Weapons */}
               <button
                 type="button"
                 disabled={!isPlayerTurn}
@@ -533,30 +594,34 @@ export function BattleScreen() {
                 </kbd>
               </button>
 
-              {/* Signature Ship Skill */}
               <button
                 type="button"
                 disabled={!canUseSkill}
                 onClick={() => performPlayerAction('skill')}
-                title={playerSkill ? getSkillDesc(lang, playerSkill.id) : ''}
+                title={
+                  playerBaseSkill ? getSkillDesc(lang, playerBaseSkill.id) : ''
+                }
                 className="h-14 px-3.5 rounded border border-sky-500/60 bg-sky-500/15 hover:bg-sky-500/25 disabled:bg-slate-900 disabled:border-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-sky-100 transition-colors cursor-pointer text-left flex items-center justify-between gap-2"
               >
                 <div className="min-w-0">
                   <div className="font-semibold text-sm flex items-center gap-1.5 truncate">
                     <Sparkles className="w-4 h-4 shrink-0 text-sky-400" />
                     <span className="truncate">
-                      {playerSkill ? getSkillName(lang, playerSkill.id) : ''}
+                      {playerBaseSkill
+                        ? getSkillName(lang, playerBaseSkill.id)
+                        : ''}
                     </span>
                   </div>
                   <div className="text-[11px] text-sky-300/80 font-mono-nums truncate">
-                    {playerSkill
+                    {playerBaseSkill && playerScaledSkill
                       ? t('battle.actionSkillSub', {
-                          cost: playerSkill.spCost,
+                          cost: playerScaledSkill.spCost,
                           target: getSkillTargetLabel(
                             lang,
-                            playerSkill.targetType,
-                            playerSkill.hits
+                            playerBaseSkill.targetType,
+                            playerBaseSkill.hits
                           ),
+                          lv: playerScaledSkill.level,
                         })
                       : ''}
                   </div>
@@ -566,7 +631,6 @@ export function BattleScreen() {
                 </kbd>
               </button>
 
-              {/* Defend / Energy Shield Bubble */}
               <button
                 type="button"
                 disabled={!isPlayerTurn}
@@ -589,7 +653,6 @@ export function BattleScreen() {
             </div>
           </div>
 
-          {/* Live-Translated Combat Log (5 cols) */}
           <div className="lg:col-span-5 rounded border border-slate-800 bg-[#070A10] flex flex-col h-28 sm:h-32">
             <div className="px-3 py-1.5 border-b border-slate-800/90 flex items-center justify-between text-[11px] text-slate-400">
               <span className="font-semibold text-slate-300">
@@ -601,7 +664,10 @@ export function BattleScreen() {
             </div>
             <div className="flex-1 overflow-y-auto px-3 py-1.5 space-y-1 text-xs tactical-scroll">
               {battle.log.map((entry) => (
-                <div key={entry.id} className="leading-snug flex items-baseline gap-2">
+                <div
+                  key={entry.id}
+                  className="leading-snug flex items-baseline gap-2"
+                >
                   <span className="font-mono-nums text-[10px] text-slate-500 shrink-0">
                     R{entry.round}
                   </span>
@@ -623,7 +689,7 @@ export function BattleScreen() {
         </div>
       </div>
 
-      {/* VICTORY / DEFEAT MODAL */}
+      {/* VICTORY / DEFEAT / RETREAT RESULTS MODAL */}
       {battle.summary && (
         <div
           className="fixed inset-0 z-40 bg-black/75 flex items-center justify-center p-4"
@@ -631,7 +697,7 @@ export function BattleScreen() {
           aria-modal="true"
           aria-labelledby="battle-outcome-title"
         >
-          <div className="w-full max-w-md rounded-lg border border-slate-700 bg-[#0E1521] p-6 space-y-5 shadow-2xl">
+          <div className="w-full max-w-md rounded-lg border border-slate-700 bg-[#0E1521] p-6 space-y-4 shadow-2xl max-h-[92vh] overflow-y-auto tactical-scroll">
             <div className="space-y-1">
               <div
                 className={`text-xs font-semibold tracking-widest uppercase ${
@@ -651,6 +717,8 @@ export function BattleScreen() {
               >
                 {battle.summary.outcome === 'victory'
                   ? t('summary.victory')
+                  : battle.summary.retreated
+                  ? t('summary.retreatTitle')
                   : t('summary.defeat')}
               </h2>
               <p className="text-sm text-slate-400">
@@ -665,6 +733,7 @@ export function BattleScreen() {
                 <div>
                   <div className="font-display text-lg font-bold text-emerald-300">
                     {t('summary.levelUp', {
+                      gear: getClassName(lang, battle.summary.deployedGearId),
                       prev: battle.summary.previousLevel,
                       next: battle.summary.newLevel,
                     })}
@@ -679,13 +748,31 @@ export function BattleScreen() {
               </div>
             )}
 
+            {battle.summary.unlockedSectorId && (
+              <div className="rounded border border-amber-500/40 bg-amber-500/10 px-3.5 py-2 text-xs font-semibold text-amber-300">
+                {t('summary.sectorUnlocked', {
+                  sector: getSectorName(lang, battle.summary.unlockedSectorId),
+                })}
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded border border-slate-800 bg-[#090D14] p-3">
                 <div className="text-xs text-slate-400">
-                  {t('summary.expEarned')}
+                  {t('summary.expEarned', {
+                    gear: getClassName(lang, battle.summary.deployedGearId),
+                  })}
                 </div>
                 <div className="mt-0.5 font-mono-nums text-xl font-bold text-amber-400">
                   +{battle.summary.expGained} EXP
+                </div>
+                <div className="text-[11px] font-mono-nums text-slate-400 mt-0.5">
+                  {battle.summary.newLevel >= BALANCE_CONFIG.maxLevel
+                    ? t('summary.maxLevelReached')
+                    : t('summary.battlesToNext', {
+                        count: battle.summary.battlesToNextLevel,
+                        next: battle.summary.newLevel + 1,
+                      })}
                 </div>
               </div>
               <div className="rounded border border-slate-800 bg-[#090D14] p-3">
@@ -701,7 +788,7 @@ export function BattleScreen() {
                   {t('summary.hostilesDestroyed')}
                 </div>
                 <div className="mt-0.5 font-mono-nums text-lg font-semibold text-slate-200">
-                  {battle.summary.enemiesDestroyed} / 4
+                  {battle.summary.enemiesDestroyed} / {battle.summary.totalEnemies}
                 </div>
               </div>
               <div className="rounded border border-slate-800 bg-[#090D14] p-3">
@@ -714,7 +801,7 @@ export function BattleScreen() {
               </div>
             </div>
 
-            {/* Salvaged Ship Part Drops */}
+            {/* Randomized Salvaged Drops */}
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs text-slate-400">
                 <span className="inline-flex items-center gap-1.5 font-semibold text-slate-200">
@@ -735,39 +822,31 @@ export function BattleScreen() {
               ) : (
                 <div className="space-y-1.5 max-h-36 overflow-y-auto tactical-scroll">
                   {battle.summary.droppedItems.map((inst) => {
-                    const def = getItemDefinition(inst.itemId);
-                    if (!def) return null;
+                    const stats = getEffectiveItemStats(inst);
                     return (
                       <div
                         key={inst.instanceId}
                         className={`rounded border bg-[#090D14] px-3 py-2 flex items-center justify-between gap-2 ${
-                          RARITY_META[def.rarity].borderClass
+                          RARITY_META[inst.rarity].borderClass
                         }`}
                       >
                         <div className="min-w-0">
                           <div
                             className={`text-xs font-semibold truncate ${
-                              RARITY_META[def.rarity].textClass
+                              RARITY_META[inst.rarity].textClass
                             }`}
                           >
-                            {getItemName(lang, def.id)}
+                            {getItemInstanceName(lang, inst)}
                           </div>
                           <div className="text-[11px] text-slate-400">
-                            {getSlotLabel(lang, def.slot)} ·{' '}
-                            {getRarityLabel(lang, def.rarity)} ·{' '}
-                            {t('common.levelShort')}
-                            {def.requiredLevel}
-                            {def.classRestriction
-                              ? ` · ${getClassName(lang, def.classRestriction)}`
-                              : ''}
+                            {getSlotLabel(lang, inst.slot)} ·{' '}
+                            {getRarityLabel(lang, inst.rarity)} · T{inst.tier} ·{' '}
+                            {inst.rollQuality}%
                           </div>
                         </div>
                         <div className="text-right font-mono-nums text-[11px] text-emerald-400 shrink-0">
-                          {STAT_KEYS.filter((k) => (def.statBonuses[k] ?? 0) > 0)
-                            .map(
-                              (k) =>
-                                `+${def.statBonuses[k]} ${getStatShort(lang, k)}`
-                            )
+                          {STAT_KEYS.filter((k) => stats[k] > 0)
+                            .map((k) => `+${stats[k]} ${getStatShort(lang, k)}`)
                             .join(' ')}
                         </div>
                       </div>

@@ -27,8 +27,19 @@ export interface DerivedStats {
   attackPower: number;
   defenseRating: number;
   dodgeChance: number; // 0 to 45 (%)
-  critChance: number; // 5 to 40 (%)
+  critChance: number; // 5 to 65 (%)
   skillPower: number;
+  armorPiercePct: number; // from equipped weapon/item traits (0 to 50)
+  splashPct: number; // splash damage % on basic attacks (0 to 40)
+  spRegenPerTurn: number; // bonus SP regen per turn from item traits
+}
+
+export type StatusEffectType = 'burn' | 'shield_break' | 'slow';
+
+export interface ActiveStatusEffect {
+  type: StatusEffectType;
+  turnsRemaining: number;
+  sourceName?: string;
 }
 
 export type SkillTargetType = 'single_enemy' | 'all_enemies' | 'all_allies';
@@ -38,13 +49,19 @@ export interface SkillDefinition {
   name: string;
   description: string;
   spCost: number;
+  spCostPerLevel: number;
   targetType: SkillTargetType;
   powerMultiplier: number;
+  powerPerLevel: number;
   defensePierce: number; // 0 to 1
   hits: number;
   bonusCrit: number; // percentage points
   shieldRestoreRatio: number; // % of maxShield restored (for support skills)
   hpRestoreRatio: number; // % of maxHp restored (for support skills)
+  appliesStatus?: StatusEffectType;
+  statusDuration?: number;
+  statusChance?: number; // 0 to 1
+  cleansesStatus?: boolean;
 }
 
 export interface MechClassDefinition {
@@ -72,6 +89,7 @@ export interface SectorDefinition {
   difficulty: SectorDifficulty;
   levelOffset: number;
   enemyCount: number;
+  hasBoss: boolean;
   expMultiplier: number;
   creditsMultiplier: number;
   description: string;
@@ -85,32 +103,69 @@ export type EquipmentSlot =
   | 'cpu'
   | 'accessory';
 
-export type ItemRarity = 'common' | 'rare' | 'epic';
+export type ItemRarity = 'common' | 'rare' | 'epic' | 'legendary';
 
-export interface ItemDefinition {
+export interface ItemSpecialTraits {
+  critBonusPct?: number;
+  armorPiercePct?: number;
+  splashPct?: number;
+  spRegenPerTurn?: number;
+  evasionMod?: number; // can be negative on heavy cannons
+}
+
+export interface ItemTemplate {
   id: string;
-  name: string;
+  nameEn: string;
+  nameVi: string;
+  descEn: string;
+  descVi: string;
   slot: EquipmentSlot;
+  tier: number; // 1 to 4
   requiredLevel: number;
   classRestriction: MechClassId | null;
-  rarity: ItemRarity;
-  price: number;
-  statBonuses: Partial<StatBlock>;
-  description: string;
+  basePrice: number;
+  primaryStat: StatKey;
+  primaryRange: [number, number];
+  secondaryStat?: StatKey;
+  secondaryRange?: [number, number];
+  affixPool: StatKey[];
+  specialTraits?: ItemSpecialTraits;
+}
+
+export interface ItemAffix {
+  stat: StatKey;
+  value: number;
+  suffixId: string;
 }
 
 export interface ItemInstance {
   instanceId: string;
-  itemId: string;
+  templateId: string;
+  slot: EquipmentSlot;
+  tier: number;
+  requiredLevel: number;
+  classRestriction: MechClassId | null;
+  rarity: ItemRarity;
+  rolledBaseStats: Partial<StatBlock>;
+  affixes: ItemAffix[];
+  suffixId: string | null;
+  rollQuality: number; // 0 to 100
+  price: number;
   enchantLevel: number; // 0 to 10
+  specialTraits?: ItemSpecialTraits;
 }
 
-export type EquippedItems = Record<EquipmentSlot, ItemInstance | null>;
+/**
+ * Each Gear stores references (instanceId) to items owned in PilotAccount.inventory.
+ * An item instanceId can only be referenced by at most ONE Gear at a time.
+ */
+export type EquippedSlotIds = Record<EquipmentSlot, string | null>;
 
 export interface EquipValidationResult {
   canEquip: boolean;
   missingLevel: number | null;
   requiredClass: MechClassId | null;
+  equippedOnOtherGear: MechClassId | null;
 }
 
 export type EnchantResultCode =
@@ -123,26 +178,37 @@ export interface EnchantAttemptResult {
   attempted: boolean;
   success: boolean;
   code: EnchantResultCode;
-  itemId: string;
+  instanceId: string;
+  templateId: string;
   previousLevel: number;
   newLevel: number;
   creditsSpent: number;
   successRate: number;
 }
 
-export interface PlayerCharacter {
-  name: string;
+export interface GearUnit {
+  classId: MechClassId;
+  owned: boolean;
   level: number;
   exp: number;
-  credits: number;
-  classId: MechClassId;
   unspentPoints: number;
   allocatedPoints: StatBlock;
-  equipped: EquippedItems;
-  inventory: ItemInstance[];
+  equipped: EquippedSlotIds;
+  skillLevels: Record<string, number>; // skillId -> 1..5
   battlesWon: number;
   battlesFought: number;
 }
+
+export interface PilotAccount {
+  name: string;
+  credits: number;
+  inventory: ItemInstance[];
+  gears: Record<MechClassId, GearUnit>;
+  activeGearId: MechClassId;
+  unlockedSectorIds: string[];
+}
+
+export type EnemyArchetype = 'drone' | 'gunship' | 'sniper' | 'repair_ship';
 
 export type CombatSide = 'ally' | 'enemy';
 
@@ -162,7 +228,10 @@ export interface CombatUnit {
   side: CombatSide;
   isPlayer: boolean;
   classId: MechClassId;
+  archetype?: EnemyArchetype;
+  isBoss?: boolean;
   level: number;
+  skillLevel: number;
   stats: StatBlock;
   derived: DerivedStats;
   hp: number;
@@ -170,12 +239,20 @@ export interface CombatUnit {
   sp: number;
   isDefending: boolean;
   alive: boolean;
+  statuses: ActiveStatusEffect[];
   animState: UnitAnimState;
 }
 
 export type ActionType = 'attack' | 'skill' | 'defend';
 
-export type PopupTone = 'damage' | 'crit' | 'shield' | 'heal' | 'evade' | 'buff';
+export type PopupTone =
+  | 'damage'
+  | 'crit'
+  | 'shield'
+  | 'heal'
+  | 'evade'
+  | 'buff'
+  | 'status';
 
 export interface FloatingPopup {
   id: string;
@@ -192,6 +269,7 @@ export type CombatLogTag =
   | 'EVADE'
   | 'SHIELD'
   | 'HEAL'
+  | 'STATUS'
   | 'KO'
   | 'SYSTEM';
 
@@ -201,7 +279,12 @@ export type CombatLogTemplateKey =
   | 'log.healSquad'
   | 'log.evade'
   | 'log.damage'
-  | 'log.destroyed';
+  | 'log.destroyed'
+  | 'log.statusApplied'
+  | 'log.burnTick'
+  | 'log.statusCleansed'
+  | 'log.splashDamage'
+  | 'log.retreat';
 
 export interface CombatLogEntry {
   id: string;
@@ -227,6 +310,8 @@ export interface CombatFxEvent {
 
 export interface BattleSummary {
   outcome: 'victory' | 'defeat';
+  retreated?: boolean;
+  deployedGearId: MechClassId;
   sectorId: string;
   rounds: number;
   expGained: number;
@@ -235,15 +320,19 @@ export interface BattleSummary {
   previousLevel: number;
   newLevel: number;
   statPointsGained: number;
+  battlesToNextLevel: number;
+  unlockedSectorId: string | null;
   enemiesDestroyed: number;
+  totalEnemies: number;
   alliesSurviving: number;
   droppedItems: ItemInstance[];
 }
 
 export interface BattleState {
   sectorId: string;
+  deployedGearId: MechClassId;
   units: CombatUnit[];
-  turnOrder: string[]; // unit IDs sorted by speed
+  turnOrder: string[]; // unit IDs sorted by effective speed
   activeTurnIndex: number;
   round: number;
   selectedTargetId: string | null;
@@ -255,6 +344,15 @@ export interface BattleState {
   summary: BattleSummary | null;
 }
 
-export type BaseTab = 'gear' | 'pilot' | 'skill' | 'shop' | 'map';
+export type BattleSpeed = 1 | 2 | 3 | 5 | 10;
+
+export interface AdminConfig {
+  godMode: boolean;
+  oneHitKills: boolean;
+  alwaysWin: boolean;
+  rewardMultiplier: number;
+}
+
+export type BaseTab = 'gear' | 'garage' | 'skill' | 'shop' | 'map';
 
 export type ScreenState = 'TITLE' | 'HANGAR' | 'SHOP' | 'BATTLE';
