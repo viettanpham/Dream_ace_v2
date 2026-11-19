@@ -3,7 +3,7 @@ import { ShieldAlert, Terminal, X } from 'lucide-react';
 import { EQUIPMENT_SLOTS, RARITY_LIST } from '../data/items';
 import { getClassName, getRarityLabel, getSlotLabel, useI18n } from '../i18n';
 import { useGameStore } from '../store/useGameStore';
-import type { EquipmentSlot, ItemRarity } from '../types/game';
+import type { BattleSize, EquipmentSlot, ItemRarity } from '../types/game';
 
 export function AdminPanel() {
   const { lang, t } = useI18n();
@@ -63,16 +63,16 @@ export function AdminPanel() {
       aria-modal="true"
       aria-label="Admin Control Panel"
     >
-      <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto tactical-scroll rounded-lg border border-amber-500/60 bg-[#0B111C] shadow-2xl">
+      <div className="w-full max-w-3xl max-h-[90dvh] overflow-y-auto tactical-scroll rounded-lg border border-amber-500/60 bg-[#0B111C] shadow-2xl">
         {/* Header */}
-        <div className="sticky top-0 z-10 px-5 py-3.5 border-b border-slate-800 bg-[#090E17] flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <Terminal className="w-5 h-5 text-amber-400" />
-            <div>
-              <h2 className="font-display text-xl font-bold text-slate-100 leading-none">
+        <div className="sticky top-0 z-10 px-4 sm:px-5 py-3 border-b border-slate-800 bg-[#090E17] flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Terminal className="w-5 h-5 text-amber-400 shrink-0" />
+            <div className="min-w-0">
+              <h2 className="font-display text-xl font-bold text-slate-100 leading-none truncate">
                 {t('admin.title')}
               </h2>
-              <p className="text-[11px] text-slate-400 mt-0.5">
+              <p className="text-[11px] text-slate-400 mt-0.5 truncate">
                 {t('admin.subtitle')}
               </p>
             </div>
@@ -81,7 +81,7 @@ export function AdminPanel() {
           <button
             type="button"
             onClick={() => setOpen(false)}
-            className="h-9 w-9 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 flex items-center justify-center text-slate-300 cursor-pointer"
+            className="min-h-[44px] min-w-[44px] rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 flex items-center justify-center text-slate-300 cursor-pointer shrink-0"
           >
             <X className="w-4 h-4" />
           </button>
@@ -465,11 +465,47 @@ export function AdminPanel() {
                     forceWinBattle();
                     setOpen(false);
                   }}
-                  className="h-9 px-3.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold cursor-pointer"
+                  className="min-h-[40px] px-3.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold cursor-pointer"
                 >
                   Instant Win Current Battle
                 </button>
               )}
+            </div>
+
+            {/* Battle Squad Size Override (4v4 / 6v6 / 8v8) */}
+            <div className="pt-2 border-t border-slate-800/80 space-y-2">
+              <div className="text-slate-400 font-medium">
+                {t('admin.battleSizeLabel')}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {(
+                  [
+                    { val: null, label: t('admin.battleSizeDefault') },
+                    { val: 4 as BattleSize, label: '4v4' },
+                    { val: 6 as BattleSize, label: '6v6' },
+                    { val: 8 as BattleSize, label: '8v8' },
+                  ] as Array<{ val: BattleSize | null; label: string }>
+                ).map((opt) => {
+                  const active = adminConfig.battleSizeOverride === opt.val;
+                  return (
+                    <button
+                      key={String(opt.val)}
+                      type="button"
+                      onClick={() => {
+                        adminUpdateConfig({ battleSizeOverride: opt.val });
+                        flash(`Battle size override: ${opt.label}`);
+                      }}
+                      className={`min-h-[40px] px-3.5 rounded border text-xs font-mono-nums font-semibold transition-colors cursor-pointer ${
+                        active
+                          ? 'border-amber-400 bg-amber-500/20 text-amber-200'
+                          : 'border-slate-700 bg-slate-900 text-slate-300 hover:text-slate-100'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </section>
 

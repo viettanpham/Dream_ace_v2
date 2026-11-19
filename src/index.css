@@ -36,10 +36,26 @@
   body,
   #root {
     height: 100%;
+    min-height: 100dvh;
+    max-width: 100%;
+    overflow-x: hidden;
     background-color: #060910;
     color: #e2e8f0;
     font-family: var(--font-sans);
+    -webkit-tap-highlight-color: transparent;
   }
+}
+
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.mb-safe {
+  margin-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .font-display {
@@ -299,8 +315,58 @@
   animation: float-popup 950ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+@keyframes radar-sweep {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes radar-star-drift {
+  0%, 100% { opacity: 0.25; transform: translate(0px, 0px); }
+  50% { opacity: 0.85; transform: translate(3px, -2px); }
+}
+
+@keyframes token-hover {
+  0%, 100% { transform: translate(0px, 0px); }
+  50% { transform: translate(0px, -2.5px); }
+}
+
+@keyframes reticle-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.88; }
+  50% { transform: scale(1.1); opacity: 1; }
+}
+
+@keyframes radar-impact-ring {
+  0% { transform: scale(0.3); opacity: 0.95; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+
 .anim-radar {
   animation: radar-spin 28s linear infinite;
+  transform-origin: center;
+}
+
+.anim-radar-sweep {
+  animation: radar-sweep 11s linear infinite;
+  transform-origin: center;
+}
+
+.anim-radar-star {
+  animation: radar-star-drift 6.5s ease-in-out infinite;
+}
+
+.anim-token-hover {
+  animation: token-hover 3.4s ease-in-out infinite;
+}
+
+.anim-reticle-pulse {
+  animation: reticle-pulse 1.3s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.anim-radar-impact {
+  animation: radar-impact-ring 480ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transform-box: fill-box;
   transform-origin: center;
 }
 
@@ -322,6 +388,11 @@
   .anim-missile,
   .anim-beam,
   .anim-radar,
+  .anim-radar-sweep,
+  .anim-radar-star,
+  .anim-token-hover,
+  .anim-reticle-pulse,
+  .anim-radar-impact,
   .anim-turn-active,
   .anim-turn-arrow {
     animation: none;

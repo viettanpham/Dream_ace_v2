@@ -16,7 +16,9 @@ import {
 } from '../data/skills';
 import type {
   AdminConfig,
+  BattleSize,
   BattleSpeed,
+  BattleViewMode,
   GearUnit,
   ItemInstance,
   Language,
@@ -38,6 +40,7 @@ export interface PersistedCampaignState {
   muted: boolean;
   battleSpeed: BattleSpeed;
   skipAnimations: boolean;
+  battleViewMode: BattleViewMode | null;
   language: Language;
   adminConfig: AdminConfig;
 }
@@ -50,6 +53,7 @@ const VALID_CLASSES = new Set<MechClassId>([
 ]);
 
 const VALID_SPEEDS = new Set<BattleSpeed>([1, 2, 3, 5, 10]);
+const VALID_BATTLE_SIZES = new Set<BattleSize>([4, 6, 8]);
 
 export function createDefaultAdminConfig(): AdminConfig {
   return {
@@ -57,6 +61,7 @@ export function createDefaultAdminConfig(): AdminConfig {
     oneHitKills: false,
     alwaysWin: false,
     rewardMultiplier: BALANCE_CONFIG.rewardMultDefault,
+    battleSizeOverride: null,
   };
 }
 
@@ -83,6 +88,7 @@ export function createFreshCampaignState(
     muted: false,
     battleSpeed: 1,
     skipAnimations: false,
+    battleViewMode: null,
     language: 'vi',
     adminConfig: createDefaultAdminConfig(),
   };
@@ -235,6 +241,10 @@ export function migrateSaveData(
   const rawSpeed = Number(raw.battleSpeed) as BattleSpeed;
   const battleSpeed: BattleSpeed = VALID_SPEEDS.has(rawSpeed) ? rawSpeed : 1;
   const skipAnimations = Boolean(raw.skipAnimations);
+  const battleViewMode: BattleViewMode | null =
+    raw.battleViewMode === 'card' || raw.battleViewMode === 'radar'
+      ? raw.battleViewMode
+      : null;
   const muted = Boolean(raw.muted);
   const hasSaveData = Boolean(raw.hasSaveData);
   const selectedSectorId =
@@ -244,6 +254,7 @@ export function migrateSaveData(
       : SECTORS_CATALOG[0].id;
 
   const rawAdmin = (raw.adminConfig ?? {}) as Partial<AdminConfig>;
+  const rawSizeOverride = Number(rawAdmin.battleSizeOverride) as BattleSize;
   const adminConfig: AdminConfig = {
     godMode: Boolean(rawAdmin.godMode),
     oneHitKills: Boolean(rawAdmin.oneHitKills),
@@ -253,6 +264,9 @@ export function migrateSaveData(
       rawAdmin.rewardMultiplier > 0
         ? rawAdmin.rewardMultiplier
         : BALANCE_CONFIG.rewardMultDefault,
+    battleSizeOverride: VALID_BATTLE_SIZES.has(rawSizeOverride)
+      ? rawSizeOverride
+      : null,
   };
 
   // Case A: v4 / v5 (`pilot` object present)
@@ -389,6 +403,7 @@ export function migrateSaveData(
       muted,
       battleSpeed,
       skipAnimations,
+      battleViewMode,
       language,
       adminConfig,
     };
@@ -506,6 +521,7 @@ export function migrateSaveData(
     muted,
     battleSpeed,
     skipAnimations,
+    battleViewMode,
     language,
     adminConfig,
   };

@@ -233,7 +233,7 @@ export function GarageView() {
               value={pilot.name}
               onChange={(e) => setPilotName(e.target.value)}
               placeholder={t('hangar.callsignPlaceholder')}
-              className="h-9 w-36 px-2.5 rounded border border-slate-700 bg-[#080C14] text-xs font-semibold text-slate-100 focus:outline-none focus:border-amber-400"
+              className="min-h-[44px] sm:min-h-0 sm:h-9 w-36 px-2.5 rounded border border-slate-700 bg-[#080C14] text-sm sm:text-xs font-semibold text-slate-100 focus:outline-none focus:border-amber-400"
             />
           </div>
 
@@ -368,7 +368,7 @@ export function GarageView() {
                   <button
                     type="button"
                     onClick={() => handleSelectGear(cls.id)}
-                    className={`w-full h-10 px-3 rounded text-xs font-semibold transition-colors cursor-pointer ${
+                    className={`w-full min-h-[44px] px-3 rounded-lg text-sm sm:text-xs font-semibold transition-colors cursor-pointer ${
                       isSelected
                         ? 'bg-amber-500/20 border border-amber-400 text-amber-300'
                         : 'bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100'
@@ -383,9 +383,9 @@ export function GarageView() {
                     type="button"
                     disabled={!canAfford}
                     onClick={() => handleBuyGear(cls.id)}
-                    className="w-full h-10 px-3 inline-flex items-center justify-center gap-1.5 rounded bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-slate-950 font-semibold text-xs transition-colors cursor-pointer"
+                    className="w-full min-h-[44px] px-3 inline-flex items-center justify-center gap-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-slate-950 font-semibold text-sm sm:text-xs transition-colors cursor-pointer"
                   >
-                    <ShoppingCart className="w-3.5 h-3.5" />
+                    <ShoppingCart className="w-4 h-4" />
                     <span>
                       {canAfford
                         ? t('garage.buyGear', {
@@ -500,7 +500,7 @@ export function GarageView() {
                         disabled={pendingPts <= 0}
                         onClick={() => adjustPending(key, -1)}
                         aria-label={`-${getStatShort(lang, key)}`}
-                        className="h-10 w-10 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-35 disabled:cursor-not-allowed flex items-center justify-center text-slate-200 transition-colors cursor-pointer"
+                        className="min-h-[44px] min-w-[44px] rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-35 disabled:cursor-not-allowed flex items-center justify-center text-slate-200 transition-colors cursor-pointer"
                       >
                         <Minus className="w-4 h-4" />
                       </button>
@@ -512,7 +512,7 @@ export function GarageView() {
                         disabled={remainingPoints <= 0}
                         onClick={() => adjustPending(key, 1)}
                         aria-label={`+${getStatShort(lang, key)}`}
-                        className="h-10 w-10 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-35 disabled:cursor-not-allowed flex items-center justify-center text-emerald-400 transition-colors cursor-pointer"
+                        className="min-h-[44px] min-w-[44px] rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-35 disabled:cursor-not-allowed flex items-center justify-center text-emerald-400 transition-colors cursor-pointer"
                       >
                         <Plus className="w-4 h-4" />
                       </button>
@@ -565,7 +565,7 @@ export function GarageView() {
                 disabled={spentTotal <= 0}
                 onClick={handleRespec}
                 title={t('hangar.respecTitle')}
-                className="h-10 px-3.5 inline-flex items-center gap-1.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium text-slate-300 transition-colors cursor-pointer"
+                className="min-h-[44px] px-3.5 inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium text-slate-300 transition-colors cursor-pointer"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 <span>{t('hangar.respec')}</span>
@@ -579,7 +579,7 @@ export function GarageView() {
                       soundFx.playClick();
                       setPending({ ...EMPTY_STAT_BLOCK });
                     }}
-                    className="h-10 px-3 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-xs font-medium text-slate-300 cursor-pointer"
+                    className="min-h-[44px] px-3 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-xs font-medium text-slate-300 cursor-pointer"
                   >
                     {t('common.clear')}
                   </button>
@@ -588,7 +588,7 @@ export function GarageView() {
                   type="button"
                   disabled={pendingTotal <= 0}
                   onClick={handleConfirmAllocation}
-                  className="h-10 px-4 inline-flex items-center gap-1.5 rounded bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white text-xs font-semibold transition-colors cursor-pointer"
+                  className="min-h-[44px] px-4 inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white text-xs font-semibold transition-colors cursor-pointer"
                 >
                   <Check className="w-4 h-4" />
                   <span>

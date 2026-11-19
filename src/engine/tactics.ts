@@ -20,6 +20,7 @@ import type {
 import {
   DEBUFF_TYPES,
   getEffectiveUnitSpeed,
+  getValidEnemyTargets,
   hasStatus,
   isUnitStealthed,
 } from './combat';
@@ -665,22 +666,15 @@ export function shouldStopAutoRepeat(
   return { stop: false, reason: null };
 }
 
-function getTargetableEnemies(
-  units: CombatUnit[],
-  actorSide: CombatUnit['side']
-): CombatUnit[] {
-  const alive = units.filter((u) => u.side !== actorSide && u.alive);
-  const visible = alive.filter((u) => !isUnitStealthed(u));
-  return visible.length > 0 ? visible : alive;
-}
-
 function pickEnemyBySelector(
   state: BattleState,
   actor: CombatUnit,
   selector: TacticsTargetSelector,
-  rng: () => number
+  rng: () => number,
+  actionType: ActionType = 'attack',
+  skillId?: string
 ): CombatUnit | null {
-  const enemies = getTargetableEnemies(state.units, actor.side);
+  const enemies = getValidEnemyTargets(state.units, actor, actionType, skillId);
   if (enemies.length === 0) return null;
 
   const byIdTie = (a: CombatUnit, b: CombatUnit) => a.id.localeCompare(b.id);
@@ -788,14 +782,27 @@ function resolveRuleTarget(
         : { targetUnit: null, targetId: null, valid: false };
     }
     // Enemy-targeting skill (single_enemy, multi_enemy, all_enemies)
-    const enemy = pickEnemyBySelector(state, actor, rule.targetSelector, rng);
+    const enemy = pickEnemyBySelector(
+      state,
+      actor,
+      rule.targetSelector,
+      rng,
+      'skill',
+      skillDef.id
+    );
     return enemy
       ? { targetUnit: enemy, targetId: enemy.id, valid: true }
       : { targetUnit: null, targetId: null, valid: false };
   }
 
-  // Basic attack -> must pick an enemy
-  const enemy = pickEnemyBySelector(state, actor, rule.targetSelector, rng);
+  // Basic attack -> must pick a valid enemy (respecting Front/Back row rules)
+  const enemy = pickEnemyBySelector(
+    state,
+    actor,
+    rule.targetSelector,
+    rng,
+    'attack'
+  );
   return enemy
     ? { targetUnit: enemy, targetId: enemy.id, valid: true }
     : { targetUnit: null, targetId: null, valid: false };

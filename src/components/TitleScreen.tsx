@@ -89,32 +89,34 @@ export function TitleScreen() {
       </svg>
 
       {/* Top Controls */}
-      <div className="relative z-10 flex items-center justify-end gap-2.5 px-6 pt-5">
+      <div className="relative z-10 flex items-center justify-end gap-2 px-4 sm:px-6 pt-4 pt-safe">
         <LanguageToggle />
         <button
           type="button"
           onClick={toggleMute}
           aria-label={muted ? t('common.unmuteTitle') : t('common.muteTitle')}
-          className="h-9 px-3.5 inline-flex items-center gap-2 rounded border border-slate-800 bg-[#0E1520]/90 hover:bg-slate-800 text-xs font-medium text-slate-300 transition-colors cursor-pointer"
+          className="min-h-[44px] sm:min-h-0 sm:h-9 px-3.5 inline-flex items-center gap-2 rounded-lg sm:rounded border border-slate-800 bg-[#0E1520]/90 hover:bg-slate-800 text-xs font-medium text-slate-300 transition-colors cursor-pointer"
         >
           {muted ? (
             <VolumeX className="w-4 h-4" />
           ) : (
             <Volume2 className="w-4 h-4" />
           )}
-          <span>{muted ? t('common.audioMuted') : t('common.audioOn')}</span>
+          <span className="hidden sm:inline">
+            {muted ? t('common.audioMuted') : t('common.audioOn')}
+          </span>
         </button>
       </div>
 
       {/* Center Composition */}
-      <main className="relative z-10 mx-auto w-full max-w-6xl px-6 sm:px-10 py-6 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+      <main className="relative z-10 mx-auto w-full max-w-6xl px-4 sm:px-10 py-5 grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-center">
         {/* Left: Title & Pilot Creation / Continue */}
         <div className="lg:col-span-7 space-y-5">
           <div className="space-y-2.5">
             <div className="flex items-center gap-3 text-xs font-medium tracking-[0.18em] text-amber-400 uppercase">
               <span>{t('app.subtitle')}</span>
             </div>
-            <h1 className="font-display text-6xl sm:text-7xl font-bold tracking-tight text-slate-50 leading-[0.94]">
+            <h1 className="font-display text-5xl sm:text-7xl font-bold tracking-tight text-slate-50 leading-[0.94]">
               {t('app.title')}
             </h1>
             <p className="max-w-xl text-sm sm:text-base text-slate-300 leading-relaxed">
@@ -216,7 +218,7 @@ export function TitleScreen() {
                   value={newPilotName}
                   onChange={(e) => setNewPilotName(e.target.value)}
                   placeholder={t('hangar.callsignPlaceholder')}
-                  className="w-full sm:max-w-xs h-10 px-3 rounded border border-slate-700 bg-[#080C14] text-sm font-semibold text-slate-100 focus:outline-none focus:border-amber-400"
+                  className="w-full sm:max-w-xs min-h-[44px] px-3 rounded border border-slate-700 bg-[#080C14] text-sm font-semibold text-slate-100 focus:outline-none focus:border-amber-400"
                 />
               </div>
 
@@ -228,7 +230,7 @@ export function TitleScreen() {
                       key={cls.id}
                       type="button"
                       onClick={() => setStarterClass(cls.id)}
-                      className={`p-2.5 rounded border text-left transition-colors cursor-pointer space-y-1 ${
+                      className={`min-h-[56px] p-2.5 rounded-lg border text-left transition-colors cursor-pointer space-y-1 ${
                         selected
                           ? 'border-amber-400 bg-amber-500/15'
                           : 'border-slate-800 bg-[#080C14] hover:border-slate-700'
@@ -251,14 +253,14 @@ export function TitleScreen() {
                 })}
               </div>
 
-              <p className="text-xs text-slate-400">
+              <p className="text-sm sm:text-xs text-slate-400">
                 {getClassDesc(lang, starterClass)}
               </p>
 
               <button
                 type="button"
                 onClick={() => startCampaign(newPilotName, starterClass)}
-                className="h-11 px-8 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-semibold text-sm tracking-wide rounded transition-colors cursor-pointer whitespace-nowrap"
+                className="w-full sm:w-auto min-h-[48px] px-8 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-bold text-sm tracking-wide rounded-lg transition-colors cursor-pointer whitespace-nowrap"
               >
                 {t('title.start')}
               </button>
@@ -293,8 +295,8 @@ export function TitleScreen() {
       </main>
 
       {/* Bottom Controls Hint */}
-      <footer className="relative z-10 px-6 pb-5 flex flex-wrap items-center justify-between gap-4 text-xs text-slate-400">
-        <span>{t('app.controlsHint')}</span>
+      <footer className="relative z-10 px-4 sm:px-6 pb-5 pb-safe flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
+        <span className="hidden sm:inline">{t('app.controlsHint')}</span>
         <span className="text-slate-500">{t('app.saveHint')}</span>
       </footer>
     </div>

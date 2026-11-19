@@ -21,6 +21,10 @@ export const ALLY_PILOT_POOL: PilotNamePool = {
     'Freya',
     'Juno',
     'Bram',
+    'Eira',
+    'Torin',
+    'Zara',
+    'Kael',
   ],
   callsigns: [
     'Valkyrie-2',
@@ -35,8 +39,21 @@ export const ALLY_PILOT_POOL: PilotNamePool = {
     'Aegis-2',
     'Falcon-4',
     'Starwing-5',
+    'Nova-6',
+    'Vanguard-8',
+    'Raptor-7',
+    'Comet-9',
   ],
 };
+
+export const WINGMAN_CHAT_KEYS = [
+  'chat.engaging',
+  'chat.flankCover',
+  'chat.targetLocked',
+  'chat.shieldsHolding',
+  'chat.pushingLine',
+  'chat.goodHit',
+] as const;
 
 export interface EnemyArchetypeDefinition {
   id: EnemyArchetype;

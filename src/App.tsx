@@ -31,7 +31,7 @@ export default function App() {
 
   if (screen === 'TITLE') {
     return (
-      <div className="h-screen w-screen overflow-hidden">
+      <div className="h-[100dvh] w-full overflow-hidden">
         <TitleScreen />
         <AdminPanel />
       </div>
@@ -39,7 +39,7 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen w-screen overflow-hidden flex flex-col bg-[#080C12] text-slate-100">
+    <div className="h-[100dvh] w-full overflow-hidden flex flex-col bg-[#080C12] text-slate-100">
       <TopHud />
       {(screen === 'HANGAR' || screen === 'SHOP') && <HangarScreen />}
       {screen === 'BATTLE' && <BattleScreen />}

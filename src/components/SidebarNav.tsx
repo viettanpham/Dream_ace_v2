@@ -38,56 +38,97 @@ export function SidebarNav() {
   const unspentPoints = activeGear.unspentPoints;
 
   return (
-    <aside className="shrink-0 border-b md:border-b-0 md:border-r border-slate-800/90 bg-[#090D15]/95 md:w-44 flex md:flex-col justify-between gap-2 p-2 md:p-3 overflow-x-auto md:overflow-visible">
-      <nav
-        className="flex md:flex-col gap-1.5 min-w-max md:min-w-0"
-        aria-label="Base navigation"
-      >
-        {SIDEBAR_ITEMS.map((item) => {
-          const Icon = item.icon;
-          const isActive = activeTab === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setActiveTab(item.id)}
-              aria-current={isActive ? 'page' : undefined}
-              className={`h-10 md:h-11 px-3 rounded border text-left text-sm font-medium transition-colors cursor-pointer flex items-center justify-between gap-2 whitespace-nowrap ${
-                isActive
-                  ? 'bg-slate-800/95 border-amber-400/75 text-slate-50 font-semibold'
-                  : 'bg-transparent border-transparent text-slate-400 hover:bg-slate-900/80 hover:text-slate-100'
-              }`}
-            >
-              <span className="inline-flex items-center gap-2.5">
-                <Icon
-                  className={`w-4 h-4 shrink-0 ${
-                    isActive ? 'text-amber-400' : 'text-slate-500'
-                  }`}
-                />
-                <span>{t(item.labelKey)}</span>
-              </span>
-
-              {item.id === 'garage' && unspentPoints > 0 && (
-                <span className="font-mono-nums text-[11px] font-bold text-emerald-400">
-                  +{unspentPoints}
+    <>
+      {/* Desktop / Tablet Left Sidebar (>= 768px) */}
+      <aside className="hidden md:flex shrink-0 border-r border-slate-800/90 bg-[#090D15]/95 w-44 flex-col justify-between gap-2 p-3">
+        <nav className="flex flex-col gap-1.5" aria-label="Base navigation">
+          {SIDEBAR_ITEMS.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveTab(item.id)}
+                aria-current={isActive ? 'page' : undefined}
+                className={`h-11 px-3 rounded border text-left text-sm font-medium transition-colors cursor-pointer flex items-center justify-between gap-2 whitespace-nowrap ${
+                  isActive
+                    ? 'bg-slate-800/95 border-amber-400/75 text-slate-50 font-semibold'
+                    : 'bg-transparent border-transparent text-slate-400 hover:bg-slate-900/80 hover:text-slate-100'
+                }`}
+              >
+                <span className="inline-flex items-center gap-2.5">
+                  <Icon
+                    className={`w-4 h-4 shrink-0 ${
+                      isActive ? 'text-amber-400' : 'text-slate-500'
+                    }`}
+                  />
+                  <span>{t(item.labelKey)}</span>
                 </span>
-              )}
-            </button>
-          );
-        })}
-      </nav>
 
-      {/* Quick Sortie Launch CTA */}
-      <div className="shrink-0 md:pt-3 md:border-t md:border-slate-800/80 flex items-center">
-        <button
-          type="button"
-          onClick={() => startBattle()}
-          className="h-10 md:h-11 w-full px-3.5 inline-flex items-center justify-center gap-2 rounded bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-semibold text-xs tracking-wide transition-colors cursor-pointer whitespace-nowrap"
-        >
-          <Rocket className="w-4 h-4 shrink-0" />
-          <span>{t('nav.deploy')}</span>
-        </button>
-      </div>
-    </aside>
+                {item.id === 'garage' && unspentPoints > 0 && (
+                  <span className="font-mono-nums text-[11px] font-bold text-emerald-400">
+                    +{unspentPoints}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Quick Sortie Launch CTA */}
+        <div className="shrink-0 pt-3 border-t border-slate-800/80 flex items-center">
+          <button
+            type="button"
+            onClick={() => startBattle()}
+            className="h-11 w-full px-3.5 inline-flex items-center justify-center gap-2 rounded bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-semibold text-xs tracking-wide transition-colors cursor-pointer whitespace-nowrap"
+          >
+            <Rocket className="w-4 h-4 shrink-0" />
+            <span>{t('nav.deploy')}</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* Mobile Fixed Bottom Tab Bar (< 768px) */}
+      <nav
+        aria-label="Mobile navigation"
+        className="md:hidden fixed bottom-0 inset-x-0 z-30 border-t border-slate-800/95 bg-[#090E18]/98 backdrop-blur-md pb-safe"
+      >
+        <div className="grid grid-cols-5">
+          {SIDEBAR_ITEMS.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveTab(item.id)}
+                aria-current={isActive ? 'page' : undefined}
+                className={`relative min-h-[56px] py-1.5 px-1 flex flex-col items-center justify-center gap-0.5 transition-colors cursor-pointer ${
+                  isActive
+                    ? 'text-amber-400 bg-amber-500/10'
+                    : 'text-slate-400 active:bg-slate-800/70'
+                }`}
+              >
+                {isActive && (
+                  <span className="absolute top-0 inset-x-2 h-0.5 bg-amber-400 rounded-b" />
+                )}
+                <div className="relative">
+                  <Icon className="w-5 h-5" />
+                  {item.id === 'garage' && unspentPoints > 0 && (
+                    <span className="absolute -top-1.5 -right-3 px-1 min-w-[16px] h-4 rounded-full bg-emerald-500 text-slate-950 font-mono-nums text-[10px] font-bold flex items-center justify-center">
+                      {unspentPoints}
+                    </span>
+                  )}
+                </div>
+                <span className="text-[11px] font-semibold leading-tight truncate max-w-full">
+                  {t(item.labelKey)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+    </>
   );
 }

@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import {
   ArrowUpCircle,
   Check,
+  ChevronDown,
+  ChevronUp,
   Cpu,
   Crosshair,
   Flame,
@@ -59,6 +61,7 @@ import type {
   StatBlock,
 } from '../types/game';
 import { soundFx } from '../utils/sound';
+import { BottomSheet } from './BottomSheet';
 import { FighterSvg } from './FighterSvg';
 
 type GearSelection =
@@ -103,6 +106,8 @@ export function GearView() {
 
   const [slotFilter, setSlotFilter] = useState<EquipmentSlot | 'all'>('all');
   const [selection, setSelection] = useState<GearSelection>(null);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const [mobileStatsExpanded, setMobileStatsExpanded] = useState(false);
   const [confirmingUnequipSlot, setConfirmingUnequipSlot] =
     useState<EquipmentSlot | null>(null);
   const [enchantFeedback, setEnchantFeedback] =
@@ -126,7 +131,6 @@ export function GearView() {
   const selectedSlotInstance =
     selection?.kind === 'slot' ? equippedMap[selection.slot] : null;
 
-  // Build simulated GearUnit for live +/- comparison
   const previewGear = useMemo(() => {
     if (selectedInventoryInstance) {
       const equippedOwner = getItemEquippedByGear(
@@ -264,8 +268,10 @@ export function GearView() {
     setConfirmingUnequipSlot(null);
     if (equippedMap[slot]) {
       setSelection({ kind: 'slot', slot });
+      setMobileDetailOpen(true);
     } else {
       setSelection(null);
+      setMobileDetailOpen(false);
       setSlotFilter(slot);
     }
   };
@@ -274,11 +280,14 @@ export function GearView() {
     soundFx.playClick();
     setEnchantFeedback(null);
     setConfirmingUnequipSlot(null);
-    setSelection((prev) =>
-      prev?.kind === 'inventory' && prev.instanceId === instanceId
-        ? null
-        : { kind: 'inventory', instanceId }
-    );
+    setSelection((prev) => {
+      const same = prev?.kind === 'inventory' && prev.instanceId === instanceId;
+      if (same && window.innerWidth >= 1024) {
+        return null;
+      }
+      return { kind: 'inventory', instanceId };
+    });
+    setMobileDetailOpen(true);
   };
 
   const handleConfirmEquip = () => {
@@ -293,6 +302,7 @@ export function GearView() {
     unequipSlot(slot);
     setConfirmingUnequipSlot(null);
     setSelection(null);
+    setMobileDetailOpen(false);
     setEnchantFeedback(null);
   };
 
@@ -391,97 +401,327 @@ export function GearView() {
       ? getEnchantMetadata(selectedSlotInstance)
       : null;
 
-  return (
-    <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 space-y-4">
-      {/* ==================== TOP ROW: 3 COLUMNS (Slots | Ship Hover+Glow | Stats) ==================== */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
-        {/* COL 1 (4 cols): 6 Equipment Slots Stacked Vertically */}
-        <section className="lg:col-span-4 rounded-lg border border-slate-800/90 bg-[#0C121D]/95 p-3.5 flex flex-col justify-between gap-2">
-          <div className="flex items-center justify-between gap-2 px-0.5">
-            <h2 className="font-display text-lg font-bold tracking-wide text-slate-100">
-              {t('gear.slotsHeading')}
-            </h2>
-            <span className="text-[11px] font-mono-nums text-slate-400">
-              {EQUIPMENT_SLOTS.filter((s) => Boolean(equippedMap[s])).length}/6
-            </span>
+  const renderDetailContent = () => {
+    if (!activeDetailInstance || !activeDetailStats) return null;
+    return (
+      <div className="flex-1 flex flex-col justify-between gap-3">
+        <div className="space-y-3">
+          {/* Item Header */}
+          <div>
+            <div className="flex items-baseline justify-between gap-2">
+              <h3
+                className={`font-display text-xl font-bold leading-tight ${
+                  RARITY_META[activeDetailInstance.rarity].textClass
+                }`}
+              >
+                {getItemInstanceName(lang, activeDetailInstance, true)}
+              </h3>
+              <span
+                className={`font-mono-nums text-xs font-semibold shrink-0 ${
+                  activeDetailInstance.rollQuality >= 80
+                    ? 'text-amber-400'
+                    : activeDetailInstance.rollQuality >= 50
+                    ? 'text-emerald-400'
+                    : 'text-slate-400'
+                }`}
+              >
+                {t('common.quality', {
+                  pct: activeDetailInstance.rollQuality,
+                })}
+              </span>
+            </div>
+            <div className="text-xs sm:text-xs text-slate-400 mt-0.5">
+              {getSlotLabel(lang, activeDetailInstance.slot)} ·{' '}
+              {getRarityLabel(lang, activeDetailInstance.rarity)} ·{' '}
+              {t('common.tier', { tier: activeDetailInstance.tier })} ·{' '}
+              {t('common.levelShort')}
+              {activeDetailInstance.requiredLevel}
+              {' · '}
+              {activeDetailInstance.classRestriction
+                ? t('common.classOnly', {
+                    className: getClassName(
+                      lang,
+                      activeDetailInstance.classRestriction
+                    ),
+                  })
+                : t('common.allClasses')}
+            </div>
           </div>
 
-          <div className="space-y-1.5 flex-1 flex flex-col justify-between">
-            {EQUIPMENT_SLOTS.map((slot) => {
-              const slotMeta = EQUIPMENT_SLOT_META[slot];
-              const inst = equippedMap[slot];
-              const isSelected =
-                selection?.kind === 'slot' && selection.slot === slot;
-              const isTargetOfPreview =
-                selectedInventoryInstance &&
-                selectedInventoryInstance.slot === slot &&
-                getItemEquippedByGear(
-                  pilot.gears,
-                  selectedInventoryInstance.instanceId
-                ) !== activeGear.classId;
-              const isUnequipping = confirmingUnequipSlot === slot;
+          <p className="text-sm lg:text-xs text-slate-300 leading-relaxed">
+            {getItemInstanceDesc(lang, activeDetailInstance)}
+          </p>
 
-              return (
+          {/* Total Effective Stats + Affixes + Traits */}
+          <div className="rounded border border-slate-800/80 bg-[#080C14] p-3 space-y-2">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm lg:text-xs font-mono-nums text-slate-100 font-semibold">
+              {STAT_KEYS.filter((k) => activeDetailStats[k] > 0).map((k) => (
+                <span key={k}>
+                  +{activeDetailStats[k]} {getStatShort(lang, k)}
+                </span>
+              ))}
+            </div>
+
+            {activeDetailInstance.affixes.length > 0 && (
+              <div className="text-xs text-sky-300/90 flex flex-wrap gap-x-2.5 gap-y-0.5 pt-1.5 border-t border-slate-800/80">
+                <span className="text-slate-500">
+                  {t('gear.affixesHeading')}:
+                </span>
+                {activeDetailInstance.affixes.map((af, idx) => (
+                  <span
+                    key={`${af.suffixId}_${idx}`}
+                    className="font-mono-nums"
+                  >
+                    +{af.value} {getStatShort(lang, af.stat)}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {formatItemTraitsList(lang, activeDetailInstance).length > 0 && (
+              <div className="text-xs text-amber-300 flex flex-wrap gap-x-2.5 gap-y-0.5 pt-1.5 border-t border-slate-800/80">
+                {formatItemTraitsList(lang, activeDetailInstance).map(
+                  (tr, idx) => (
+                    <span key={idx}>{tr}</span>
+                  )
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Live +/- Comparison Block */}
+          {isPreviewActive && (
+            <div className="rounded border border-slate-800 bg-[#080C14] p-3 space-y-1.5">
+              <div className="text-xs font-semibold text-amber-300">
+                {t('gear.comparisonHeading')}
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm lg:text-xs font-mono-nums">
+                {STAT_KEYS.filter((k) => statDeltas[k] !== 0).length > 0 ? (
+                  STAT_KEYS.filter((k) => statDeltas[k] !== 0).map((k) => {
+                    const delta = statDeltas[k];
+                    return (
+                      <span
+                        key={k}
+                        className={
+                          delta > 0
+                            ? 'text-emerald-400 font-semibold'
+                            : 'text-red-400 font-semibold'
+                        }
+                      >
+                        {getStatShort(lang, k)}{' '}
+                        {delta > 0 ? `+${delta}` : delta}
+                      </span>
+                    );
+                  })
+                ) : (
+                  <span className="text-slate-500">{t('gear.noStatDiff')}</span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Cannot-Equip Inline Warning */}
+          {activeValidation && !activeValidation.canEquip && (
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded px-3 py-2">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <ShieldAlert className="w-4 h-4 shrink-0" />
+                <span>
+                  {t('equip.cannotEquip', {
+                    reason:
+                      formatEquipValidationReason(lang, activeValidation) ?? '',
+                  })}
+                </span>
+              </div>
+              {activeValidation.equippedOnOtherGear && (
                 <button
-                  key={slot}
                   type="button"
-                  onClick={() => handleSelectSlot(slot)}
-                  className={`w-full min-h-[48px] px-3 py-1.5 rounded border text-left transition-colors cursor-pointer flex items-center justify-between gap-2.5 ${
-                    isUnequipping
-                      ? 'border-red-400/80 bg-red-500/10'
-                      : isSelected
-                      ? 'border-sky-400 bg-sky-500/15'
-                      : isTargetOfPreview
-                      ? 'border-amber-400/80 bg-amber-500/10'
-                      : 'border-slate-800/90 bg-[#080C14] hover:border-slate-700'
+                  onClick={() =>
+                    unequipInstanceEverywhere(activeDetailInstance.instanceId)
+                  }
+                  className="shrink-0 min-h-[36px] px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-semibold cursor-pointer"
+                >
+                  {t('gear.unequipFromOther', {
+                    gear: getClassName(
+                      lang,
+                      activeValidation.equippedOnOtherGear
+                    ),
+                  })}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Inline Enchant Section (when inspecting an Equipped Slot) */}
+          {selection?.kind === 'slot' && activeEnchantMeta && (
+            <div className="rounded border border-sky-500/35 bg-[#091322] p-3 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="font-semibold text-sky-300">
+                  {activeEnchantMeta.isMax
+                    ? t('equip.enchantMaxReached')
+                    : `+${activeEnchantMeta.currentLevel} → +${activeEnchantMeta.nextLevel} (+8%/lv)`}
+                </span>
+                {!activeEnchantMeta.isMax && (
+                  <span className="font-mono-nums text-slate-300">
+                    <span
+                      className={
+                        activeEnchantMeta.successRate >= 70
+                          ? 'text-emerald-400 font-semibold'
+                          : activeEnchantMeta.successRate >= 45
+                          ? 'text-amber-400 font-semibold'
+                          : 'text-red-400 font-semibold'
+                      }
+                    >
+                      {activeEnchantMeta.successRate}%
+                    </span>
+                    {' · '}
+                    <span>{activeEnchantMeta.cost.toLocaleString()} CR</span>
+                  </span>
+                )}
+              </div>
+
+              {!activeEnchantMeta.isMax && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-mono-nums text-slate-300">
+                  {STAT_KEYS.filter(
+                    (k) => activeEnchantMeta.currentStats[k] > 0
+                  ).map((k) => (
+                    <span key={k}>
+                      {getStatShort(lang, k)} +{activeEnchantMeta.currentStats[k]}{' '}
+                      <span className="text-emerald-400">
+                        → +{activeEnchantMeta.nextStats[k]}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {enchantFeedback && (
+                <div
+                  className={`text-xs px-2.5 py-2 rounded border ${
+                    enchantFeedback.success
+                      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                      : 'border-red-500/40 bg-red-500/10 text-red-300'
                   }`}
                 >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span
-                      className={`h-8 w-8 rounded border flex items-center justify-center shrink-0 ${
-                        inst
-                          ? `${RARITY_META[inst.rarity].borderClass} bg-slate-900 ${RARITY_META[inst.rarity].textClass}`
-                          : 'border-slate-800 bg-slate-950 text-slate-600'
-                      }`}
-                    >
-                      <SlotIcon slot={slot} className="w-4 h-4" />
-                    </span>
+                  {renderEnchantMessage(enchantFeedback)}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 text-[11px] text-slate-400 leading-none">
-                        <span>{getSlotLabel(lang, slot)}</span>
-                        {slotMeta.classLocked && (
-                          <Lock className="w-2.5 h-2.5 text-slate-500" />
-                        )}
-                      </div>
-                      <div
-                        className={`mt-1 text-xs font-semibold truncate ${
-                          inst ? RARITY_META[inst.rarity].textClass : 'text-slate-600'
-                        }`}
-                      >
-                        {inst ? getItemInstanceName(lang, inst) : '—'}
-                      </div>
-                    </div>
-                  </div>
-
-                  {inst && (
-                    <div className="flex items-center gap-1.5 shrink-0 font-mono-nums text-[11px]">
-                      <span className="text-slate-500">{inst.rollQuality}%</span>
-                      {inst.enchantLevel > 0 && (
-                        <span className="font-bold text-amber-400">
-                          +{inst.enchantLevel}
-                        </span>
-                      )}
-                    </div>
-                  )}
+        {/* Action Buttons (>= 44px height) */}
+        <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-800/80">
+          {selection?.kind === 'inventory' &&
+            activeDetailOwnerGear !== activeGear.classId && (
+              <>
+                <button
+                  type="button"
+                  disabled={!activeValidation?.canEquip}
+                  onClick={handleConfirmEquip}
+                  className="flex-1 min-h-[44px] px-4 inline-flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-semibold text-sm lg:text-xs transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>
+                    {t('gear.confirmEquip', {
+                      gear: getClassName(lang, activeGear.classId),
+                    })}
+                  </span>
                 </button>
-              );
-            })}
-          </div>
-        </section>
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundFx.playClick();
+                    setSelection(null);
+                    setMobileDetailOpen(false);
+                  }}
+                  className="min-h-[44px] px-4 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 text-sm lg:text-xs font-medium transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  {t('common.cancel')}
+                </button>
+              </>
+            )}
 
-        {/* COL 2 (5 cols): Hovering Space Fighter Ship + Glow + Owned Gears Quick Selector */}
-        <section className="lg:col-span-5 rounded-lg border border-slate-800/90 bg-[#0C121D]/95 p-4 flex flex-col justify-between items-center relative overflow-hidden">
+          {selection?.kind === 'inventory' &&
+            activeDetailOwnerGear === activeGear.classId && (
+              <button
+                type="button"
+                onClick={() =>
+                  setSelection({
+                    kind: 'slot',
+                    slot: activeDetailInstance.slot,
+                  })
+                }
+                className="flex-1 min-h-[44px] px-4 rounded-lg border border-sky-500/50 bg-sky-500/15 hover:bg-sky-500/25 text-sky-200 font-semibold text-sm lg:text-xs transition-colors cursor-pointer"
+              >
+                {t('gear.currentlyEquipped')} · Enchant / Unequip
+              </button>
+            )}
+
+          {selection?.kind === 'slot' && activeEnchantMeta && (
+            <>
+              {!activeEnchantMeta.isMax && (
+                <button
+                  type="button"
+                  disabled={pilot.credits < activeEnchantMeta.cost}
+                  onClick={() => handleEnchant(selection.slot)}
+                  className="flex-1 min-h-[44px] px-3.5 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-slate-950 font-semibold text-sm lg:text-xs transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  {pilot.credits < activeEnchantMeta.cost
+                    ? t('equip.needCredits', {
+                        cost: activeEnchantMeta.cost.toLocaleString(),
+                      })
+                    : t('equip.enchantAction', {
+                        level: activeEnchantMeta.nextLevel,
+                        cost: activeEnchantMeta.cost.toLocaleString(),
+                      })}
+                </button>
+              )}
+
+              {confirmingUnequipSlot === selection.slot ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => handleConfirmUnequip(selection.slot)}
+                    className="min-h-[44px] px-4 rounded-lg bg-red-600 hover:bg-red-500 text-white font-semibold text-sm lg:text-xs transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    {t('gear.confirmUnequip')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      soundFx.playClick();
+                      setConfirmingUnequipSlot(null);
+                    }}
+                    className="min-h-[44px] px-3.5 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 text-sm lg:text-xs font-medium cursor-pointer whitespace-nowrap"
+                  >
+                    {t('common.cancel')}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundFx.playClick();
+                    setConfirmingUnequipSlot(selection.slot);
+                  }}
+                  className="min-h-[44px] px-4 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-sm lg:text-xs font-medium transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  {t('gear.previewUnequip')}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-5 space-y-3.5 sm:space-y-4">
+      {/* ==================== TOP ROW: Mobile (Ship+KeyStats -> 3x2 Slots) / Desktop (Slots | Ship | Stats) ==================== */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 sm:gap-4 items-stretch">
+        {/* COL 2 on Desktop / FIRST on Mobile: Hovering Space Fighter + Key Stats + Collapsible Full Stats */}
+        <section className="order-1 lg:order-2 lg:col-span-5 rounded-lg border border-slate-800/90 bg-[#0C121D]/95 p-3.5 sm:p-4 flex flex-col justify-between items-center relative overflow-hidden gap-3">
           <svg
             viewBox="0 0 360 280"
             className="pointer-events-none absolute inset-0 w-full h-full opacity-25"
@@ -538,7 +778,7 @@ export function GearView() {
                 <button
                   type="button"
                   onClick={() => setActiveTab('garage')}
-                  className="text-[11px] font-mono-nums font-semibold text-emerald-400 hover:text-emerald-300 cursor-pointer whitespace-nowrap"
+                  className="text-xs font-mono-nums font-semibold text-emerald-400 hover:text-emerald-300 cursor-pointer whitespace-nowrap"
                 >
                   {t('gear.allocateHint', { count: activeGear.unspentPoints })}
                 </button>
@@ -546,20 +786,104 @@ export function GearView() {
             </div>
           </div>
 
-          {/* Hovering Space Fighter */}
-          <div className="relative z-10 py-3 flex items-center justify-center">
+          {/* Mobile Compact Showcase: Ship Left + Key Stats Right */}
+          <div className="relative z-10 w-full flex items-center justify-center lg:py-3 gap-3">
             <FighterSvg
               classId={activeGear.classId}
               side="ally"
               facing="right"
               size="lg"
               heroHover
-              className="w-48 h-48 sm:w-52 sm:h-52"
+              className="w-32 h-32 sm:w-40 sm:h-40 lg:w-52 lg:h-52 shrink-0"
             />
+
+            {/* Key stats strip shown only on < lg */}
+            <div className="lg:hidden flex-1 min-w-0 grid grid-cols-2 gap-1.5 font-mono-nums">
+              <div className="rounded border border-slate-800 bg-[#080C14]/90 px-2 py-1.5">
+                <div className="text-[11px] text-slate-400">HP</div>
+                <div className="text-sm font-bold text-emerald-400">
+                  {currentDerived.maxHp}
+                </div>
+              </div>
+              <div className="rounded border border-slate-800 bg-[#080C14]/90 px-2 py-1.5">
+                <div className="text-[11px] text-slate-400">SHD</div>
+                <div className="text-sm font-bold text-sky-400">
+                  {currentDerived.maxShield}
+                </div>
+              </div>
+              <div className="rounded border border-slate-800 bg-[#080C14]/90 px-2 py-1.5">
+                <div className="text-[11px] text-slate-400">ATK</div>
+                <div className="text-sm font-bold text-slate-100">
+                  {currentStats.attack}
+                </div>
+              </div>
+              <div className="rounded border border-slate-800 bg-[#080C14]/90 px-2 py-1.5">
+                <div className="text-[11px] text-slate-400">SPD</div>
+                <div className="text-sm font-bold text-amber-300">
+                  {currentDerived.speed}
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* Owned Gears Selector (only owned Gears; locked Gears are bought in Garage) */}
-          <div className="relative z-10 w-full flex items-center justify-between gap-2">
+          {/* Mobile Collapsible Full Stats Toggle (< lg) */}
+          <div className="lg:hidden relative z-10 w-full space-y-2">
+            <button
+              type="button"
+              onClick={() => setMobileStatsExpanded((v) => !v)}
+              className="w-full min-h-[44px] px-3 rounded-lg border border-slate-800 bg-[#080C14]/90 text-slate-200 text-sm font-semibold flex items-center justify-between cursor-pointer"
+            >
+              <span>
+                {mobileStatsExpanded
+                  ? t('mobile.hideStats')
+                  : t('mobile.fullStats')}
+              </span>
+              {mobileStatsExpanded ? (
+                <ChevronUp className="w-4 h-4 text-amber-400" />
+              ) : (
+                <ChevronDown className="w-4 h-4 text-slate-400" />
+              )}
+            </button>
+
+            {mobileStatsExpanded && (
+              <div className="rounded-lg border border-slate-800 bg-[#080C14]/95 p-3 space-y-2.5">
+                <div className="grid grid-cols-3 gap-2 font-mono-nums">
+                  {STAT_KEYS.map((key) => (
+                    <div
+                      key={key}
+                      className="rounded border border-slate-800/80 bg-slate-950/70 px-2 py-1.5 flex items-center justify-between text-xs"
+                    >
+                      <span className="text-slate-400">
+                        {getStatShort(lang, key)}
+                      </span>
+                      <span className="font-bold text-slate-100">
+                        {currentStats[key]}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-3 gap-2 font-mono-nums">
+                  {derivedMetrics.map((m) => (
+                    <div
+                      key={m.key}
+                      className="rounded border border-slate-800/80 bg-slate-950/70 px-2 py-1.5"
+                    >
+                      <div className="text-[10px] text-slate-400 truncate">
+                        {m.label}
+                      </div>
+                      <div className={`text-xs font-bold ${m.color}`}>
+                        {m.cur}
+                        {m.suffix ?? ''}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Owned Gears Selector */}
+          <div className="relative z-10 w-full flex items-center justify-between gap-2 flex-wrap">
             <div className="flex items-center gap-1.5 flex-wrap">
               {ownedGears.map((cls) => {
                 const g = pilot.gears[cls.id];
@@ -570,18 +894,19 @@ export function GearView() {
                     type="button"
                     onClick={() => {
                       setSelection(null);
+                      setMobileDetailOpen(false);
                       setConfirmingUnequipSlot(null);
                       setEnchantFeedback(null);
                       selectActiveGear(cls.id);
                     }}
-                    className={`h-8 px-2.5 rounded border text-xs font-display font-semibold transition-colors cursor-pointer ${
+                    className={`min-h-[44px] lg:min-h-0 lg:h-8 px-3 lg:px-2.5 rounded border text-xs font-display font-semibold transition-colors cursor-pointer ${
                       isSelected
                         ? 'bg-slate-800 border-amber-400/80 text-slate-50'
                         : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
                     }`}
                   >
                     {getClassName(lang, cls.id)}{' '}
-                    <span className="font-mono-nums text-[10px] opacity-80">
+                    <span className="font-mono-nums text-[11px] opacity-80">
                       Lv.{g.level}
                     </span>
                   </button>
@@ -593,7 +918,7 @@ export function GearView() {
               <button
                 type="button"
                 onClick={() => setActiveTab('garage')}
-                className="text-[11px] font-medium text-amber-400 hover:text-amber-300 cursor-pointer whitespace-nowrap"
+                className="min-h-[44px] lg:min-h-0 px-2 text-xs font-medium text-amber-400 hover:text-amber-300 cursor-pointer whitespace-nowrap"
               >
                 + Garage ({ownedGears.length}/4)
               </button>
@@ -601,8 +926,111 @@ export function GearView() {
           </div>
         </section>
 
-        {/* COL 3 (3 cols): Live Combat Stats Readout with +/- Preview */}
-        <section className="lg:col-span-3 rounded-lg border border-slate-800/90 bg-[#0C121D]/95 p-3.5 flex flex-col justify-between gap-3">
+        {/* COL 1 on Desktop / SECOND on Mobile: 6 Equipment Slots (3x2 Square Tiles on Phone, Vertical Stack on Desktop) */}
+        <section className="order-2 lg:order-1 lg:col-span-4 rounded-lg border border-slate-800/90 bg-[#0C121D]/95 p-3.5 flex flex-col justify-between gap-2.5">
+          <div className="flex items-center justify-between gap-2 px-0.5">
+            <h2 className="font-display text-lg font-bold tracking-wide text-slate-100">
+              {t('gear.slotsHeading')}
+            </h2>
+            <span className="text-xs font-mono-nums text-slate-400">
+              {EQUIPMENT_SLOTS.filter((s) => Boolean(equippedMap[s])).length}/6
+            </span>
+          </div>
+
+          <div className="grid grid-cols-3 lg:grid-cols-1 gap-2 lg:gap-1.5 flex-1">
+            {EQUIPMENT_SLOTS.map((slot) => {
+              const slotMeta = EQUIPMENT_SLOT_META[slot];
+              const inst = equippedMap[slot];
+              const isSelected =
+                selection?.kind === 'slot' && selection.slot === slot;
+              const isTargetOfPreview =
+                selectedInventoryInstance &&
+                selectedInventoryInstance.slot === slot &&
+                getItemEquippedByGear(
+                  pilot.gears,
+                  selectedInventoryInstance.instanceId
+                ) !== activeGear.classId;
+              const isUnequipping = confirmingUnequipSlot === slot;
+
+              return (
+                <button
+                  key={slot}
+                  type="button"
+                  onClick={() => handleSelectSlot(slot)}
+                  className={`w-full aspect-square lg:aspect-auto lg:min-h-[48px] p-2 lg:px-3 lg:py-1.5 rounded-lg lg:rounded border text-center lg:text-left transition-colors cursor-pointer flex flex-col lg:flex-row items-center justify-between gap-1 lg:gap-2.5 ${
+                    isUnequipping
+                      ? 'border-red-400/80 bg-red-500/10'
+                      : isSelected
+                      ? 'border-sky-400 bg-sky-500/15'
+                      : isTargetOfPreview
+                      ? 'border-amber-400/80 bg-amber-500/10'
+                      : inst
+                      ? `${RARITY_META[inst.rarity].borderClass} bg-[#080C14] hover:border-slate-600`
+                      : 'border-slate-800/90 bg-[#080C14] hover:border-slate-700'
+                  }`}
+                >
+                  {/* Top/Left Icon + Labels */}
+                  <div className="flex flex-col lg:flex-row items-center gap-1 lg:gap-2.5 min-w-0 w-full">
+                    <div className="flex items-center justify-between lg:justify-center w-full lg:w-auto">
+                      <span
+                        className={`h-8 w-8 rounded border flex items-center justify-center shrink-0 ${
+                          inst
+                            ? `${RARITY_META[inst.rarity].borderClass} bg-slate-900 ${RARITY_META[inst.rarity].textClass}`
+                            : 'border-slate-800 bg-slate-950 text-slate-600'
+                        }`}
+                      >
+                        <SlotIcon slot={slot} className="w-4 h-4" />
+                      </span>
+                      {inst && inst.enchantLevel > 0 && (
+                        <span className="lg:hidden font-mono-nums text-[11px] font-bold text-amber-400">
+                          +{inst.enchantLevel}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="min-w-0 w-full">
+                      <div className="flex items-center justify-center lg:justify-start gap-1 text-[11px] text-slate-400 leading-none">
+                        <span className="lg:hidden truncate">
+                          {getSlotShort(lang, slot)}
+                        </span>
+                        <span className="hidden lg:inline">
+                          {getSlotLabel(lang, slot)}
+                        </span>
+                        {slotMeta.classLocked && (
+                          <Lock className="w-2.5 h-2.5 text-slate-500 shrink-0" />
+                        )}
+                      </div>
+                      <div
+                        className={`mt-1 text-xs font-semibold truncate ${
+                          inst
+                            ? RARITY_META[inst.rarity].textClass
+                            : 'text-slate-600'
+                        }`}
+                      >
+                        {inst ? getItemInstanceName(lang, inst) : '—'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Desktop right quality + enchant */}
+                  {inst && (
+                    <div className="hidden lg:flex items-center gap-1.5 shrink-0 font-mono-nums text-[11px]">
+                      <span className="text-slate-500">{inst.rollQuality}%</span>
+                      {inst.enchantLevel > 0 && (
+                        <span className="font-bold text-amber-400">
+                          +{inst.enchantLevel}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* COL 3 (Desktop only >= lg): Live Combat Stats Readout with +/- Preview */}
+        <section className="hidden lg:flex lg:order-3 lg:col-span-3 rounded-lg border border-slate-800/90 bg-[#0C121D]/95 p-3.5 flex-col justify-between gap-3">
           <div className="flex items-center justify-between gap-2">
             <h2 className="font-display text-lg font-bold tracking-wide text-slate-100">
               {t('gear.statsHeading')}
@@ -694,10 +1122,10 @@ export function GearView() {
         </section>
       </div>
 
-      {/* ==================== BOTTOM ROW: 2 COLUMNS (Shared Cargo Grid | Detail + +/- Comparison) ==================== */}
+      {/* ==================== BOTTOM ROW: Shared Cargo Grid | Inline Detail (Desktop) ==================== */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
-        {/* BOTTOM-LEFT (7 cols): Shared Cargo Grid */}
-        <section className="lg:col-span-7 rounded-lg border border-slate-800/90 bg-[#0C121D]/95 p-4 flex flex-col gap-3">
+        {/* Shared Cargo Grid */}
+        <section className="lg:col-span-7 rounded-lg border border-slate-800/90 bg-[#0C121D]/95 p-3.5 sm:p-4 flex flex-col gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-baseline gap-2">
               <h2 className="font-display text-lg font-bold tracking-wide text-slate-100">
@@ -711,17 +1139,17 @@ export function GearView() {
             <button
               type="button"
               onClick={() => setActiveTab('shop')}
-              className="text-xs font-medium text-amber-400 hover:text-amber-300 transition-colors cursor-pointer whitespace-nowrap"
+              className="min-h-[36px] text-xs font-medium text-amber-400 hover:text-amber-300 transition-colors cursor-pointer whitespace-nowrap"
             >
               {t('equip.openShop')}
             </button>
           </div>
 
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 tactical-scroll">
             <button
               type="button"
               onClick={() => setSlotFilter('all')}
-              className={`h-8 px-2.5 rounded text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
+              className={`min-h-[44px] lg:min-h-0 lg:h-8 px-3 lg:px-2.5 rounded-lg lg:rounded text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                 slotFilter === 'all'
                   ? 'bg-slate-800 text-slate-100 border border-slate-600'
                   : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200'
@@ -734,7 +1162,7 @@ export function GearView() {
                 key={slot}
                 type="button"
                 onClick={() => setSlotFilter(slot)}
-                className={`h-8 px-2.5 rounded text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                className={`min-h-[44px] lg:min-h-0 lg:h-8 px-3 lg:px-2.5 rounded-lg lg:rounded text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                   slotFilter === slot
                     ? 'bg-slate-800 text-slate-100 border border-slate-600'
                     : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200'
@@ -746,13 +1174,13 @@ export function GearView() {
           </div>
 
           {filteredInventory.length === 0 ? (
-            <div className="flex-1 min-h-[160px] rounded border border-slate-800/80 bg-[#080C14] px-4 py-8 flex items-center justify-center text-center text-xs text-slate-400">
+            <div className="flex-1 min-h-[140px] rounded border border-slate-800/80 bg-[#080C14] px-4 py-8 flex items-center justify-center text-center text-sm lg:text-xs text-slate-400">
               {pilot.inventory.length === 0
                 ? t('equip.inventoryEmpty')
                 : t('equip.inventoryEmptyFilter')}
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2 max-h-68 overflow-y-auto pr-1 tactical-scroll">
+            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2 max-h-72 overflow-y-auto pr-1 tactical-scroll">
               {filteredInventory.map((inst) => {
                 const ownerGear = getItemEquippedByGear(
                   pilot.gears,
@@ -772,7 +1200,7 @@ export function GearView() {
                     key={inst.instanceId}
                     type="button"
                     onClick={() => handleSelectInventory(inst.instanceId)}
-                    className={`p-2.5 rounded border text-left transition-colors cursor-pointer flex flex-col justify-between gap-1.5 min-h-[92px] ${
+                    className={`p-2.5 rounded-lg lg:rounded border text-left transition-colors cursor-pointer flex flex-col justify-between gap-1.5 min-h-[92px] ${
                       isSelected
                         ? 'border-amber-400 bg-amber-500/15 shadow-[0_0_0_1px_rgba(251,191,36,0.3)]'
                         : `${RARITY_META[inst.rarity].borderClass} ${RARITY_META[inst.rarity].bgTintClass} hover:bg-slate-900/90`
@@ -780,15 +1208,15 @@ export function GearView() {
                   >
                     <div className="flex items-center justify-between gap-1">
                       <span
-                        className={`inline-flex items-center gap-1 text-[10px] font-mono-nums ${
+                        className={`inline-flex items-center gap-1 text-[11px] font-mono-nums ${
                           RARITY_META[inst.rarity].textClass
                         }`}
                       >
-                        <SlotIcon slot={inst.slot} className="w-3 h-3" />
+                        <SlotIcon slot={inst.slot} className="w-3.5 h-3.5" />
                         <span>T{inst.tier}</span>
                       </span>
 
-                      <div className="flex items-center gap-1 font-mono-nums text-[10px]">
+                      <div className="flex items-center gap-1 font-mono-nums text-[11px]">
                         <span className="text-slate-400">
                           {inst.rollQuality}%
                         </span>
@@ -797,9 +1225,10 @@ export function GearView() {
                             +{inst.enchantLevel}
                           </span>
                         )}
-                        {!validation.canEquip && ownerGear !== activeGear.classId && (
-                          <ShieldAlert className="w-3 h-3 text-red-400" />
-                        )}
+                        {!validation.canEquip &&
+                          ownerGear !== activeGear.classId && (
+                            <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
+                          )}
                       </div>
                     </div>
 
@@ -811,7 +1240,7 @@ export function GearView() {
                       {getItemInstanceName(lang, inst)}
                     </div>
 
-                    <div className="text-[10px] font-mono-nums flex items-center justify-between gap-1">
+                    <div className="text-[11px] font-mono-nums flex items-center justify-between gap-1">
                       {ownerGear ? (
                         <span
                           className={`truncate font-semibold ${
@@ -825,7 +1254,7 @@ export function GearView() {
                           })}
                         </span>
                       ) : (
-                        <span className="text-slate-500">
+                        <span className="text-slate-400 truncate">
                           {t('common.levelShort')}
                           {inst.requiredLevel}
                           {inst.classRestriction
@@ -841,8 +1270,8 @@ export function GearView() {
           )}
         </section>
 
-        {/* BOTTOM-RIGHT (5 cols): Item Details + Roll Quality + Affixes + Live +/- Comparison */}
-        <section className="lg:col-span-5 rounded-lg border border-slate-800/90 bg-[#0C121D]/95 p-4 flex flex-col justify-between gap-3">
+        {/* Inline Detail Panel (Desktop >= lg) */}
+        <section className="hidden lg:flex lg:col-span-5 rounded-lg border border-slate-800/90 bg-[#0C121D]/95 p-4 flex-col justify-between gap-3">
           <div className="flex items-center justify-between gap-2">
             <h2 className="font-display text-lg font-bold tracking-wide text-slate-100">
               {t('gear.detailHeading')}
@@ -868,318 +1297,36 @@ export function GearView() {
               </p>
             </div>
           ) : (
-            <div className="flex-1 flex flex-col justify-between gap-3">
-              <div className="space-y-2.5">
-                {/* Item Header */}
-                <div>
-                  <div className="flex items-baseline justify-between gap-2">
-                    <h3
-                      className={`font-display text-xl font-bold leading-tight ${
-                        RARITY_META[activeDetailInstance.rarity].textClass
-                      }`}
-                    >
-                      {getItemInstanceName(lang, activeDetailInstance, true)}
-                    </h3>
-                    <span
-                      className={`font-mono-nums text-xs font-semibold shrink-0 ${
-                        activeDetailInstance.rollQuality >= 80
-                          ? 'text-amber-400'
-                          : activeDetailInstance.rollQuality >= 50
-                          ? 'text-emerald-400'
-                          : 'text-slate-400'
-                      }`}
-                    >
-                      {t('common.quality', {
-                        pct: activeDetailInstance.rollQuality,
-                      })}
-                    </span>
-                  </div>
-                  <div className="text-xs text-slate-400 mt-0.5">
-                    {getSlotLabel(lang, activeDetailInstance.slot)} ·{' '}
-                    {getRarityLabel(lang, activeDetailInstance.rarity)} ·{' '}
-                    {t('common.tier', { tier: activeDetailInstance.tier })} ·{' '}
-                    {t('common.levelShort')}
-                    {activeDetailInstance.requiredLevel}
-                    {' · '}
-                    {activeDetailInstance.classRestriction
-                      ? t('common.classOnly', {
-                          className: getClassName(
-                            lang,
-                            activeDetailInstance.classRestriction
-                          ),
-                        })
-                      : t('common.allClasses')}
-                  </div>
-                </div>
-
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  {getItemInstanceDesc(lang, activeDetailInstance)}
-                </p>
-
-                {/* Total Effective Stats + Affixes + Traits */}
-                <div className="rounded border border-slate-800/80 bg-[#080C14] p-2.5 space-y-2">
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-mono-nums text-slate-100 font-semibold">
-                    {STAT_KEYS.filter((k) => activeDetailStats[k] > 0).map((k) => (
-                      <span key={k}>
-                        +{activeDetailStats[k]} {getStatShort(lang, k)}
-                      </span>
-                    ))}
-                  </div>
-
-                  {activeDetailInstance.affixes.length > 0 && (
-                    <div className="text-[11px] text-sky-300/90 flex flex-wrap gap-x-2.5 gap-y-0.5 pt-1 border-t border-slate-800/80">
-                      <span className="text-slate-500">
-                        {t('gear.affixesHeading')}:
-                      </span>
-                      {activeDetailInstance.affixes.map((af, idx) => (
-                        <span key={`${af.suffixId}_${idx}`} className="font-mono-nums">
-                          +{af.value} {getStatShort(lang, af.stat)}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {formatItemTraitsList(lang, activeDetailInstance).length > 0 && (
-                    <div className="text-[11px] text-amber-300 flex flex-wrap gap-x-2.5 gap-y-0.5 pt-1 border-t border-slate-800/80">
-                      {formatItemTraitsList(lang, activeDetailInstance).map(
-                        (tr, idx) => (
-                          <span key={idx}>{tr}</span>
-                        )
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Live +/- Comparison Block */}
-                {isPreviewActive && (
-                  <div className="rounded border border-slate-800 bg-[#080C14] p-2.5 space-y-1.5">
-                    <div className="text-[11px] font-semibold text-amber-300">
-                      {t('gear.comparisonHeading')}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-mono-nums">
-                      {STAT_KEYS.filter((k) => statDeltas[k] !== 0).length > 0 ? (
-                        STAT_KEYS.filter((k) => statDeltas[k] !== 0).map((k) => {
-                          const delta = statDeltas[k];
-                          return (
-                            <span
-                              key={k}
-                              className={
-                                delta > 0
-                                  ? 'text-emerald-400 font-semibold'
-                                  : 'text-red-400 font-semibold'
-                              }
-                            >
-                              {getStatShort(lang, k)}{' '}
-                              {delta > 0 ? `+${delta}` : delta}
-                            </span>
-                          );
-                        })
-                      ) : (
-                        <span className="text-slate-500">
-                          {t('gear.noStatDiff')}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Cannot-Equip Inline Warning */}
-                {activeValidation && !activeValidation.canEquip && (
-                  <div className="flex items-center justify-between gap-2 text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded px-2.5 py-1.5">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <ShieldAlert className="w-4 h-4 shrink-0" />
-                      <span className="truncate">
-                        {t('equip.cannotEquip', {
-                          reason:
-                            formatEquipValidationReason(lang, activeValidation) ??
-                            '',
-                        })}
-                      </span>
-                    </div>
-                    {activeValidation.equippedOnOtherGear && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          unequipInstanceEverywhere(
-                            activeDetailInstance.instanceId
-                          )
-                        }
-                        className="shrink-0 px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-100 text-[11px] font-semibold cursor-pointer"
-                      >
-                        {t('gear.unequipFromOther', {
-                          gear: getClassName(
-                            lang,
-                            activeValidation.equippedOnOtherGear
-                          ),
-                        })}
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {/* Inline Enchant Section (when inspecting an Equipped Slot) */}
-                {selection?.kind === 'slot' && activeEnchantMeta && (
-                  <div className="rounded border border-sky-500/35 bg-[#091322] p-3 space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-sky-300">
-                        {activeEnchantMeta.isMax
-                          ? t('equip.enchantMaxReached')
-                          : `+${activeEnchantMeta.currentLevel} → +${activeEnchantMeta.nextLevel} (+8%/lv)`}
-                      </span>
-                      {!activeEnchantMeta.isMax && (
-                        <span className="font-mono-nums text-slate-300">
-                          <span
-                            className={
-                              activeEnchantMeta.successRate >= 70
-                                ? 'text-emerald-400 font-semibold'
-                                : activeEnchantMeta.successRate >= 45
-                                ? 'text-amber-400 font-semibold'
-                                : 'text-red-400 font-semibold'
-                            }
-                          >
-                            {activeEnchantMeta.successRate}%
-                          </span>
-                          {' · '}
-                          <span>{activeEnchantMeta.cost.toLocaleString()} CR</span>
-                        </span>
-                      )}
-                    </div>
-
-                    {!activeEnchantMeta.isMax && (
-                      <div className="flex flex-wrap items-center gap-x-3 text-[11px] font-mono-nums text-slate-300">
-                        {STAT_KEYS.filter(
-                          (k) => activeEnchantMeta.currentStats[k] > 0
-                        ).map((k) => (
-                          <span key={k}>
-                            {getStatShort(lang, k)} +{activeEnchantMeta.currentStats[k]}{' '}
-                            <span className="text-emerald-400">
-                              → +{activeEnchantMeta.nextStats[k]}
-                            </span>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-
-                    {enchantFeedback && (
-                      <div
-                        className={`text-[11px] px-2.5 py-1.5 rounded border ${
-                          enchantFeedback.success
-                            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
-                            : 'border-red-500/40 bg-red-500/10 text-red-300'
-                        }`}
-                      >
-                        {renderEnchantMessage(enchantFeedback)}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center gap-2 pt-2 border-t border-slate-800/80">
-                {selection?.kind === 'inventory' &&
-                  activeDetailOwnerGear !== activeGear.classId && (
-                    <>
-                      <button
-                        type="button"
-                        disabled={!activeValidation?.canEquip}
-                        onClick={handleConfirmEquip}
-                        className="flex-1 h-10 px-4 inline-flex items-center justify-center gap-1.5 rounded bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-semibold text-xs transition-colors cursor-pointer whitespace-nowrap"
-                      >
-                        <Check className="w-4 h-4" />
-                        <span>
-                          {t('gear.confirmEquip', {
-                            gear: getClassName(lang, activeGear.classId),
-                          })}
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          soundFx.playClick();
-                          setSelection(null);
-                        }}
-                        className="h-10 px-3.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap"
-                      >
-                        {t('common.cancel')}
-                      </button>
-                    </>
-                  )}
-
-                {selection?.kind === 'inventory' &&
-                  activeDetailOwnerGear === activeGear.classId && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSelection({
-                          kind: 'slot',
-                          slot: activeDetailInstance.slot,
-                        })
-                      }
-                      className="flex-1 h-10 px-4 rounded border border-sky-500/50 bg-sky-500/15 hover:bg-sky-500/25 text-sky-200 font-semibold text-xs transition-colors cursor-pointer"
-                    >
-                      {t('gear.currentlyEquipped')} · Enchant / Unequip
-                    </button>
-                  )}
-
-                {selection?.kind === 'slot' && activeEnchantMeta && (
-                  <>
-                    {!activeEnchantMeta.isMax && (
-                      <button
-                        type="button"
-                        disabled={pilot.credits < activeEnchantMeta.cost}
-                        onClick={() => handleEnchant(selection.slot)}
-                        className="flex-1 h-10 px-3.5 rounded bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-slate-950 font-semibold text-xs transition-colors cursor-pointer whitespace-nowrap"
-                      >
-                        {pilot.credits < activeEnchantMeta.cost
-                          ? t('equip.needCredits', {
-                              cost: activeEnchantMeta.cost.toLocaleString(),
-                            })
-                          : t('equip.enchantAction', {
-                              level: activeEnchantMeta.nextLevel,
-                              cost: activeEnchantMeta.cost.toLocaleString(),
-                            })}
-                      </button>
-                    )}
-
-                    {confirmingUnequipSlot === selection.slot ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => handleConfirmUnequip(selection.slot)}
-                          className="h-10 px-3.5 rounded bg-red-600 hover:bg-red-500 text-white font-semibold text-xs transition-colors cursor-pointer whitespace-nowrap"
-                        >
-                          {t('gear.confirmUnequip')}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            soundFx.playClick();
-                            setConfirmingUnequipSlot(null);
-                          }}
-                          className="h-10 px-3 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-medium cursor-pointer whitespace-nowrap"
-                        >
-                          {t('common.cancel')}
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          soundFx.playClick();
-                          setConfirmingUnequipSlot(selection.slot);
-                        }}
-                        className="h-10 px-3.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap"
-                      >
-                        {t('gear.previewUnequip')}
-                      </button>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
+            renderDetailContent()
           )}
         </section>
+      </div>
+
+      {/* Mobile Bottom Sheet for Item Detail / Compare / Enchant (< lg) */}
+      <div className="lg:hidden">
+        <BottomSheet
+          open={mobileDetailOpen && Boolean(activeDetailInstance)}
+          onClose={() => {
+            setMobileDetailOpen(false);
+            setConfirmingUnequipSlot(null);
+          }}
+          title={
+            activeDetailInstance
+              ? getItemInstanceName(lang, activeDetailInstance, true)
+              : t('gear.detailHeading')
+          }
+          subtitle={
+            activeDetailInstance
+              ? activeDetailOwnerGear
+                ? t('common.equippedOnGear', {
+                    gear: getClassName(lang, activeDetailOwnerGear),
+                  })
+                : t('gear.inCargo')
+              : undefined
+          }
+        >
+          {renderDetailContent()}
+        </BottomSheet>
       </div>
     </div>
   );

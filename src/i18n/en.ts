@@ -725,8 +725,58 @@ export const EN_TRANSLATIONS = {
   'admin.globalSection': 'Global Pilot & Campaign',
   'admin.itemGenSection': 'Random Item Generator',
   'admin.togglesSection': 'Combat & Reward Overrides',
+  'admin.battleSizeLabel': 'Battle Squad Size Override',
+  'admin.battleSizeDefault': 'Sector Default',
   'admin.resetSave': 'Reset Save Data',
   'admin.confirmResetSave': 'Confirm Wipe Save',
+
+  // Mobile Navigation & Responsive UI
+  'mobile.settings': 'Settings',
+  'mobile.settingsTitle': 'Command & Settings',
+  'mobile.fullStats': 'Full Stats',
+  'mobile.hideStats': 'Hide Stats',
+  'mobile.tapInspect': 'Tap to inspect',
+  'mobile.mapZoomIn': 'Zoom In',
+  'mobile.mapZoomOut': 'Zoom Out',
+  'mobile.mapResetView': 'Reset View',
+  'mobile.mapPanHint': 'Drag to pan · Pinch to zoom',
+  'mobile.squadScale': '{size}v{size} Engagement',
+
+  // Scalable Combat, Balance of Power & Radar View
+  'battle.viewCard': 'Card',
+  'battle.viewRadar': 'Radar',
+  'battle.viewModeLabel': 'Combat View',
+  'battle.balanceAllies': 'Allied Fleet',
+  'battle.balanceHostiles': 'Hostile Fleet',
+  'battle.frontRowBlocked': 'Front row blocks basic attack',
+  'battle.longRangeReady': 'Long-range targets Back row',
+  'battle.actionSkills': 'Skills',
+  'battle.actionItem': 'Supplies',
+  'battle.suppliesTitle': 'Field Supplies & Tactics',
+  'battle.noConsumables':
+    'No single-use consumables loaded in V2.0. Use Support skills for nanite repairs or adjust Auto Tactics below.',
+  'battle.openTactics': 'Configure Auto Tactics',
+  'battle.logSheetHint': 'Tap for Combat Log ({count})',
+  'battle.inspectUnit': 'Unit Telemetry',
+  'battle.inspectStats': 'Combat Telemetry',
+  'battle.inspectStatuses': 'Active Statuses',
+  'battle.inspectNoStatuses': 'No active status effects',
+  'battle.inspectSkills': 'Known Systems / Skills',
+  'battle.lockTargetBtn': 'Lock Enemy Target',
+  'battle.lockAllyBtn': 'Lock Ally Target',
+  'battle.targetLockedBtn': 'Target Locked',
+  'battle.structureTag': 'STRUCTURE',
+
+  // Wingman Radio Chatter
+  'log.wingmanChat': '{actor}: "{quote}"',
+  'chat.engaging': 'Fox two! Engaging target!',
+  'chat.covering': 'Covering your six, Lead!',
+  'chat.shieldsUp': 'Deflectors holding — pressing forward!',
+  'chat.targetLocked': 'Hostile signature locked on radar!',
+  'chat.staySharp': 'Watch the flank, squadron!',
+  'chat.flankOpen': 'Opening firing corridor — push now!',
+  'chat.movingIn': 'Vectoring in for attack run!',
+  'chat.goodHit': 'Direct hit confirmed on hostile hull!',
 } as const;
 
 export type TranslationKey = keyof typeof EN_TRANSLATIONS;

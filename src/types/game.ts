@@ -244,12 +244,17 @@ export interface MechClassDefinition {
 
 export type SectorDifficulty = 'Standard' | 'Hard' | 'Elite';
 
+export type BattleSize = 4 | 6 | 8;
+
+export type BattleViewMode = 'card' | 'radar';
+
 export interface SectorDefinition {
   id: string;
   name: string;
   regionCode: string;
   difficulty: SectorDifficulty;
   levelOffset: number;
+  squadSize: BattleSize;
   enemyCount: number;
   hasBoss: boolean;
   expMultiplier: number;
@@ -516,10 +521,12 @@ export interface CombatUnit {
   callsign: string;
   side: CombatSide;
   row: CombatRow;
+  formationCol?: number; // 0..(cols-1) within its row for adjacent splash & grid/radar layout
   isPlayer: boolean;
   classId: MechClassId;
   archetype?: EnemyArchetype;
   isBoss?: boolean;
+  isStructure?: boolean; // Turrets / structures / orbital stations (square tokens in Radar View)
   level: number;
   skillLevel: number; // fallback for NPCs
   skillLevels: Record<string, number>;
@@ -588,7 +595,8 @@ export type CombatLogTemplateKey =
   | 'log.counterAttack'
   | 'log.scanReveal'
   | 'log.invincibleBlock'
-  | 'log.silencedBlocked';
+  | 'log.silencedBlocked'
+  | 'log.wingmanChat';
 
 export interface CombatLogEntry {
   id: string;
@@ -609,9 +617,11 @@ export interface CombatFxEvent {
   id: string;
   kind: CombatFxKind;
   fromSide: CombatSide;
-  fromSlotIndex: number; // 0..3
+  fromSlotIndex: number; // 0..7
+  fromUnitId?: string;
   toSide: CombatSide;
   toSlotIndices: number[];
+  toUnitIds?: string[];
   accentHex: string;
 }
 
@@ -637,9 +647,17 @@ export interface BattleSummary {
   droppedItems: ItemInstance[];
 }
 
+export interface WingmanChatter {
+  id: string;
+  unitId: string;
+  unitName: string;
+  textKey: string;
+}
+
 export interface BattleState {
   sectorId: string;
   deployedGearId: MechClassId;
+  squadSize: BattleSize;
   units: CombatUnit[];
   turnOrder: string[];
   activeTurnIndex: number;
@@ -648,6 +666,7 @@ export interface BattleState {
   selectedAllyTargetId: string | null;
   lastPlayerTargetId: string | null;
   autoStopNotice: AutoStopReason | null;
+  wingmanChat?: WingmanChatter | null;
   log: CombatLogEntry[];
   popups: FloatingPopup[];
   fxEvents: CombatFxEvent[];
@@ -663,6 +682,7 @@ export interface AdminConfig {
   oneHitKills: boolean;
   alwaysWin: boolean;
   rewardMultiplier: number;
+  battleSizeOverride: BattleSize | null;
 }
 
 export type BaseTab = 'gear' | 'garage' | 'skill' | 'shop' | 'map';

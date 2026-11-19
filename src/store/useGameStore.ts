@@ -3,11 +3,13 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import { BALANCE_CONFIG, getGarageUnlockCost } from '../data/balance';
 import { EMPTY_STAT_BLOCK, MECH_CLASS_LIST } from '../data/classes';
 import { getNextSectorId, SECTORS_CATALOG } from '../data/maps';
+import { WINGMAN_CHAT_KEYS } from '../data/pilots';
 import { getSkillById } from '../data/skills';
 import {
   calculateBattleRewards,
   chooseAiDecision,
   createInitialBattleState,
+  getValidEnemyTargets,
   reconcileRemainingTurnOrder,
   resolveUnitAction,
   sortTurnOrder,
@@ -60,6 +62,7 @@ import type {
   BaseTab,
   BattleSpeed,
   BattleState,
+  BattleViewMode,
   CombatLogEntry,
   CombatUnit,
   EnchantAttemptResult,
@@ -90,6 +93,7 @@ interface GameStoreState {
   muted: boolean;
   battleSpeed: BattleSpeed;
   skipAnimations: boolean;
+  battleViewMode: BattleViewMode | null;
   language: Language;
   adminConfig: AdminConfig;
 
@@ -173,12 +177,14 @@ interface GameStoreState {
   clearExpiredPopups: (ids: string[]) => void;
   clearExpiredFx: (ids: string[]) => void;
   clearExplodedUnits: (ids: string[]) => void;
+  clearWingmanChat: () => void;
   returnToHangar: () => void;
 
-  // Audio & Speed controls
+  // Audio, View & Speed controls
   toggleMute: () => void;
   setBattleSpeed: (speed: BattleSpeed) => void;
   toggleSkipAnimations: () => void;
+  setBattleViewMode: (mode: BattleViewMode) => void;
 
   // Admin CP actions
   setAdminPanelOpen: (open: boolean) => void;
@@ -470,6 +476,7 @@ export const useGameStore = create<GameStoreState>()(
             muted: state.muted,
             battleSpeed: state.battleSpeed,
             skipAnimations: state.skipAnimations,
+            battleViewMode: state.battleViewMode,
             adminConfig: state.adminConfig,
             hasSaveData: true,
             screen: 'HANGAR',
@@ -496,6 +503,7 @@ export const useGameStore = create<GameStoreState>()(
           muted: state.muted,
           battleSpeed: state.battleSpeed,
           skipAnimations: state.skipAnimations,
+          battleViewMode: state.battleViewMode,
           adminConfig: createDefaultAdminConfig(),
           hasSaveData: false,
           battle: null,
@@ -1015,7 +1023,12 @@ export const useGameStore = create<GameStoreState>()(
           ? requestedSector
           : state.pilot.unlockedSectorIds[0] ?? SECTORS_CATALOG[0].id;
 
-        const battleState = createInitialBattleState(state.pilot, targetSectorId);
+        const battleState = createInitialBattleState(
+          state.pilot,
+          targetSectorId,
+          Math.random,
+          state.adminConfig.battleSizeOverride
+        );
         soundFx.playConfirm();
 
         if (state.adminConfig.alwaysWin) {
@@ -1178,6 +1191,10 @@ export const useGameStore = create<GameStoreState>()(
           finalTurnIndex = Math.max(0, firstAliveIdx);
         }
 
+        const playerNext = resolution.updatedUnits.find((u) => u.isPlayer);
+        const validFrontEnemies = playerNext
+          ? getValidEnemyTargets(resolution.updatedUnits, playerNext, 'attack')
+          : aliveEnemies;
         const currentTargetStillAlive = aliveEnemies.some(
           (e) => e.id === battle.selectedTargetId
         );
@@ -1198,7 +1215,7 @@ export const useGameStore = create<GameStoreState>()(
             round: wrappedRound ? battle.round + 1 : battle.round,
             selectedTargetId: currentTargetStillAlive
               ? battle.selectedTargetId
-              : aliveEnemies[0]?.id ?? null,
+              : validFrontEnemies[0]?.id ?? aliveEnemies[0]?.id ?? null,
             selectedAllyTargetId: currentAllyStillAlive
               ? battle.selectedAllyTargetId
               : aliveAllies[0]?.id ?? null,
@@ -1499,6 +1516,30 @@ export const useGameStore = create<GameStoreState>()(
           finalTurnIndex = Math.max(0, firstAliveIdx);
         }
 
+        // Occasional AI wingman radio callout (~28% chance when animations are enabled)
+        let nextWingmanChat = battle.wingmanChat ?? null;
+        if (
+          !bypassFx &&
+          activeUnit.side === 'ally' &&
+          !activeUnit.isPlayer &&
+          Math.random() < 0.28
+        ) {
+          const textKey =
+            WINGMAN_CHAT_KEYS[
+              Math.floor(Math.random() * WINGMAN_CHAT_KEYS.length)
+            ];
+          nextWingmanChat = {
+            id: `chat_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            unitId: activeUnit.id,
+            unitName: activeUnit.name,
+            textKey,
+          };
+        }
+
+        const playerNext = resolution.updatedUnits.find((u) => u.isPlayer);
+        const validFrontEnemies = playerNext
+          ? getValidEnemyTargets(resolution.updatedUnits, playerNext, 'attack')
+          : aliveEnemies;
         const currentTargetStillAlive = aliveEnemies.some(
           (e) => e.id === battle.selectedTargetId
         );
@@ -1514,12 +1555,13 @@ export const useGameStore = create<GameStoreState>()(
             popups: nextPopups,
             fxEvents: nextFx,
             explodedUnitIds: nextExploded,
+            wingmanChat: nextWingmanChat,
             turnOrder: nextTurnOrder,
             activeTurnIndex: finalTurnIndex,
             round: wrappedRound ? battle.round + 1 : battle.round,
             selectedTargetId: currentTargetStillAlive
               ? battle.selectedTargetId
-              : aliveEnemies[0]?.id ?? null,
+              : validFrontEnemies[0]?.id ?? aliveEnemies[0]?.id ?? null,
             selectedAllyTargetId: currentAllyStillAlive
               ? battle.selectedAllyTargetId
               : aliveAllies[0]?.id ?? null,
@@ -1625,6 +1667,17 @@ export const useGameStore = create<GameStoreState>()(
         });
       },
 
+      clearWingmanChat: () => {
+        const { battle } = get();
+        if (!battle || !battle.wingmanChat) return;
+        set({
+          battle: {
+            ...battle,
+            wingmanChat: null,
+          },
+        });
+      },
+
       returnToHangar: () => {
         soundFx.playClick();
         set({
@@ -1649,6 +1702,11 @@ export const useGameStore = create<GameStoreState>()(
       toggleSkipAnimations: () => {
         soundFx.playClick();
         set((state) => ({ skipAnimations: !state.skipAnimations }));
+      },
+
+      setBattleViewMode: (battleViewMode) => {
+        soundFx.playClick();
+        set({ battleViewMode });
       },
 
       // ---- ADMIN CP ACTIONS ----
@@ -1877,6 +1935,7 @@ export const useGameStore = create<GameStoreState>()(
         muted: state.muted,
         battleSpeed: state.battleSpeed,
         skipAnimations: state.skipAnimations,
+        battleViewMode: state.battleViewMode,
         language: state.language,
         adminConfig: state.adminConfig,
       }),

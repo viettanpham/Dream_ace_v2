@@ -1,15 +1,22 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Award,
+  Backpack,
+  ChevronUp,
   Crosshair,
   Flag,
   HeartHandshake,
   Info,
+  LayoutGrid,
   Package,
+  Radar,
   Repeat,
+  ScrollText,
   Settings,
   Shield,
+  ShieldAlert,
+  Sparkles,
   Square,
   ZapOff,
 } from 'lucide-react';
@@ -17,7 +24,11 @@ import { BALANCE_CONFIG } from '../data/balance';
 import { STAT_KEYS } from '../data/classes';
 import { RARITY_META } from '../data/items';
 import { getScaledSkillStats, getSkillById } from '../data/skills';
-import { hasStatus } from '../engine/combat';
+import {
+  getValidEnemyTargets,
+  hasStatus,
+  isLongRangeAction,
+} from '../engine/combat';
 import { getEffectiveItemStats } from '../engine/equipment';
 import { canUnitUseSkill } from '../engine/skills';
 import {
@@ -43,9 +54,12 @@ import type {
   CombatFxEvent,
   CombatLogEntry,
 } from '../types/game';
+import { BattleRadarView } from './BattleRadarView';
 import { BattleUnitCard } from './BattleUnitCard';
+import { BottomSheet } from './BottomSheet';
 import { SkillIcon } from './SkillIcon';
 import { TurnQueueBar } from './TurnQueueBar';
+import { UnitDetailSheet } from './UnitDetailSheet';
 
 const BATTLE_SPEEDS: BattleSpeed[] = [1, 2, 3, 5, 10];
 const REPEAT_OPTIONS: AutoRepeatLimit[] = [1, 5, 10, 'infinite'];
@@ -252,6 +266,7 @@ export function BattleScreen() {
   const autoRepeatLimit = useGameStore((s) => s.autoRepeatLimit);
   const autoRepeatSession = useGameStore((s) => s.autoRepeatSession);
   const tacticsModalOpen = useGameStore((s) => s.tacticsModalOpen);
+  const battleViewMode = useGameStore((s) => s.battleViewMode);
   const selectTarget = useGameStore((s) => s.selectTarget);
   const selectAllyTarget = useGameStore((s) => s.selectAllyTarget);
   const performPlayerAction = useGameStore((s) => s.performPlayerAction);
@@ -261,9 +276,11 @@ export function BattleScreen() {
   const clearExpiredPopups = useGameStore((s) => s.clearExpiredPopups);
   const clearExpiredFx = useGameStore((s) => s.clearExpiredFx);
   const clearExplodedUnits = useGameStore((s) => s.clearExplodedUnits);
+  const clearWingmanChat = useGameStore((s) => s.clearWingmanChat);
   const returnToHangar = useGameStore((s) => s.returnToHangar);
   const startBattle = useGameStore((s) => s.startBattle);
   const setBattleSpeed = useGameStore((s) => s.setBattleSpeed);
+  const setBattleViewMode = useGameStore((s) => s.setBattleViewMode);
   const toggleSkipAnimations = useGameStore((s) => s.toggleSkipAnimations);
   const toggleMute = useGameStore((s) => s.toggleMute);
   const setAutoBattleEnabled = useGameStore((s) => s.setAutoBattleEnabled);
@@ -275,8 +292,28 @@ export function BattleScreen() {
   const clearAutoRepeatSummary = useGameStore((s) => s.clearAutoRepeatSummary);
 
   const [inspectedSkillId, setInspectedSkillId] = useState<string | null>(null);
+  const [inspectedUnitId, setInspectedUnitId] = useState<string | null>(null);
+  const [logSheetOpen, setLogSheetOpen] = useState(false);
+  const [suppliesSheetOpen, setSuppliesSheetOpen] = useState(false);
+  const [mobileSkillsExpanded, setMobileSkillsExpanded] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth < 768 : false
+  );
+
   const logEndRef = useRef<HTMLDivElement | null>(null);
   const bypassFx = skipAnimations || battleSpeed === 10;
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(max-width: 767px)');
+    const onChange = (e: MediaQueryListEvent) => setIsMobileViewport(e.matches);
+    setIsMobileViewport(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  const effectiveViewMode =
+    battleViewMode ?? (isMobileViewport ? 'radar' : 'card');
 
   const activeUnitId = battle ? battle.turnOrder[battle.activeTurnIndex] : null;
   const activeUnit =
@@ -324,6 +361,14 @@ export function BattleScreen() {
     }, 640);
     return () => window.clearTimeout(timer);
   }, [battle?.explodedUnitIds, clearExplodedUnits]);
+
+  useEffect(() => {
+    if (!battle?.wingmanChat) return;
+    const timer = window.setTimeout(() => {
+      clearWingmanChat();
+    }, 2600);
+    return () => window.clearTimeout(timer);
+  }, [battle?.wingmanChat, clearWingmanChat]);
 
   // Automatic AI (and player Charge Shot auto-release) scheduler
   useEffect(() => {
@@ -474,8 +519,22 @@ export function BattleScreen() {
     (id) => getSkillById(id)?.targetType === 'single_ally'
   );
 
+  const validBasicTargetIds = useMemo(() => {
+    if (!playerUnit) return new Set<string>();
+    return new Set(
+      getValidEnemyTargets(battle.units, playerUnit, 'attack').map((u) => u.id)
+    );
+  }, [battle.units, playerUnit]);
+
+  const playerHasLongRangeBasic = playerUnit
+    ? isLongRangeAction(playerUnit, 'attack')
+    : false;
+
   const selectedTarget = enemies.find((e) => e.id === battle.selectedTargetId);
   const selectedAlly = allies.find((a) => a.id === battle.selectedAllyTargetId);
+  const inspectedUnit = inspectedUnitId
+    ? battle.units.find((u) => u.id === inspectedUnitId) ?? null
+    : null;
   const sectorLabel = getSectorName(lang, battle.sectorId);
 
   const inspectedSkill = inspectedSkillId
@@ -505,14 +564,106 @@ export function BattleScreen() {
     battle.summary && autoRepeatSession && !autoRepeatSession.active
   );
 
+  // Balance of Power calculations
+  const allyRemainingHp = allies.reduce((acc, u) => acc + (u.alive ? u.hp : 0), 0);
+  const enemyRemainingHp = enemies.reduce((acc, u) => acc + (u.alive ? u.hp : 0), 0);
+  const totalRemainingHp = Math.max(1, allyRemainingHp + enemyRemainingHp);
+  const allySharePct = Math.round((allyRemainingHp / totalRemainingHp) * 100);
+  const enemySharePct = 100 - allySharePct;
+  const aliveAlliesCount = allies.filter((u) => u.alive).length;
+  const aliveEnemiesCount = enemies.filter((u) => u.alive).length;
+
+  const latestLog =
+    battle.log.length > 0 ? battle.log[battle.log.length - 1] : null;
+  const isLargeSquad = battle.squadSize > 4;
+  const compactGridCols =
+    battle.squadSize >= 8
+      ? 'grid-cols-2 sm:grid-cols-4'
+      : 'grid-cols-2 sm:grid-cols-3';
+
+  const renderCardUnit = (unit: (typeof allies)[number], compact: boolean) => {
+    const isEnemy = unit.side === 'enemy';
+    const frontBlocked =
+      isEnemy && unit.alive && !validBasicTargetIds.has(unit.id);
+    const wingmanChatText =
+      battle.wingmanChat && battle.wingmanChat.unitId === unit.id
+        ? t(battle.wingmanChat.textKey as Parameters<typeof t>[0])
+        : null;
+
+    return (
+      <BattleUnitCard
+        key={unit.id}
+        unit={unit}
+        compact={compact}
+        frontBlocked={frontBlocked}
+        wingmanChatText={wingmanChatText}
+        isActiveTurn={activeUnitId === unit.id && !battle.summary}
+        isTargeted={
+          isEnemy
+            ? battle.selectedTargetId === unit.id && unit.alive
+            : hasSingleAllySkill &&
+              battle.selectedAllyTargetId === unit.id &&
+              unit.alive
+        }
+        canTarget={
+          isEnemy
+            ? canPlayerManualAct && unit.alive && !hasStatus(unit, 'stealth')
+            : canPlayerManualAct && unit.alive && hasSingleAllySkill
+        }
+        exploding={battle.explodedUnitIds.includes(unit.id)}
+        skipAnimations={bypassFx}
+        autoActive={unit.isPlayer && autoBattleEnabled}
+        popups={battle.popups.filter((p) => p.unitId === unit.id)}
+        onSelect={
+          isEnemy
+            ? () => selectTarget(unit.id)
+            : () => selectAllyTarget(unit.id)
+        }
+        onInspect={() => setInspectedUnitId(unit.id)}
+      />
+    );
+  };
+
   return (
     <div className="relative flex-1 min-h-0 flex flex-col bg-tactical-grid overflow-hidden">
-      {/* TOP BAR: TURN QUEUE + MANUAL/AUTO TOGGLE + TACTICS GEAR + AUTO-REPEAT + SPEED + SKIP + RETREAT */}
-      <div className="shrink-0 border-b border-slate-800/80 bg-[#0A0F18]/95 px-3 sm:px-6 py-2 flex flex-col xl:flex-row xl:items-center justify-between gap-2.5">
+      {/* TOP BAR: TURN QUEUE + VIEW MODE + MANUAL/AUTO + TACTICS + AUTO-REPEAT + SPEED + SKIP + RETREAT */}
+      <div className="shrink-0 border-b border-slate-800/80 bg-[#0A0F18]/95 px-2.5 sm:px-6 py-2 flex flex-col xl:flex-row xl:items-center justify-between gap-2">
         <TurnQueueBar battle={battle} bypassFx={bypassFx} />
 
         {/* Battle Controls Cluster */}
         <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+          {/* Card | Radar View Toggle */}
+          <div
+            className="inline-flex items-center rounded border border-slate-700 bg-slate-950 p-0.5"
+            role="group"
+            aria-label={t('battle.viewModeLabel')}
+          >
+            <button
+              type="button"
+              onClick={() => setBattleViewMode('card')}
+              className={`min-h-[32px] px-2 rounded text-[11px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap ${
+                effectiveViewMode === 'card'
+                  ? 'bg-sky-500 text-slate-950'
+                  : 'text-slate-400 hover:text-slate-100'
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span>{t('battle.viewCard')}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setBattleViewMode('radar')}
+              className={`min-h-[32px] px-2 rounded text-[11px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap ${
+                effectiveViewMode === 'radar'
+                  ? 'bg-sky-500 text-slate-950'
+                  : 'text-slate-400 hover:text-slate-100'
+              }`}
+            >
+              <Radar className="w-3.5 h-3.5" />
+              <span>{t('battle.viewRadar')}</span>
+            </button>
+          </div>
+
           {/* Manual | Auto Segmented Toggle (Hotkey A) */}
           <div
             className="inline-flex items-center rounded border border-slate-700 bg-slate-950 p-0.5"
@@ -523,7 +674,7 @@ export function BattleScreen() {
             <button
               type="button"
               onClick={() => setAutoBattleEnabled(false)}
-              className={`h-7 px-2.5 rounded text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+              className={`min-h-[32px] px-2 rounded text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                 !autoBattleEnabled
                   ? 'bg-slate-200 text-slate-950'
                   : 'text-slate-400 hover:text-slate-100'
@@ -534,14 +685,14 @@ export function BattleScreen() {
             <button
               type="button"
               onClick={() => setAutoBattleEnabled(true)}
-              className={`h-7 px-2.5 rounded text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1 ${
+              className={`min-h-[32px] px-2 rounded text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1 ${
                 autoBattleEnabled
                   ? 'bg-emerald-500 text-slate-950'
                   : 'text-slate-400 hover:text-slate-100'
               }`}
             >
               <span>{t('auto.auto')}</span>
-              <kbd className="font-mono-nums text-[9px] px-1 rounded bg-black/20">
+              <kbd className="hidden sm:inline font-mono-nums text-[9px] px-1 rounded bg-black/20">
                 A
               </kbd>
             </button>
@@ -553,14 +704,14 @@ export function BattleScreen() {
             onClick={() => setTacticsModalOpen(true)}
             title={t('auto.tacticsBtn')}
             aria-label={t('auto.tacticsBtn')}
-            className="h-8 w-8 inline-flex items-center justify-center rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 hover:border-emerald-400/70 text-slate-300 hover:text-emerald-300 transition-colors cursor-pointer"
+            className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 hover:border-emerald-400/70 text-slate-300 hover:text-emerald-300 transition-colors cursor-pointer"
           >
-            <Settings className="w-3.5 h-3.5" />
+            <Settings className="w-4 h-4" />
           </button>
 
           {/* Auto-Repeat Counter / Selector */}
           {autoRepeatSession?.active ? (
-            <div className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded border border-emerald-500/60 bg-emerald-500/15 text-emerald-200 text-[11px] font-mono-nums font-semibold">
+            <div className="inline-flex items-center gap-1.5 min-h-[36px] px-2 rounded border border-emerald-500/60 bg-emerald-500/15 text-emerald-200 text-[11px] font-mono-nums font-semibold">
               <Repeat className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
               <span className="whitespace-nowrap">
                 {autoRepeatSession.limit === 'infinite'
@@ -578,14 +729,14 @@ export function BattleScreen() {
               <button
                 type="button"
                 onClick={() => stopAutoRepeat('manual_stop')}
-                className="ml-1 px-1.5 py-0.5 rounded bg-red-500/80 hover:bg-red-500 text-white inline-flex items-center gap-1 text-[10px] font-sans font-bold cursor-pointer"
+                className="ml-1 px-2 py-1 rounded bg-red-500/85 hover:bg-red-500 text-white inline-flex items-center gap-1 text-[10px] font-sans font-bold cursor-pointer"
               >
                 <Square className="w-2.5 h-2.5 fill-current" />
                 <span>{t('auto.repeatStop')}</span>
               </button>
             </div>
           ) : (
-            <div className="inline-flex items-center rounded border border-slate-700 bg-slate-950 overflow-hidden h-8">
+            <div className="inline-flex items-center rounded border border-slate-700 bg-slate-950 overflow-hidden min-h-[36px]">
               <select
                 value={String(autoRepeatLimit)}
                 onChange={(e) => {
@@ -595,7 +746,7 @@ export function BattleScreen() {
                   );
                 }}
                 aria-label={t('auto.repeatLabel')}
-                className="h-full bg-transparent pl-2 pr-1 text-[11px] font-mono-nums text-slate-200 focus:outline-none cursor-pointer"
+                className="min-h-[34px] bg-transparent pl-2 pr-1 text-[11px] font-mono-nums text-slate-200 focus:outline-none cursor-pointer"
               >
                 {REPEAT_OPTIONS.map((opt) => (
                   <option key={String(opt)} value={String(opt)} className="bg-slate-900">
@@ -607,9 +758,9 @@ export function BattleScreen() {
                 type="button"
                 onClick={() => startAutoRepeat(autoRepeatLimit, battle.sectorId)}
                 title={t('auto.repeatStart')}
-                className="h-full px-2 border-l border-slate-800 bg-slate-900 hover:bg-emerald-500/20 text-emerald-300 text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                className="min-h-[34px] px-2 border-l border-slate-800 bg-slate-900 hover:bg-emerald-500/20 text-emerald-300 text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
               >
-                <Repeat className="w-3 h-3" />
+                <Repeat className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">{t('auto.repeatLabel')}</span>
               </button>
             </div>
@@ -626,7 +777,7 @@ export function BattleScreen() {
                 key={spd}
                 type="button"
                 onClick={() => setBattleSpeed(spd)}
-                className={`h-7 px-2 rounded text-[11px] font-mono-nums font-semibold transition-colors cursor-pointer ${
+                className={`min-h-[32px] px-1.5 sm:px-2 rounded text-[11px] font-mono-nums font-semibold transition-colors cursor-pointer ${
                   battleSpeed === spd
                     ? 'bg-sky-500 text-slate-950'
                     : 'text-slate-400 hover:text-slate-100'
@@ -641,26 +792,65 @@ export function BattleScreen() {
             type="button"
             onClick={toggleSkipAnimations}
             aria-pressed={skipAnimations}
-            className={`h-8 px-2.5 inline-flex items-center gap-1 rounded border text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${
+            className={`min-h-[36px] px-2 inline-flex items-center gap-1 rounded border text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${
               skipAnimations
                 ? 'border-sky-400 bg-sky-500/20 text-sky-200'
                 : 'border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200'
             }`}
           >
-            <ZapOff className="w-3 h-3" />
-            <span>{t('battle.skipAnim')}</span>
+            <ZapOff className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">{t('battle.skipAnim')}</span>
           </button>
 
           {!battle.summary && (
             <button
               type="button"
               onClick={retreatBattle}
-              className="h-8 px-2.5 inline-flex items-center gap-1 rounded border border-red-500/40 bg-red-500/10 hover:bg-red-500/20 text-red-300 text-[11px] font-medium cursor-pointer whitespace-nowrap"
+              className="min-h-[36px] px-2 inline-flex items-center gap-1 rounded border border-red-500/40 bg-red-500/10 hover:bg-red-500/20 text-red-300 text-[11px] font-medium cursor-pointer whitespace-nowrap"
             >
-              <Flag className="w-3 h-3" />
-              <span>{t('battle.retreat')}</span>
+              <Flag className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{t('battle.retreat')}</span>
             </button>
           )}
+        </div>
+      </div>
+
+      {/* BALANCE OF POWER BAR */}
+      <div className="shrink-0 border-b border-slate-800/80 bg-[#070B13] px-3 sm:px-6 py-1.5">
+        <div className="mx-auto max-w-[1400px] flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-1.5 text-[11px] font-mono-nums shrink-0">
+            <span className="font-bold text-sky-300">
+              {aliveAlliesCount}/{allies.length}
+            </span>
+            <span className="hidden sm:inline text-slate-400">
+              {t('battle.balanceAllies')}
+            </span>
+          </div>
+
+          <div className="flex-1 flex items-center gap-1.5 min-w-0">
+            <div className="flex-1 h-2 rounded-full bg-slate-900 border border-slate-800 overflow-hidden flex">
+              <div
+                style={{ width: `${allySharePct}%` }}
+                className="h-full bg-gradient-to-r from-emerald-500 to-sky-400 transition-all duration-300"
+              />
+              <div
+                style={{ width: `${enemySharePct}%` }}
+                className="h-full bg-gradient-to-r from-orange-500 to-red-500 transition-all duration-300"
+              />
+            </div>
+            <span className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-[10px] font-mono-nums font-bold text-amber-300 shrink-0">
+              {battle.squadSize}v{battle.squadSize}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5 text-[11px] font-mono-nums shrink-0">
+            <span className="hidden sm:inline text-slate-400">
+              {t('battle.balanceHostiles')}
+            </span>
+            <span className="font-bold text-red-400">
+              {aliveEnemiesCount}/{enemies.length}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -678,92 +868,334 @@ export function BattleScreen() {
           <button
             type="button"
             onClick={() => setAutoBattleEnabled(true)}
-            className="px-2 py-0.5 rounded border border-emerald-400/60 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 text-[11px] font-semibold cursor-pointer"
+            className="min-h-[32px] px-2.5 rounded border border-emerald-400/60 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 text-xs font-semibold cursor-pointer"
           >
             {t('auto.auto')}
           </button>
         </div>
       )}
 
-      {/* MAIN 4v4 SPACE BATTLEFIELD ARENA */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 py-3">
-        <div className="relative mx-auto max-w-[1400px] h-full grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
-          {!bypassFx && <BattleFxOverlay fxEvents={battle.fxEvents} />}
+      {/* MAIN SCALABLE BATTLEFIELD ARENA (CARD VIEW OR RADAR VIEW) */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-2.5 sm:px-6 py-2.5 sm:py-3">
+        {effectiveViewMode === 'radar' ? (
+          <div className="mx-auto max-w-[1200px] h-full flex flex-col">
+            <BattleRadarView
+              battle={battle}
+              activeUnitId={activeUnitId}
+              validBasicTargetIds={validBasicTargetIds}
+              canPlayerManualAct={canPlayerManualAct}
+              hasSingleAllySkill={hasSingleAllySkill}
+              autoBattleEnabled={autoBattleEnabled}
+              skipAnimations={bypassFx}
+              onSelectEnemy={selectTarget}
+              onSelectAlly={selectAllyTarget}
+              onInspectUnit={(u) => setInspectedUnitId(u.id)}
+            />
+          </div>
+        ) : isLargeSquad ? (
+          /* COMPACT 2-ROW FORMATION CARD VIEW FOR 6v6 & 8v8 */
+          <div className="mx-auto max-w-[1440px] grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
+            {/* Allied Wing (Front + Back rows) */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between text-xs px-1">
+                <span className="font-display text-sm font-semibold tracking-wider text-sky-400 uppercase">
+                  {t('battle.alliedWing')}
+                </span>
+                <span className="font-mono-nums text-slate-400">
+                  {t('battle.operational', {
+                    alive: aliveAlliesCount,
+                    total: allies.length,
+                  })}
+                </span>
+              </div>
 
-          {/* Allied Fighter Wing (clickable when player has single_ally skills) */}
-          <div className="space-y-2 relative z-10">
-            <div className="flex items-center justify-between text-xs px-1">
-              <span className="font-display text-sm font-semibold tracking-wider text-sky-400 uppercase">
-                {t('battle.alliedWing')}
-              </span>
-              <span className="font-mono-nums text-slate-400">
-                {t('battle.operational', {
-                  alive: allies.filter((u) => u.alive).length,
-                  total: allies.length,
-                })}
-              </span>
+              {(['front', 'back'] as const).map((row) => {
+                const rowUnits = allies
+                  .filter((u) => u.row === row)
+                  .sort((a, b) => (a.formationCol ?? 0) - (b.formationCol ?? 0));
+                if (rowUnits.length === 0) return null;
+                return (
+                  <div key={row} className="space-y-1">
+                    <div className="text-[10px] font-mono-nums font-bold uppercase tracking-wider text-sky-400/80 px-1">
+                      {row === 'front' ? t('common.frontRow') : t('common.backRow')}
+                    </div>
+                    <div className={`grid ${compactGridCols} gap-2`}>
+                      {rowUnits.map((u) => renderCardUnit(u, true))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-            <div className="space-y-2">
-              {allies.map((unit) => (
-                <BattleUnitCard
-                  key={unit.id}
-                  unit={unit}
-                  isActiveTurn={activeUnitId === unit.id && !battle.summary}
-                  isTargeted={
-                    hasSingleAllySkill &&
-                    battle.selectedAllyTargetId === unit.id &&
-                    unit.alive
-                  }
-                  canTarget={canPlayerManualAct && unit.alive}
-                  exploding={battle.explodedUnitIds.includes(unit.id)}
-                  skipAnimations={bypassFx}
-                  autoActive={unit.isPlayer && autoBattleEnabled}
-                  popups={battle.popups.filter((p) => p.unitId === unit.id)}
-                  onSelect={() => selectAllyTarget(unit.id)}
-                />
-              ))}
+
+            {/* Hostile Wing (Front + Back rows) */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between text-xs px-1">
+                <span
+                  className="font-display text-sm font-semibold tracking-wider uppercase"
+                  style={{ color: 'var(--team-enemy)' }}
+                >
+                  {t('battle.hostileWing', { sector: sectorLabel })}
+                </span>
+                <span className="font-mono-nums text-slate-400">
+                  {t('battle.activeCount', {
+                    alive: aliveEnemiesCount,
+                    total: enemies.length,
+                  })}
+                </span>
+              </div>
+
+              {(['front', 'back'] as const).map((row) => {
+                const rowUnits = enemies
+                  .filter((u) => u.row === row)
+                  .sort((a, b) => (a.formationCol ?? 0) - (b.formationCol ?? 0));
+                if (rowUnits.length === 0) return null;
+                return (
+                  <div key={row} className="space-y-1">
+                    <div className="text-[10px] font-mono-nums font-bold uppercase tracking-wider text-red-400/80 px-1">
+                      {row === 'front' ? t('common.frontRow') : t('common.backRow')}
+                    </div>
+                    <div className={`grid ${compactGridCols} gap-2`}>
+                      {rowUnits.map((u) => renderCardUnit(u, true))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
+        ) : (
+          /* STANDARD 4v4 CARD VIEW */
+          <div className="relative mx-auto max-w-[1400px] h-full grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 items-start">
+            {!bypassFx && <BattleFxOverlay fxEvents={battle.fxEvents} />}
 
-          {/* Hostile Wing */}
-          <div className="space-y-2 relative z-10">
-            <div className="flex items-center justify-between text-xs px-1">
-              <span
-                className="font-display text-sm font-semibold tracking-wider uppercase"
-                style={{ color: 'var(--team-enemy)' }}
-              >
-                {t('battle.hostileWing', { sector: sectorLabel })}
-              </span>
-              <span className="font-mono-nums text-slate-400">
-                {t('battle.activeCount', {
-                  alive: enemies.filter((u) => u.alive).length,
-                  total: enemies.length,
-                })}
-              </span>
+            {/* Allied Fighter Wing */}
+            <div className="space-y-2 relative z-10">
+              <div className="flex items-center justify-between text-xs px-1">
+                <span className="font-display text-sm font-semibold tracking-wider text-sky-400 uppercase">
+                  {t('battle.alliedWing')}
+                </span>
+                <span className="font-mono-nums text-slate-400">
+                  {t('battle.operational', {
+                    alive: aliveAlliesCount,
+                    total: allies.length,
+                  })}
+                </span>
+              </div>
+              <div className="space-y-2">
+                {allies.map((unit) => renderCardUnit(unit, false))}
+              </div>
             </div>
-            <div className="space-y-2">
-              {enemies.map((unit) => (
-                <BattleUnitCard
-                  key={unit.id}
-                  unit={unit}
-                  isActiveTurn={activeUnitId === unit.id && !battle.summary}
-                  isTargeted={battle.selectedTargetId === unit.id && unit.alive}
-                  canTarget={
-                    canPlayerManualAct && unit.alive && !hasStatus(unit, 'stealth')
-                  }
-                  exploding={battle.explodedUnitIds.includes(unit.id)}
-                  skipAnimations={bypassFx}
-                  popups={battle.popups.filter((p) => p.unitId === unit.id)}
-                  onSelect={() => selectTarget(unit.id)}
-                />
-              ))}
+
+            {/* Hostile Wing */}
+            <div className="space-y-2 relative z-10">
+              <div className="flex items-center justify-between text-xs px-1">
+                <span
+                  className="font-display text-sm font-semibold tracking-wider uppercase"
+                  style={{ color: 'var(--team-enemy)' }}
+                >
+                  {t('battle.hostileWing', { sector: sectorLabel })}
+                </span>
+                <span className="font-mono-nums text-slate-400">
+                  {t('battle.activeCount', {
+                    alive: aliveEnemiesCount,
+                    total: enemies.length,
+                  })}
+                </span>
+              </div>
+              <div className="space-y-2">
+                {enemies.map((unit) => renderCardUnit(unit, false))}
+              </div>
             </div>
           </div>
+        )}
+      </div>
+
+      {/* BOTTOM COMMAND DOCK — MOBILE (< lg) */}
+      <div className="lg:hidden shrink-0 border-t border-slate-800/90 bg-[#0A0F18]/98 px-2.5 pt-2 pb-2 pb-safe space-y-2">
+        {/* Tap-to-Expand Combat Log Preview Bar */}
+        <button
+          type="button"
+          onClick={() => setLogSheetOpen(true)}
+          className="w-full min-h-[38px] px-2.5 py-1.5 rounded-lg border border-slate-800 bg-[#070A10] flex items-center justify-between gap-2 text-left cursor-pointer"
+        >
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <ScrollText className="w-4 h-4 text-sky-400 shrink-0" />
+            <span className="text-xs text-slate-300 truncate">
+              {latestLog
+                ? formatCombatLogMessage(lang, latestLog)
+                : t('battle.logSheetHint', { count: battle.log.length })}
+            </span>
+          </div>
+          <span className="text-[11px] font-mono-nums text-slate-400 inline-flex items-center gap-1 shrink-0">
+            <span>{battle.log.length}</span>
+            <ChevronUp className="w-3.5 h-3.5" />
+          </span>
+        </button>
+
+        {/* Turn + Target Lock Strip */}
+        <div className="flex flex-wrap items-center justify-between gap-1.5 text-xs px-0.5">
+          <div className="truncate font-semibold">
+            {isPlayerCharging ? (
+              <span className="text-amber-300">{t('battle.chargingTurn')}</span>
+            ) : isPlayerTurn && autoBattleEnabled ? (
+              <span className="text-emerald-400">
+                {t('auto.autoTurnRunning', {
+                  gear: getClassName(lang, battle.deployedGearId),
+                })}
+              </span>
+            ) : isPlayerTurn ? (
+              <span style={{ color: 'var(--turn-active-text)' }}>
+                {t('battle.yourTurn')}
+              </span>
+            ) : battle.summary ? (
+              <span className="text-slate-300">
+                {autoRepeatSession?.active
+                  ? t('auto.repeatNextSoon')
+                  : t('battle.concluded')}
+              </span>
+            ) : (
+              <span className="text-slate-300">
+                {t('battle.aiTurn')} <strong className="text-slate-100">{activeUnit?.name ?? ''}</strong>
+              </span>
+            )}
+          </div>
+
+          {selectedTarget && selectedTarget.alive && (
+            <button
+              type="button"
+              onClick={() => setInspectedUnitId(selectedTarget.id)}
+              className="inline-flex items-center gap-1 text-xs text-red-300 bg-red-500/10 border border-red-500/35 rounded px-2 py-0.5 cursor-pointer shrink-0"
+            >
+              <Crosshair className="w-3 h-3 text-red-400" />
+              <span className="font-semibold truncate max-w-[110px]">
+                {selectedTarget.name}
+              </span>
+            </button>
+          )}
+        </div>
+
+        {/* Front-Row Blocked / Long-Range Hint */}
+        {selectedTarget &&
+          selectedTarget.alive &&
+          !validBasicTargetIds.has(selectedTarget.id) && (
+            <div className="rounded border border-amber-500/35 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-200 flex items-center gap-1.5">
+              <ShieldAlert className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span>{t('battle.frontRowBlocked')}</span>
+            </div>
+          )}
+
+        {/* Collapsible Mobile 6-Slot Skill Tray */}
+        {mobileSkillsExpanded && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-44 overflow-y-auto tactical-scroll pt-0.5">
+            {playerSkillIds.length === 0 ? (
+              <div className="col-span-full rounded border border-slate-800 bg-slate-950/70 px-3 py-2.5 text-center text-xs text-slate-500">
+                {t('battle.noSkillsSlotted')}
+              </div>
+            ) : (
+              playerSkillIds.slice(0, 6).map((skillId) => {
+                const skill = getSkillById(skillId);
+                if (!skill || !playerUnit) return null;
+                const usability = canUnitUseSkill(playerUnit, skill.id);
+                const clickable = canPlayerManualAct && usability.canUse;
+                const isToggleOn = Boolean(usability.isToggleActive);
+                const isUsedOnce =
+                  skill.oncePerBattle &&
+                  playerUnit.usedOnceSkills.includes(skill.id);
+
+                return (
+                  <button
+                    key={skill.id}
+                    type="button"
+                    disabled={!clickable}
+                    onClick={() => {
+                      if (clickable) {
+                        performPlayerAction('skill', skill.id);
+                        setMobileSkillsExpanded(false);
+                      }
+                    }}
+                    className={`min-h-[54px] p-2 rounded-lg border text-left flex flex-col justify-between gap-1 transition-colors ${
+                      isToggleOn
+                        ? 'border-emerald-400 bg-emerald-500/20 text-emerald-100'
+                        : !clickable
+                        ? 'border-slate-800 bg-slate-900/70 text-slate-500 opacity-65'
+                        : skill.category === 'elite'
+                        ? 'border-amber-400/80 bg-amber-500/15 text-amber-100'
+                        : skill.category === 'special'
+                        ? 'border-purple-400/80 bg-purple-500/15 text-purple-100'
+                        : 'border-sky-500/50 bg-sky-500/15 text-sky-100'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <SkillIcon icon={skill.icon} className="w-4 h-4 shrink-0" />
+                      <span className="text-[11px] font-mono-nums font-bold text-amber-300">
+                        {isToggleOn
+                          ? t('battle.skillOnTag')
+                          : isUsedOnce
+                          ? t('battle.skillUsedTag')
+                          : usability.cooldownRemaining > 0
+                          ? `CD ${usability.cooldownRemaining}`
+                          : `${usability.spCost} SP`}
+                      </span>
+                    </div>
+                    <div className="text-xs font-semibold leading-tight truncate">
+                      {getSkillName(lang, skill.id)}
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {/* Primary 4-Button Thumb Action Row (>= 48px touch targets) */}
+        <div className="grid grid-cols-4 gap-1.5">
+          <button
+            type="button"
+            disabled={!canPlayerManualAct}
+            onClick={() => performPlayerAction('attack')}
+            className="min-h-[48px] px-2 rounded-lg border border-emerald-500/70 bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 disabled:bg-slate-900 disabled:border-slate-800 disabled:text-slate-500 text-slate-950 font-bold text-xs flex flex-col items-center justify-center gap-0.5 cursor-pointer disabled:cursor-not-allowed"
+          >
+            <Crosshair className="w-4 h-4" />
+            <span className="truncate max-w-full">{t('battle.actionAttack')}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setMobileSkillsExpanded((v) => !v)}
+            className={`min-h-[48px] px-2 rounded-lg border font-bold text-xs flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-colors ${
+              mobileSkillsExpanded
+                ? 'border-sky-400 bg-sky-500 text-slate-950'
+                : 'border-sky-500/50 bg-sky-500/15 text-sky-100 hover:bg-sky-500/25'
+            }`}
+          >
+            <Sparkles className="w-4 h-4" />
+            <span className="truncate max-w-full">
+              {t('battle.actionSkills')} ({playerSkillIds.length})
+            </span>
+          </button>
+
+          <button
+            type="button"
+            disabled={!canPlayerManualAct}
+            onClick={() => performPlayerAction('defend')}
+            className="min-h-[48px] px-2 rounded-lg border border-slate-700 bg-slate-800/90 hover:bg-slate-700 disabled:bg-slate-900 disabled:border-slate-800 disabled:text-slate-500 text-slate-100 font-bold text-xs flex flex-col items-center justify-center gap-0.5 cursor-pointer disabled:cursor-not-allowed"
+          >
+            <Shield className="w-4 h-4 text-sky-400" />
+            <span className="truncate max-w-full">{t('battle.actionDefend')}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSuppliesSheetOpen(true)}
+            className="min-h-[48px] px-2 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 font-bold text-xs flex flex-col items-center justify-center gap-0.5 cursor-pointer"
+          >
+            <Backpack className="w-4 h-4 text-amber-400" />
+            <span className="truncate max-w-full">{t('battle.actionItem')}</span>
+          </button>
         </div>
       </div>
 
-      {/* BOTTOM COMMAND DOCK (BASE ACTIONS + 6-SLOT SKILL BAR) & COMBAT LOG */}
-      <div className="shrink-0 border-t border-slate-800/90 bg-[#0A0F18]/98 px-4 sm:px-6 py-3">
+      {/* BOTTOM COMMAND DOCK — DESKTOP (lg:) */}
+      <div className="hidden lg:block shrink-0 border-t border-slate-800/90 bg-[#0A0F18]/98 px-4 sm:px-6 py-3">
         <div className="mx-auto max-w-[1400px] grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
           <div className="lg:col-span-8 flex flex-col justify-between gap-2">
             {/* Turn Banner + Target Locks */}
@@ -802,6 +1234,21 @@ export function BattleScreen() {
               )}
 
               <div className="flex flex-wrap items-center gap-3">
+                {playerHasLongRangeBasic && (
+                  <span className="text-[11px] font-mono-nums text-sky-300">
+                    {t('battle.longRangeReady')}
+                  </span>
+                )}
+
+                {selectedTarget &&
+                  selectedTarget.alive &&
+                  !validBasicTargetIds.has(selectedTarget.id) && (
+                    <span className="inline-flex items-center gap-1 text-amber-300 text-[11px]">
+                      <ShieldAlert className="w-3.5 h-3.5" />
+                      <span>{t('battle.frontRowBlocked')}</span>
+                    </span>
+                  )}
+
                 {hasSingleAllySkill && selectedAlly && selectedAlly.alive && (
                   <span className="inline-flex items-center gap-1 text-emerald-300">
                     <HeartHandshake className="w-3.5 h-3.5" />
@@ -1001,7 +1448,7 @@ export function BattleScreen() {
             )}
           </div>
 
-          {/* Combat Log */}
+          {/* Inline Combat Log (Desktop) */}
           <div className="lg:col-span-4 rounded border border-slate-800 bg-[#070A10] flex flex-col h-32 lg:h-auto lg:max-h-36">
             <div className="px-3 py-1.5 border-b border-slate-800/90 flex items-center justify-between text-[11px] text-slate-400">
               <span className="font-semibold text-slate-300">
@@ -1308,7 +1755,7 @@ export function BattleScreen() {
                   {t('summary.alliesSurviving')}
                 </div>
                 <div className="mt-0.5 font-mono-nums text-lg font-semibold text-slate-200">
-                  {battle.summary.alliesSurviving} / 4
+                  {battle.summary.alliesSurviving} / {battle.squadSize}
                 </div>
               </div>
             </div>
@@ -1372,14 +1819,14 @@ export function BattleScreen() {
               <button
                 type="button"
                 onClick={returnToHangar}
-                className="flex-1 h-11 px-4 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-sm transition-colors cursor-pointer whitespace-nowrap"
+                className="flex-1 min-h-[44px] px-4 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-sm transition-colors cursor-pointer whitespace-nowrap"
               >
                 {t('nav.returnHangar')}
               </button>
               <button
                 type="button"
                 onClick={() => startBattle()}
-                className="flex-1 h-11 px-4 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-100 font-medium text-sm transition-colors cursor-pointer whitespace-nowrap"
+                className="flex-1 min-h-[44px] px-4 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-100 font-medium text-sm transition-colors cursor-pointer whitespace-nowrap"
               >
                 {t('summary.nextSortie')}
               </button>
@@ -1387,6 +1834,98 @@ export function BattleScreen() {
           </div>
         </div>
       )}
+
+      {/* UNIT TELEMETRY & TARGET LOCK SHEET */}
+      <UnitDetailSheet
+        unit={inspectedUnit}
+        onClose={() => setInspectedUnitId(null)}
+        isTargeted={
+          Boolean(
+            inspectedUnit &&
+              ((inspectedUnit.side === 'enemy' &&
+                battle.selectedTargetId === inspectedUnit.id) ||
+                (inspectedUnit.side === 'ally' &&
+                  hasSingleAllySkill &&
+                  battle.selectedAllyTargetId === inspectedUnit.id))
+          )
+        }
+        canLockEnemy={canPlayerManualAct}
+        canLockAlly={canPlayerManualAct && hasSingleAllySkill}
+        frontRowBlocked={
+          Boolean(
+            inspectedUnit &&
+              inspectedUnit.side === 'enemy' &&
+              !validBasicTargetIds.has(inspectedUnit.id)
+          )
+        }
+        onLockEnemy={selectTarget}
+        onLockAlly={selectAllyTarget}
+      />
+
+      {/* MOBILE COMBAT LOG BOTTOM SHEET */}
+      <BottomSheet
+        open={logSheetOpen}
+        onClose={() => setLogSheetOpen(false)}
+        title={t('battle.combatLog')}
+        subtitle={t('battle.eventsCount', { count: battle.log.length })}
+      >
+        <div className="space-y-2">
+          {battle.log.map((entry) => {
+            const actorColor = getLogActorColor(entry);
+            return (
+              <div
+                key={entry.id}
+                className="leading-snug flex items-baseline gap-2 text-sm"
+              >
+                <span className="font-mono-nums text-xs text-slate-500 shrink-0">
+                  R{entry.round}
+                </span>
+                <span
+                  className={`font-mono-nums text-xs font-semibold shrink-0 w-14 ${getLogTagStyle(
+                    entry.tag
+                  )}`}
+                >
+                  {getLogTagLabel(lang, entry.tag)}
+                </span>
+                <span
+                  className="text-slate-200"
+                  style={
+                    actorColor
+                      ? { borderLeft: `2px solid ${actorColor}`, paddingLeft: '8px' }
+                      : undefined
+                  }
+                >
+                  {formatCombatLogMessage(lang, entry)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </BottomSheet>
+
+      {/* MOBILE FIELD SUPPLIES & TACTICS BOTTOM SHEET */}
+      <BottomSheet
+        open={suppliesSheetOpen}
+        onClose={() => setSuppliesSheetOpen(false)}
+        title={t('battle.suppliesTitle')}
+        footer={
+          <button
+            type="button"
+            onClick={() => {
+              setSuppliesSheetOpen(false);
+              setTacticsModalOpen(true);
+            }}
+            className="w-full min-h-[48px] px-4 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-sm inline-flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <Settings className="w-4 h-4" />
+            <span>{t('battle.openTactics')}</span>
+          </button>
+        }
+      >
+        <div className="rounded-lg border border-slate-800 bg-[#080D16] p-4 text-sm text-slate-300 leading-relaxed">
+          {t('battle.noConsumables')}
+        </div>
+      </BottomSheet>
     </div>
   );
 }

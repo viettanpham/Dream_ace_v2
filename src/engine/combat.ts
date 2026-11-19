@@ -16,6 +16,7 @@ import type {
   ActionType,
   ActiveStatusEffect,
   AdminConfig,
+  BattleSize,
   BattleState,
   CombatFxEvent,
   CombatFxKind,
@@ -200,10 +201,12 @@ function buildCombatUnit(params: {
   callsign: string;
   side: CombatSide;
   row: CombatRow;
+  formationCol?: number;
   isPlayer: boolean;
   classId: MechClassId;
   archetype?: EnemyArchetype;
   isBoss?: boolean;
+  isStructure?: boolean;
   level: number;
   skillLevel?: number;
   skillLevels?: Record<string, number>;
@@ -264,10 +267,12 @@ function buildCombatUnit(params: {
     callsign: params.callsign,
     side: params.side,
     row: params.row,
+    formationCol: params.formationCol,
     isPlayer: params.isPlayer,
     classId: params.classId,
     archetype: params.archetype,
     isBoss: Boolean(params.isBoss),
+    isStructure: Boolean(params.isStructure),
     level: params.level,
     skillLevel: params.skillLevel ?? 1,
     skillLevels: params.skillLevels ?? npcFallback.skillLevels,
@@ -399,9 +404,12 @@ export function buildTurnQueue(battle: BattleState): TurnQueueView {
 export function createInitialBattleState(
   pilot: PilotAccount,
   sectorId: string,
-  rng: () => number = Math.random
+  rng: () => number = Math.random,
+  squadSizeOverride?: BattleSize | null
 ): BattleState {
   const sector = getSectorById(sectorId);
+  const squadSize: BattleSize = squadSizeOverride ?? sector.squadSize ?? 4;
+  const frontCount = Math.ceil(squadSize / 2); // 4->2F/2B, 6->3F/3B, 8->4F/4B
   const activeGear = pilot.gears[pilot.activeGearId];
   const classIds = MECH_CLASS_LIST.map((c) => c.id);
 
@@ -416,6 +424,7 @@ export function createInitialBattleState(
     callsign: 'Lead-1',
     side: 'ally',
     row: 'front',
+    formationCol: 0,
     isPlayer: true,
     classId: activeGear.classId,
     level: activeGear.level,
@@ -428,12 +437,12 @@ export function createInitialBattleState(
     passives: playerPassives,
   });
 
-  // 2. Three AI Ally Pilots
+  // 2. AI Ally Wingmen (matching squadSize - 1, arranged in 2 rows x up to 4 cols)
   const usedNames = new Set<string>([playerUnit.name]);
   const usedCallsigns = new Set<string>([playerUnit.callsign]);
   const allyUnits: CombatUnit[] = [playerUnit];
 
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < squadSize - 1; i++) {
     const remainingNames = ALLY_PILOT_POOL.firstNames.filter(
       (n) => !usedNames.has(n)
     );
@@ -455,6 +464,8 @@ export function createInitialBattleState(
     const allyClass: MechClassId = randomItem(classIds, rng);
     const levelJitter = Math.floor(rng() * 3) - 1;
     const allyLevel = Math.max(1, activeGear.level + levelJitter);
+    const slotInTeam = i + 1;
+    const isFront = slotInTeam < frontCount;
 
     allyUnits.push(
       buildCombatUnit({
@@ -462,7 +473,8 @@ export function createInitialBattleState(
         name: pilotName,
         callsign,
         side: 'ally',
-        row: i === 0 ? 'front' : 'back',
+        row: isFront ? 'front' : 'back',
+        formationCol: isFront ? slotInTeam : slotInTeam - frontCount,
         isPlayer: false,
         classId: allyClass,
         level: allyLevel,
@@ -471,22 +483,37 @@ export function createInitialBattleState(
     );
   }
 
-  // 3. Four Hostile Starfighters with Distinct Tactical Archetypes
-  const archetypeRoster: EnemyArchetype[] = [
-    'gunship',
-    'drone',
-    'sniper',
-    'repair_ship',
-  ];
+  // 3. Hostile Squadron (matching squadSize with mixed archetypes; Front/Back formation)
+  const archetypeRosterBySize: Record<BattleSize, EnemyArchetype[]> = {
+    4: ['gunship', 'drone', 'sniper', 'repair_ship'],
+    6: ['gunship', 'drone', 'gunship', 'sniper', 'repair_ship', 'sniper'],
+    8: [
+      'gunship',
+      'drone',
+      'gunship',
+      'drone',
+      'sniper',
+      'repair_ship',
+      'sniper',
+      'repair_ship',
+    ],
+  };
+  const roster = archetypeRosterBySize[squadSize];
   const enemyUnits: CombatUnit[] = [];
 
-  for (let i = 0; i < sector.enemyCount; i++) {
-    const archetype = archetypeRoster[i % archetypeRoster.length];
+  for (let i = 0; i < squadSize; i++) {
+    const archetype = roster[i % roster.length];
     const archDef = ENEMY_ARCHETYPE_DEFS[archetype];
     const isBoss = sector.hasBoss && i === 0;
+    const isFront = i < frontCount;
+    // Fortress (6v6) and Capital (8v8) front-line gunships act as defense turrets/structures (square Radar tokens)
+    const isStructure =
+      isBoss || (squadSize >= 6 && isFront && archetype === 'gunship' && i === frontCount - 1);
     const prefix = randomItem(ENEMY_PREFIXES, rng);
     const baseName = isBoss
       ? randomItem(archDef.bossNames, rng)
+      : isStructure
+      ? 'Defense Turret'
       : randomItem(archDef.names, rng);
     const enemyLevel = Math.max(
       1,
@@ -503,13 +530,15 @@ export function createInitialBattleState(
       buildCombatUnit({
         id: `enemy_${i + 1}`,
         name: `${prefix} ${baseName}`,
-        callsign: isBoss ? 'BOSS' : `Hostile-${i + 1}`,
+        callsign: isBoss ? 'BOSS' : isStructure ? `Turret-${i + 1}` : `Hostile-${i + 1}`,
         side: 'enemy',
-        row: i < 2 ? 'front' : 'back',
+        row: isFront ? 'front' : 'back',
+        formationCol: isFront ? i : i - frontCount,
         isPlayer: false,
         classId: archDef.classId,
         archetype,
         isBoss,
+        isStructure,
         level: Math.max(1, enemyLevel),
         allocatedPoints: generateNpcAllocations(
           archDef.classId,
@@ -539,6 +568,7 @@ export function createInitialBattleState(
   return {
     sectorId: sector.id,
     deployedGearId: activeGear.classId,
+    squadSize,
     units,
     turnOrder,
     activeTurnIndex: 0,
@@ -547,6 +577,7 @@ export function createInitialBattleState(
     selectedAllyTargetId: playerUnit.id,
     lastPlayerTargetId: null,
     autoStopNotice: null,
+    wingmanChat: null,
     log: [openingLog],
     popups: [],
     fxEvents: [],
@@ -572,6 +603,19 @@ export interface ActionResolution {
     | 'destroy';
 }
 
+const LONG_RANGE_SKILL_EFFECTS = new Set<SkillDefinition['effectKind']>([
+  'splash_attack',
+  'multi_attack',
+  'charge_attack',
+  'aoe_elite_attack',
+  'pierce_all_elite',
+  'attack_slow',
+  'attack_shield_break',
+  'attack_pierce',
+  'silence_target',
+  'scan_reveal',
+]);
+
 function getTargetableOpponents(
   units: CombatUnit[],
   actorSide: CombatSide
@@ -579,6 +623,95 @@ function getTargetableOpponents(
   const aliveOpp = units.filter((u) => u.side !== actorSide && u.alive);
   const nonStealth = aliveOpp.filter((u) => !isUnitStealthed(u));
   return nonStealth.length > 0 ? nonStealth : aliveOpp;
+}
+
+/**
+ * Returns true if the actor/action can bypass front-row cover to target back-row units directly:
+ * - Siege Mode active
+ * - Sniper archetype
+ * - Long-range skills (missile/bombing/railgun/multi-enemy/AoE/snipe/scan skills)
+ */
+export function isLongRangeAction(
+  actor: CombatUnit,
+  action: ActionType,
+  skillId?: string
+): boolean {
+  if (hasStatus(actor, 'siege_mode')) return true;
+  if (actor.archetype === 'sniper') return true;
+  if (action === 'skill' && skillId) {
+    const sk = getSkillById(skillId);
+    if (!sk) return false;
+    if (sk.targetType === 'multi_enemy' || sk.targetType === 'all_enemies') {
+      return true;
+    }
+    if (LONG_RANGE_SKILL_EFFECTS.has(sk.effectKind)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Returns valid enemy targets respecting Stealth + Front/Back row rules:
+ * Basic attacks hit the Front row; Back row is targetable ONLY when Front row is empty
+ * OR when the action is long-range (Siege Mode, Sniper, missile/bombing/long-range skills).
+ */
+export function getValidEnemyTargets(
+  units: CombatUnit[],
+  actor: CombatUnit,
+  action: ActionType = 'attack',
+  skillId?: string
+): CombatUnit[] {
+  const basePool = getTargetableOpponents(units, actor.side);
+  if (isLongRangeAction(actor, action, skillId)) {
+    return basePool;
+  }
+  const frontTargets = basePool.filter((u) => u.row === 'front');
+  return frontTargets.length > 0 ? frontTargets : basePool;
+}
+
+/**
+ * Finds alive units adjacent to `targetUnit` within its formation row (col - 1, col + 1).
+ * Works across 4v4 (2x2), 6v6 (2x3), and 8v8 (2x4) formations.
+ */
+export function getAdjacentUnits(
+  units: CombatUnit[],
+  targetUnit: CombatUnit
+): CombatUnit[] {
+  const sameRow = units.filter(
+    (u) => u.side === targetUnit.side && u.row === targetUnit.row
+  );
+  const colOf = (u: CombatUnit, fallbackIdx: number) =>
+    typeof u.formationCol === 'number' ? u.formationCol : fallbackIdx;
+
+  const targetIdx = sameRow.findIndex((u) => u.id === targetUnit.id);
+  if (targetIdx === -1) return [];
+  const targetCol = colOf(targetUnit, targetIdx);
+
+  return sameRow.filter((u, idx) => {
+    if (!u.alive || u.id === targetUnit.id) return false;
+    const c = colOf(u, idx);
+    return Math.abs(c - targetCol) === 1;
+  });
+}
+
+function hydrateFxUnits(
+  fx: CombatFxEvent | null,
+  units: CombatUnit[],
+  actorId: string
+): CombatFxEvent | null {
+  if (!fx) return null;
+  const toSideUnits = units.filter((u) => u.side === fx.toSide);
+  const toUnitIds =
+    fx.toUnitIds ??
+    fx.toSlotIndices
+      .map((slotIdx) => toSideUnits[slotIdx]?.id)
+      .filter((id): id is string => Boolean(id));
+  return {
+    ...fx,
+    fromUnitId: fx.fromUnitId ?? actorId,
+    toUnitIds,
+  };
 }
 
 function applyDamageToUnit(
@@ -1016,6 +1149,32 @@ function decrementCooldowns(
 }
 
 export function resolveUnitAction(
+  units: CombatUnit[],
+  actorId: string,
+  action: ActionType,
+  targetId: string | null,
+  round: number,
+  adminConfig?: AdminConfig,
+  rng: () => number = Math.random,
+  skillId?: string
+): ActionResolution {
+  const result = resolveUnitActionCore(
+    units,
+    actorId,
+    action,
+    targetId,
+    round,
+    adminConfig,
+    rng,
+    skillId
+  );
+  return {
+    ...result,
+    fxEvent: hydrateFxUnits(result.fxEvent, units, actorId),
+  };
+}
+
+function resolveUnitActionCore(
   units: CombatUnit[],
   actorId: string,
   action: ActionType,
@@ -1983,15 +2142,13 @@ export function resolveUnitAction(
             if (res.destroyed) destroyedUnitIds.push(chosen.id);
             if (res.counteredAttackerKilled) destroyedUnitIds.push(act.id);
 
-            // 50% splash to adjacent enemy slots (cSlot - 1, cSlot + 1)
+            // 50% splash to adjacent enemy units in the same formation row (col - 1, col + 1)
             const splashRaw = mainRaw * (skill.secondaryRatio ?? 0.5);
-            const sameSideEnemies = nextUnits.filter(
-              (u) => u.side === chosen.side
-            );
-            for (const adjSlot of [cSlot - 1, cSlot + 1]) {
-              const adj = sameSideEnemies[adjSlot];
-              if (!adj || !adj.alive) continue;
+            const adjacentTargets = getAdjacentUnits(nextUnits, chosen);
+            for (const adj of adjacentTargets) {
+              if (!adj.alive) continue;
               const aIdx = nextUnits.findIndex((u) => u.id === adj.id);
+              const adjSlot = getSlotIndex(units, adj.id);
               targetSlotIndices.push(adjSlot);
               const sRes = applyDamageToUnit(
                 nextUnits,
@@ -2746,7 +2903,7 @@ export function resolveUnitAction(
     animState: 'attacking',
   };
 
-  const opponents = getTargetableOpponents(nextUnits, actor.side);
+  const opponents = getValidEnemyTargets(nextUnits, nextUnits[actorIdx], 'attack');
   const chosenTarget = opponents.find((u) => u.id === targetId) ?? opponents[0];
 
   if (!chosenTarget) {
@@ -2807,17 +2964,16 @@ export function resolveUnitAction(
     }
   }
 
-  // Splash damage trait (from equipped weapon/reactor)
+  // Splash damage trait (from equipped weapon/reactor) hits adjacent formation units
   const fxTargetSlots = [targetSlotIdx];
   if (!res.evaded && actor.derived.splashPct > 0 && res.damageDealt > 0) {
     const splashDmg = Math.max(
       4,
       Math.round((res.damageDealt * actor.derived.splashPct) / 100)
     );
-    const otherOpponent = nextUnits.find(
-      (u) => u.side !== actor.side && u.alive && u.id !== chosenTarget.id
-    );
-    if (otherOpponent) {
+    const adjacentTargets = getAdjacentUnits(nextUnits, chosenTarget);
+    for (const otherOpponent of adjacentTargets) {
+      if (!otherOpponent.alive) continue;
       const oIdx = nextUnits.findIndex((u) => u.id === otherOpponent.id);
       fxTargetSlots.push(getSlotIndex(units, otherOpponent.id));
       const shieldDisabled = hasStatus(otherOpponent, 'shield_break');
@@ -2913,7 +3069,7 @@ export function chooseAiDecision(
   rng: () => number = Math.random
 ): { action: ActionType; targetId: string | null; skillId?: string } {
   const allies = units.filter((u) => u.side === actor.side && u.alive);
-  const enemies = getTargetableOpponents(units, actor.side);
+  const enemies = getValidEnemyTargets(units, actor, 'attack');
 
   if (enemies.length === 0) {
     return { action: 'defend', targetId: null };
@@ -2972,16 +3128,21 @@ export function chooseAiDecision(
   );
   if (tacticalSkills.length > 0 && rng() < 0.55) {
     const pick = randomItem(tacticalSkills, rng);
-    const allyTarget =
+    const skillEnemies = getValidEnemyTargets(units, actor, 'skill', pick.id);
+    const skillEnemyTarget =
+      actor.archetype === 'sniper'
+        ? [...skillEnemies].sort((a, b) => a.hp - b.hp)[0]
+        : skillEnemies.find((e) => e.id === target.id) ?? skillEnemies[0] ?? target;
+    const resolvedTargetId =
       pick.targetType === 'single_ally'
         ? [...allies].sort((a, b) => a.hp - b.hp)[0]?.id ?? actor.id
-        : target.id;
+        : skillEnemyTarget.id;
     return {
       action: 'skill',
       targetId:
         pick.targetType === 'self' || pick.targetType === 'all_allies'
           ? null
-          : allyTarget,
+          : resolvedTargetId,
       skillId: pick.id,
     };
   }

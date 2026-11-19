@@ -528,6 +528,14 @@ function formatCombatLogBody(
         actor: String(p.actor ?? ''),
       });
 
+    case 'log.wingmanChat': {
+      const chatKey = String(p.chatKey ?? 'chat.engaging') as TranslationKey;
+      return translate(lang, 'log.wingmanChat', {
+        actor: String(p.actor ?? ''),
+        quote: translate(lang, chatKey),
+      });
+    }
+
     default:
       return '';
   }
