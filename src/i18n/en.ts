@@ -1274,6 +1274,19 @@ export const EN_TRANSLATIONS = {
   'battle.speechBubbles': 'Unit speech bubbles',
   'battle.speedLabel': 'Speed',
   'battle.skillCdShort': 'CD {turns}t',
+
+  // Battle Visual Effects (G3a)
+  'battle.effectsLabel': 'Effects',
+  'battle.effectsFull': 'Full',
+  'battle.effectsCompact': 'Compact',
+  'battle.effectsOff': 'Off',
+  'battle.vfxMiss': 'MISS',
+  'battle.vfxCrit': 'CRIT',
+  'battle.vfxShield': 'SHIELD',
+  'battle.vfxShieldBreak': 'SHD BREAK',
+  'battle.vfxStealth': 'STEALTH',
+  'battle.vfxReveal': 'REVEALED',
+  'battle.vfxSpRestore': '+SP',
 } as const;
 
 export type TranslationKey = keyof typeof EN_TRANSLATIONS;

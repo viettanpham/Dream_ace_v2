@@ -1276,5 +1276,18 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'battle.speechBubbles': 'Bong bóng thoại đơn vị',
   'battle.speedLabel': 'Tốc độ',
   'battle.skillCdShort': 'Hồi {turns}L',
+
+  // Battle Visual Effects (G3a)
+  'battle.effectsLabel': 'Hiệu ứng',
+  'battle.effectsFull': 'Đầy đủ',
+  'battle.effectsCompact': 'Gọn',
+  'battle.effectsOff': 'Tắt',
+  'battle.vfxMiss': 'TRƯỢT',
+  'battle.vfxCrit': 'CHÍ MẠNG',
+  'battle.vfxShield': 'KHIÊN',
+  'battle.vfxShieldBreak': 'VỠ KHIÊN',
+  'battle.vfxStealth': 'TÀNG HÌNH',
+  'battle.vfxReveal': 'LỘ DIỆN',
+  'battle.vfxSpRestore': '+SP',
 };
 

@@ -548,6 +548,348 @@
   animation: lane-flow 1.3s linear infinite;
 }
 
+/* ==================== FIREFOX-SAFE HTML OVERLAY BATTLE VFX ==================== */
+/* Strictly HTML elements using transform: translate3d/rotate/scale + opacity only. */
+/* Zero transform-box, zero offset-path, zero SVG SMIL. */
+
+@keyframes vfx-cannon-fly {
+  0% {
+    opacity: 0;
+    transform: translate3d(var(--sx), var(--sy), 0) rotate(var(--ang)) scaleX(0.5);
+  }
+  14% {
+    opacity: 1;
+    transform: translate3d(var(--sx1), var(--sy1), 0) rotate(var(--ang)) scaleX(1);
+  }
+  84% {
+    opacity: 1;
+    transform: translate3d(var(--ex1), var(--ey1), 0) rotate(var(--ang)) scaleX(1.06);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--ex), var(--ey), 0) rotate(var(--ang)) scaleX(0.6);
+  }
+}
+
+@keyframes vfx-beam-fire {
+  0% {
+    opacity: 0;
+    transform: translate3d(var(--sx), var(--sy), 0) rotate(var(--ang)) scaleX(0.06) scaleY(0.5);
+  }
+  20% {
+    opacity: 0.98;
+    transform: translate3d(var(--sx), var(--sy), 0) rotate(var(--ang)) scaleX(1) scaleY(1.18);
+  }
+  74% {
+    opacity: 0.9;
+    transform: translate3d(var(--sx), var(--sy), 0) rotate(var(--ang)) scaleX(1) scaleY(0.96);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--sx), var(--sy), 0) rotate(var(--ang)) scaleX(1) scaleY(0.2);
+  }
+}
+
+@keyframes vfx-missile-arc {
+  0% {
+    opacity: 0;
+    transform: translate3d(var(--sx), var(--sy), 0) rotate(var(--ang1)) scale(0.75);
+  }
+  12% {
+    opacity: 1;
+    transform: translate3d(var(--sx), var(--sy), 0) rotate(var(--ang1)) scale(1);
+  }
+  42% {
+    opacity: 1;
+    transform: translate3d(var(--mx1), var(--my1), 0) rotate(var(--ang2)) scale(1.04);
+  }
+  76% {
+    opacity: 1;
+    transform: translate3d(var(--mx2), var(--my2), 0) rotate(var(--ang3)) scale(1.02);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--ex), var(--ey), 0) rotate(var(--ang3)) scale(0.7);
+  }
+}
+
+@keyframes vfx-smoke-puff {
+  0% {
+    opacity: 0;
+    transform: translate3d(var(--px), var(--py), 0) scale(0.4);
+  }
+  25% {
+    opacity: 0.65;
+    transform: translate3d(var(--px), var(--py), 0) scale(0.95);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--px), calc(var(--py) - 8px), 0) scale(1.65);
+  }
+}
+
+@keyframes vfx-ring-expand {
+  0% {
+    opacity: 0;
+    transform: translate3d(var(--tx), var(--ty), 0) scale(0.32);
+  }
+  26% {
+    opacity: 0.95;
+    transform: translate3d(var(--tx), var(--ty), 0) scale(0.92);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--tx), var(--ty), 0) scale(1.85);
+  }
+}
+
+@keyframes vfx-crit-flash {
+  0% {
+    opacity: 0;
+    transform: translate3d(var(--tx), var(--ty), 0) scale(0.4) rotate(0deg);
+  }
+  28% {
+    opacity: 1;
+    transform: translate3d(var(--tx), var(--ty), 0) scale(1.35) rotate(22deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--tx), var(--ty), 0) scale(1.8) rotate(45deg);
+  }
+}
+
+@keyframes vfx-hit-flash-html {
+  0% {
+    opacity: 0;
+    transform: translate3d(var(--tx), var(--ty), 0) scale(0.6);
+  }
+  30% {
+    opacity: 0.92;
+    transform: translate3d(var(--tx), var(--ty), 0) scale(1.18);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--tx), var(--ty), 0) scale(1.5);
+  }
+}
+
+@keyframes vfx-defeat-html {
+  0% {
+    opacity: 0.95;
+    transform: translate3d(var(--tx), var(--ty), 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--tx), var(--ty), 0) scale(0.75);
+  }
+}
+
+@keyframes vfx-shield-shard-left {
+  0% {
+    opacity: 0.95;
+    transform: translate3d(var(--tx), var(--ty), 0) rotate(0deg) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(calc(var(--tx) - 14px), calc(var(--ty) - 8px), 0) rotate(-26deg) scale(0.82);
+  }
+}
+
+@keyframes vfx-shield-shard-right {
+  0% {
+    opacity: 0.95;
+    transform: translate3d(var(--tx), var(--ty), 0) rotate(0deg) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(calc(var(--tx) + 14px), calc(var(--ty) + 8px), 0) rotate(26deg) scale(0.82);
+  }
+}
+
+@keyframes vfx-particle-rise {
+  0% {
+    opacity: 0;
+    transform: translate3d(var(--tx), calc(var(--ty) + 6px), 0) scale(0.82);
+  }
+  24% {
+    opacity: 1;
+    transform: translate3d(var(--tx), calc(var(--ty) - 4px), 0) scale(1);
+  }
+  82% {
+    opacity: 0.95;
+    transform: translate3d(var(--tx), calc(var(--ty) - 22px), 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--tx), calc(var(--ty) - 30px), 0) scale(0.92);
+  }
+}
+
+@keyframes vfx-particle-fall {
+  0% {
+    opacity: 0;
+    transform: translate3d(var(--tx), calc(var(--ty) - 18px), 0) scale(0.85);
+  }
+  24% {
+    opacity: 1;
+    transform: translate3d(var(--tx), calc(var(--ty) - 8px), 0) scale(1);
+  }
+  82% {
+    opacity: 0.95;
+    transform: translate3d(var(--tx), calc(var(--ty) + 10px), 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--tx), calc(var(--ty) + 18px), 0) scale(0.92);
+  }
+}
+
+@keyframes vfx-debuff-shake {
+  0% {
+    opacity: 0.95;
+    transform: translate3d(var(--tx), var(--ty), 0);
+  }
+  20% {
+    opacity: 0.95;
+    transform: translate3d(calc(var(--tx) - 5px), var(--ty), 0);
+  }
+  40% {
+    opacity: 0.9;
+    transform: translate3d(calc(var(--tx) + 5px), var(--ty), 0);
+  }
+  60% {
+    opacity: 0.8;
+    transform: translate3d(calc(var(--tx) - 3px), var(--ty), 0);
+  }
+  80% {
+    opacity: 0.5;
+    transform: translate3d(calc(var(--tx) + 2px), var(--ty), 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--tx), var(--ty), 0);
+  }
+}
+
+@keyframes vfx-dodge-slide {
+  0% {
+    opacity: 0;
+    transform: translate3d(var(--tx), var(--ty), 0);
+  }
+  22% {
+    opacity: 1;
+    transform: translate3d(calc(var(--tx) + var(--dodge-dx, 10px)), calc(var(--ty) - 4px), 0);
+  }
+  75% {
+    opacity: 0.9;
+    transform: translate3d(calc(var(--tx) + var(--dodge-dx, 10px)), calc(var(--ty) - 6px), 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--tx), calc(var(--ty) - 10px), 0);
+  }
+}
+
+@keyframes vfx-stealth-veil {
+  0% {
+    opacity: 0.9;
+    transform: translate3d(var(--tx), var(--ty), 0) scale(1.1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--tx), var(--ty), 0) scale(0.65);
+  }
+}
+
+@keyframes vfx-html-sweep-spin {
+  from {
+    transform: translate3d(-50%, -50%, 0) rotate(0deg);
+  }
+  to {
+    transform: translate3d(-50%, -50%, 0) rotate(360deg);
+  }
+}
+
+.vfx-cannon-fly {
+  animation: vfx-cannon-fly var(--vfx-dur, 440ms) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.vfx-beam-fire {
+  animation: vfx-beam-fire var(--vfx-dur, 480ms) ease-out forwards;
+  will-change: transform, opacity;
+}
+
+.vfx-missile-arc {
+  animation: vfx-missile-arc var(--vfx-dur, 580ms) cubic-bezier(0.25, 0.72, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.vfx-smoke-puff {
+  animation: vfx-smoke-puff var(--vfx-dur, 380ms) ease-out forwards;
+  will-change: transform, opacity;
+}
+
+.vfx-ring-expand {
+  animation: vfx-ring-expand var(--vfx-dur, 480ms) cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.vfx-crit-flash {
+  animation: vfx-crit-flash var(--vfx-dur, 460ms) cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.vfx-hit-flash-html {
+  animation: vfx-hit-flash-html var(--vfx-dur, 280ms) ease-out forwards;
+  will-change: transform, opacity;
+}
+
+.vfx-defeat-html {
+  animation: vfx-defeat-html var(--vfx-dur, 440ms) ease-out forwards;
+  will-change: transform, opacity;
+}
+
+.vfx-shield-shard-left {
+  animation: vfx-shield-shard-left var(--vfx-dur, 540ms) ease-out forwards;
+  will-change: transform, opacity;
+}
+
+.vfx-shield-shard-right {
+  animation: vfx-shield-shard-right var(--vfx-dur, 540ms) ease-out forwards;
+  will-change: transform, opacity;
+}
+
+.vfx-particle-rise {
+  animation: vfx-particle-rise var(--vfx-dur, 520ms) cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.vfx-particle-fall {
+  animation: vfx-particle-fall var(--vfx-dur, 520ms) cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.vfx-debuff-shake {
+  animation: vfx-debuff-shake var(--vfx-dur, 420ms) linear forwards;
+  will-change: transform, opacity;
+}
+
+.vfx-dodge-slide {
+  animation: vfx-dodge-slide var(--vfx-dur, 440ms) ease-out forwards;
+  will-change: transform, opacity;
+}
+
+.vfx-stealth-veil {
+  animation: vfx-stealth-veil var(--vfx-dur, 500ms) ease-out forwards;
+  will-change: transform, opacity;
+}
+
+.vfx-html-sweep {
+  animation: vfx-html-sweep-spin 11s linear infinite;
+  will-change: transform;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .anim-ship-hover,
   .anim-ship-hover-hero,
@@ -579,7 +921,23 @@
   .anim-turn-arrow,
   .anim-conveyor-shift,
   .anim-raid-pulse,
-  .anim-lane-flow {
+  .anim-lane-flow,
+  .vfx-cannon-fly,
+  .vfx-beam-fire,
+  .vfx-missile-arc,
+  .vfx-smoke-puff,
+  .vfx-ring-expand,
+  .vfx-crit-flash,
+  .vfx-hit-flash-html,
+  .vfx-defeat-html,
+  .vfx-shield-shard-left,
+  .vfx-shield-shard-right,
+  .vfx-particle-rise,
+  .vfx-particle-fall,
+  .vfx-debuff-shake,
+  .vfx-dodge-slide,
+  .vfx-stealth-veil,
+  .vfx-html-sweep {
     animation: none;
   }
   .meter-fill,

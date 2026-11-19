@@ -5,7 +5,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
 } from 'react';
 import { HelpCircle, Radio, X } from 'lucide-react';
 import { getTeamColorRole, hasStatus } from '../engine/combat';
@@ -14,7 +13,6 @@ import type {
   ActiveStatusEffect,
   BattleSpeed,
   BattleState,
-  CombatFxEvent,
   CombatRow,
   CombatUnit,
   FloatingPopup,
@@ -23,8 +21,6 @@ import type {
 } from '../types/game';
 import {
   computeDefeatFadeDurationMs,
-  computeHitFlashDurationMs,
-  computeRadarFxDurationMs,
   computeRowExposure,
   computeSpeechBubbleAnchor,
   evaluateRadarTargetValidity,
@@ -44,6 +40,14 @@ import {
   type TargetInvalidReason,
   type TargetValidityResult,
 } from '../utils/battleDisplay';
+import {
+  resolveEffectiveVfxConfig,
+  type BattleEffectsMode,
+} from '../utils/battleVfx';
+import {
+  BattleVfxOverlay,
+  type ManualAimLineSpec,
+} from './BattleVfxOverlay';
 
 interface BattleRadarViewProps {
   battle: BattleState;
@@ -55,6 +59,8 @@ interface BattleRadarViewProps {
   skipAnimations: boolean;
   speechBubblesEnabled?: boolean;
   battleSpeed?: BattleSpeed;
+  effectsMode?: BattleEffectsMode;
+  playerWeaponId?: string | null;
   layoutMode?: BattleLayoutMode;
   onSelectEnemy: (unitId: string) => void;
   onSelectAlly: (unitId: string) => void;
@@ -514,39 +520,10 @@ function computeUnitPositions(
   return map;
 }
 
-function resolveFxEndpoints(
-  fx: CombatFxEvent,
-  battle: BattleState,
-  posMap: Map<string, TokenPos>
-): { from: TokenPos | null; targets: Array<{ id: string; pos: TokenPos }> } {
-  const fromSideUnits = battle.units.filter((u) => u.side === fx.fromSide);
-  const toSideUnits = battle.units.filter((u) => u.side === fx.toSide);
-
-  const fromId = fx.fromUnitId ?? fromSideUnits[fx.fromSlotIndex]?.id;
-  const from = fromId ? posMap.get(fromId) ?? null : null;
-
-  const targetIds =
-    fx.toUnitIds && fx.toUnitIds.length > 0
-      ? fx.toUnitIds
-      : fx.toSlotIndices
-          .map((idx) => toSideUnits[idx]?.id)
-          .filter((id): id is string => Boolean(id));
-
-  const targets = targetIds
-    .map((id) => {
-      const pos = posMap.get(id);
-      return pos ? { id, pos } : null;
-    })
-    .filter((entry): entry is { id: string; pos: TokenPos } => Boolean(entry));
-
-  return { from, targets };
-}
-
 interface RadarUnitMarkerProps {
   unit: CombatUnit;
   x: number;
   y: number;
-  idx: number;
   tokenRadius: number;
   hitSize: number;
   barW: number;
@@ -554,14 +531,11 @@ interface RadarUnitMarkerProps {
   isActive: boolean;
   isTargeted: boolean;
   isBlockedByRow: boolean;
-  isHitFlashing: boolean;
-  isDefeatFading: boolean;
-  hitFlashDurationMs: number;
-  defeatFadeDurationMs: number;
   autoBattleEnabled: boolean;
-  animationsSkipped: boolean;
   hoverTooltip: string;
   autoBadgeText: string;
+  onMarkerRef: (unitId: string, el: SVGGElement | null) => void;
+  onHoverUnit: (unitId: string | null) => void;
   onTap: (unitId: string) => void;
   onLongPressStart: (unitId: string) => void;
   onLongPressCancel: () => void;
@@ -571,7 +545,6 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
   unit,
   x,
   y,
-  idx,
   tokenRadius,
   hitSize,
   barW,
@@ -579,14 +552,11 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
   isActive,
   isTargeted,
   isBlockedByRow,
-  isHitFlashing,
-  isDefeatFading,
-  hitFlashDurationMs,
-  defeatFadeDurationMs,
   autoBattleEnabled,
-  animationsSkipped,
   hoverTooltip,
   autoBadgeText,
+  onMarkerRef,
+  onHoverUnit,
   onTap,
   onLongPressStart,
   onLongPressCancel,
@@ -641,6 +611,7 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
 
   return (
     <g
+      ref={(el) => onMarkerRef(unit.id, el)}
       data-testid={`radar-unit-${unit.id}`}
       data-unit-row={unit.row}
       data-unit-side={unit.side}
@@ -656,6 +627,10 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
       aria-label={hoverTooltip}
       aria-disabled={!unit.alive ? 'true' : undefined}
       onClick={() => onTap(unit.id)}
+      onMouseEnter={() => onHoverUnit(unit.id)}
+      onMouseLeave={() => onHoverUnit(null)}
+      onFocus={() => onHoverUnit(unit.id)}
+      onBlur={() => onHoverUnit(null)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -686,18 +661,9 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
         fill="transparent"
       />
 
-      {/* Core visual body with dimmed/down opacity */}
+      {/* Core visual body with dimmed/down opacity (static SVG — zero animated SVG transforms) */}
       <g opacity={markerOpacity}>
-        <g
-          className={
-            unit.alive && !animationsSkipped ? 'anim-token-hover' : undefined
-          }
-          style={
-            unit.alive && !animationsSkipped
-              ? { animationDelay: `${(idx % 5) * 0.4}s` }
-              : undefined
-          }
-        >
+        <g>
           {/* Acting Unit Ring (distinct gold-white halo) */}
           {isActive && unit.alive && (
             <circle
@@ -713,10 +679,7 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
 
           {/* Current Target Ring (distinct dashed/reticle ring) */}
           {isTargeted && unit.alive && (
-            <g
-              data-testid={`radar-target-ring-${unit.id}`}
-              className={animationsSkipped ? undefined : 'anim-reticle-pulse'}
-            >
+            <g data-testid={`radar-target-ring-${unit.id}`}>
               <circle
                 cx="0"
                 cy="0"
@@ -937,20 +900,14 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
               rx="1.5"
               fill="#1e293b"
             />
-            <g transform={`translate(${-barW / 2}, 0)`}>
-              <rect
-                x="0"
-                y="0"
-                width={barW}
-                height="3.8"
-                rx="1.5"
-                fill={hpFillColor}
-                style={{
-                  transform: `scaleX(${hpRatio})`,
-                  transformOrigin: '0px 0px',
-                }}
-              />
-            </g>
+            <rect
+              x={-barW / 2}
+              y="0"
+              width={Math.max(0, barW * hpRatio)}
+              height="3.8"
+              rx="1.5"
+              fill={hpFillColor}
+            />
 
             <rect
               x={-barW / 2}
@@ -961,20 +918,14 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
               fill="#1e293b"
             />
             {unit.derived.maxShield > 0 && (
-              <g transform={`translate(${-barW / 2}, 4.8)`}>
-                <rect
-                  x="0"
-                  y="0"
-                  width={barW}
-                  height="2.4"
-                  rx="1"
-                  fill={hasStatus(unit, 'shield_break') ? '#ef4444' : '#38bdf8'}
-                  style={{
-                    transform: `scaleX(${shdRatio})`,
-                    transformOrigin: '0px 0px',
-                  }}
-                />
-              </g>
+              <rect
+                x={-barW / 2}
+                y="4.8"
+                width={Math.max(0, barW * shdRatio)}
+                height="2.4"
+                rx="1"
+                fill={hasStatus(unit, 'shield_break') ? '#ef4444' : '#38bdf8'}
+              />
             )}
 
             <rect
@@ -1044,43 +995,6 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
         </g>
       )}
 
-      {/* Brief Hit Flash Overlay (transform/opacity only; skipped on reduced motion) */}
-      {!animationsSkipped && isHitFlashing && (
-        <g
-          data-testid={`radar-hit-flash-${unit.id}`}
-          className="pointer-events-none anim-radar-hit-flash"
-          style={{ '--hit-dur': `${hitFlashDurationMs}ms` } as CSSProperties}
-        >
-          <circle
-            cx="0"
-            cy="0"
-            r={visualRadius + 4}
-            fill="rgba(255, 255, 255, 0.55)"
-            stroke="#fef08a"
-            strokeWidth="2.4"
-          />
-        </g>
-      )}
-
-      {/* Defeat Fade-Out Overlay (~400ms, transform/opacity only; skipped on reduced motion) */}
-      {!animationsSkipped && isDefeatFading && (
-        <g
-          data-testid={`radar-defeat-fade-${unit.id}`}
-          className="pointer-events-none anim-radar-defeat-fade"
-          style={
-            { '--defeat-dur': `${defeatFadeDurationMs}ms` } as CSSProperties
-          }
-        >
-          <circle
-            cx="0"
-            cy="0"
-            r={visualRadius + 5}
-            fill="rgba(239, 68, 68, 0.25)"
-            stroke="#f87171"
-            strokeWidth="2.2"
-          />
-        </g>
-      )}
     </g>
   );
 });
@@ -1095,6 +1009,8 @@ export function BattleRadarView({
   skipAnimations,
   speechBubblesEnabled = true,
   battleSpeed = 1,
+  effectsMode = 'full',
+  playerWeaponId = null,
   layoutMode: layoutModeProp,
   onSelectEnemy,
   onSelectAlly,
@@ -1105,25 +1021,48 @@ export function BattleRadarView({
   const prefersReducedMotion = usePrefersReducedMotion();
   const layoutMode = layoutModeProp ?? detectedMode;
   const isLandscape = layoutMode !== 'phone-portrait';
-  const animationsSkipped = skipAnimations || prefersReducedMotion;
+  const vfxConfig = useMemo(
+    () =>
+      resolveEffectiveVfxConfig(
+        effectsMode,
+        battleSpeed,
+        prefersReducedMotion,
+        skipAnimations
+      ),
+    [effectsMode, battleSpeed, prefersReducedMotion, skipAnimations]
+  );
+  const animationsSkipped = vfxConfig.animationsSkipped;
 
   const [legendOpen, setLegendOpen] = useState<boolean>(() =>
     readRadarLegendOpen()
   );
   const [invalidToast, setInvalidToast] = useState<string | null>(null);
   const [fadingDefeatIds, setFadingDefeatIds] = useState<string[]>([]);
+  const [hoveredTargetId, setHoveredTargetId] = useState<string | null>(null);
   const [visibleBubbleId, setVisibleBubbleId] = useState<string | null>(
     battle.wingmanChat?.id ?? null
   );
 
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const markerElementsRef = useRef<Map<string, SVGGElement>>(new Map());
   const toastTimerRef = useRef<number | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const longPressFiredRef = useRef(false);
   const prevAliveMapRef = useRef<Map<string, boolean>>(new Map());
   const defeatTimersRef = useRef<Map<string, number>>(new Map());
 
+  const registerMarkerRef = useCallback(
+    (unitId: string, el: SVGGElement | null) => {
+      if (el) {
+        markerElementsRef.current.set(unitId, el);
+      } else {
+        markerElementsRef.current.delete(unitId);
+      }
+    },
+    []
+  );
+
   const defeatFadeDurationMs = computeDefeatFadeDurationMs(battleSpeed);
-  const hitFlashDurationMs = computeHitFlashDurationMs(battleSpeed);
 
   const toggleLegend = useCallback(() => {
     setLegendOpen((prev) => {
@@ -1313,17 +1252,24 @@ export function BattleRadarView({
   const fxHitTargetIds = useMemo(() => {
     const set = new Set<string>();
     for (const u of battle.units) {
-      if (u.animState === 'hit') set.add(u.id);
+      if (u.animState === 'hit' || u.animState === 'shielded') set.add(u.id);
     }
     for (const fx of battle.fxEvents) {
       if (fx.kind === 'heal') continue;
-      const { targets } = resolveFxEndpoints(fx, battle, posMap);
-      for (const entry of targets) {
-        set.add(entry.id);
+      if (fx.toUnitIds && fx.toUnitIds.length > 0) {
+        for (const id of fx.toUnitIds) {
+          if (id) set.add(id);
+        }
+      } else {
+        const toSideUnits = battle.units.filter((u) => u.side === fx.toSide);
+        for (const slotIdx of fx.toSlotIndices) {
+          const target = toSideUnits[slotIdx];
+          if (target) set.add(target.id);
+        }
       }
     }
     return set;
-  }, [battle, posMap]);
+  }, [battle.units, battle.fxEvents]);
 
   const defeatFadingSet = useMemo(() => {
     const set = new Set<string>(fadingDefeatIds);
@@ -1453,74 +1399,81 @@ export function BattleRadarView({
     }
   }, []);
 
-  const aimArrow = useMemo(() => {
-    if (battle.summary || !activeUnit || !activeUnit.alive) return null;
-    const from = posMap.get(activeUnit.id);
-    if (!from) return null;
+  // Thin targeting line shown ONLY while the player is choosing a target in Manual mode.
+  // Removed in Auto mode, during enemy/AI turns, and as soon as an action is confirmed/resolving.
+  const manualAimLine = useMemo<ManualAimLineSpec | null>(() => {
+    if (
+      battle.summary ||
+      autoBattleEnabled ||
+      !canPlayerManualAct ||
+      battle.isResolving ||
+      battle.fxEvents.length > 0 ||
+      !activeUnit ||
+      !activeUnit.isPlayer ||
+      !activeUnit.alive
+    ) {
+      return null;
+    }
 
     let targetUnit: CombatUnit | null = null;
-    if (activeUnit.side === 'ally') {
-      if (hasSingleAllySkill && battle.selectedAllyTargetId) {
-        const allyTarget = battle.units.find(
-          (u) => u.id === battle.selectedAllyTargetId && u.alive
-        );
-        if (allyTarget && allyTarget.id !== activeUnit.id) {
-          targetUnit = allyTarget;
+
+    // Priority 1: Hovered valid target during Manual selection
+    if (hoveredTargetId && hoveredTargetId !== activeUnit.id) {
+      const hovered = battle.units.find(
+        (u) => u.id === hoveredTargetId && u.alive
+      );
+      if (hovered) {
+        if (hovered.side === 'enemy') {
+          const validity = enemyValidityMap.get(hovered.id);
+          if (!validity || validity.valid) {
+            targetUnit = hovered;
+          }
+        } else if (hasSingleAllySkill) {
+          targetUnit = hovered;
         }
       }
-      if (!targetUnit && battle.selectedTargetId) {
-        const enemyTarget = battle.units.find(
-          (u) => u.id === battle.selectedTargetId && u.alive
-        );
-        if (enemyTarget) targetUnit = enemyTarget;
+    }
+
+    // Priority 2: Currently selected ally (when player has single-ally support skill)
+    if (!targetUnit && hasSingleAllySkill && battle.selectedAllyTargetId) {
+      const allyTarget = battle.units.find(
+        (u) => u.id === battle.selectedAllyTargetId && u.alive
+      );
+      if (allyTarget && allyTarget.id !== activeUnit.id) {
+        targetUnit = allyTarget;
       }
-    } else {
-      const exposedAllyRow =
-        allyExposure.front === 'exposed'
-          ? 'front'
-          : allyExposure.middle === 'exposed'
-          ? 'middle'
-          : 'back';
-      targetUnit =
-        battle.units.find(
-          (u) => u.side === 'ally' && u.alive && u.row === exposedAllyRow
-        ) ??
-        battle.units.find((u) => u.side === 'ally' && u.alive) ??
-        null;
+    }
+
+    // Priority 3: Currently selected enemy target
+    if (!targetUnit && battle.selectedTargetId) {
+      const enemyTarget = battle.units.find(
+        (u) => u.id === battle.selectedTargetId && u.alive
+      );
+      if (enemyTarget) {
+        targetUnit = enemyTarget;
+      }
     }
 
     if (!targetUnit || targetUnit.id === activeUnit.id) return null;
-    const to = posMap.get(targetUnit.id);
-    if (!to) return null;
 
-    const dx = to.x - from.x;
-    const dy = to.y - from.y;
-    const dist = Math.hypot(dx, dy);
-    const padStart = tokenRadius + 10;
-    const padEnd = tokenRadius + 12;
-    if (dist <= padStart + padEnd + 4) return null;
-
-    const ux = dx / dist;
-    const uy = dy / dist;
     return {
-      x1: from.x + ux * padStart,
-      y1: from.y + uy * padStart,
-      x2: to.x - ux * padEnd,
-      y2: to.y - uy * padEnd,
-      isAllySupport: targetUnit.side === activeUnit.side,
       fromId: activeUnit.id,
       toId: targetUnit.id,
+      isAllySupport: targetUnit.side === activeUnit.side,
     };
   }, [
     battle.summary,
+    battle.isResolving,
+    battle.fxEvents.length,
     battle.units,
     battle.selectedTargetId,
     battle.selectedAllyTargetId,
+    autoBattleEnabled,
+    canPlayerManualAct,
     activeUnit,
+    hoveredTargetId,
+    enemyValidityMap,
     hasSingleAllySkill,
-    allyExposure,
-    posMap,
-    tokenRadius,
   ]);
 
   // Compact speech bubble (single short line <= 28 chars, collision-avoiding anchor, auto-hides after 1.5s, toggleable)
@@ -1580,12 +1533,13 @@ export function BattleRadarView({
 
   return (
     <div
+      ref={containerRef}
       data-testid="battle-radar-container"
       data-animations-skipped={animationsSkipped ? 'true' : 'false'}
       style={{ touchAction: 'pan-y' }}
       className="relative flex-1 min-h-0 w-full h-full flex items-center justify-center overflow-hidden rounded-lg border border-slate-800/90 bg-[#050A12] select-none touch-pan-y"
     >
-      {/* Main Tactical 3-Row Radar SVG — scales to fit with zero inner scroll & zero clipping */}
+      {/* Main Tactical 3-Row Radar SVG — static geometry only (zero animated SVG transforms) */}
       <svg
         viewBox={`0 0 ${vw} ${vh}`}
         preserveAspectRatio="xMidYMid meet"
@@ -1600,32 +1554,6 @@ export function BattleRadarView({
             <stop offset="55%" stopColor="#07111d" stopOpacity="0.88" />
             <stop offset="100%" stopColor="#04080f" stopOpacity="1" />
           </radialGradient>
-          <linearGradient id="radarSweepGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#38bdf8" stopOpacity="0" />
-            <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.14" />
-          </linearGradient>
-          <marker
-            id="radarAimArrowEnemy"
-            viewBox="0 0 10 10"
-            refX="7"
-            refY="5"
-            markerWidth="6.5"
-            markerHeight="6.5"
-            orient="auto"
-          >
-            <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#f87171" />
-          </marker>
-          <marker
-            id="radarAimArrowAlly"
-            viewBox="0 0 10 10"
-            refX="7"
-            refY="5"
-            markerWidth="6.5"
-            markerHeight="6.5"
-            orient="auto"
-          >
-            <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#34d399" />
-          </marker>
         </defs>
 
         <rect x="0" y="0" width={vw} height={vh} fill="url(#radarBgGlow)" />
@@ -1638,8 +1566,6 @@ export function BattleRadarView({
             r={st.r}
             fill="#bae6fd"
             opacity="0.3"
-            className={animationsSkipped ? undefined : 'anim-radar-star'}
-            style={animationsSkipped ? undefined : { animationDelay: st.delay }}
           />
         ))}
 
@@ -1656,23 +1582,6 @@ export function BattleRadarView({
             strokeDasharray={i === 1 ? '4 5' : undefined}
           />
         ))}
-
-        {!animationsSkipped && (
-          <g
-            data-testid="radar-sweep-layer"
-            className="anim-radar-sweep"
-            style={{ transformOrigin: `${cx}px ${cy}px` }}
-          >
-            <path
-              d={`M ${cx} ${cy} L ${cx} ${cy - Math.max(vw, vh) * 0.52} A ${
-                Math.max(vw, vh) * 0.52
-              } ${Math.max(vw, vh) * 0.52} 0 0 1 ${
-                cx + Math.max(vw, vh) * 0.22
-              } ${cy - Math.max(vw, vh) * 0.46} Z`}
-              fill="url(#radarSweepGrad)"
-            />
-          </g>
-        )}
 
         {/* 3-ROW CONTENT-FIT LANE BANDS (smaller Exposed/Protected labels) */}
         {lanes.map((lane) => {
@@ -1784,35 +1693,8 @@ export function BattleRadarView({
           />
         )}
 
-        {/* Actor-to-Target Aim Line & Arrow */}
-        {aimArrow && (
-          <g
-            data-testid="radar-target-arrow"
-            data-from={aimArrow.fromId}
-            data-to={aimArrow.toId}
-            className="pointer-events-none"
-          >
-            <line
-              x1={aimArrow.x1}
-              y1={aimArrow.y1}
-              x2={aimArrow.x2}
-              y2={aimArrow.y2}
-              stroke={aimArrow.isAllySupport ? '#34d399' : '#f87171'}
-              strokeOpacity="0.72"
-              strokeWidth="1.8"
-              strokeDasharray="5 4"
-              strokeLinecap="round"
-              markerEnd={
-                aimArrow.isAllySupport
-                  ? 'url(#radarAimArrowAlly)'
-                  : 'url(#radarAimArrowEnemy)'
-              }
-            />
-          </g>
-        )}
-
         {/* MEMOIZED UNIT MARKERS */}
-        {battle.units.map((unit, idx) => {
+        {battle.units.map((unit) => {
           const pos = posMap.get(unit.id);
           if (!pos) return null;
 
@@ -1857,7 +1739,6 @@ export function BattleRadarView({
               unit={unit}
               x={pos.x}
               y={pos.y}
-              idx={idx}
               tokenRadius={tokenRadius}
               hitSize={hitSize}
               barW={barW}
@@ -1865,114 +1746,34 @@ export function BattleRadarView({
               isActive={isActive}
               isTargeted={isTargeted}
               isBlockedByRow={isBlockedByRow}
-              isHitFlashing={fxHitTargetIds.has(unit.id)}
-              isDefeatFading={defeatFadingSet.has(unit.id)}
-              hitFlashDurationMs={hitFlashDurationMs}
-              defeatFadeDurationMs={defeatFadeDurationMs}
               autoBattleEnabled={autoBattleEnabled}
-              animationsSkipped={animationsSkipped}
               hoverTooltip={hoverTooltip}
               autoBadgeText={autoBadgeText}
+              onMarkerRef={registerMarkerRef}
+              onHoverUnit={setHoveredTargetId}
               onTap={handleTokenTap}
               onLongPressStart={handleLongPressStart}
               onLongPressCancel={handleLongPressCancel}
             />
           );
         })}
-
-        {/* COMPOSITOR-ONLY COMBAT FX LAYER */}
-        {!animationsSkipped &&
-          battle.fxEvents.map((fx) => {
-            const { from, targets } = resolveFxEndpoints(fx, battle, posMap);
-            if (!from || targets.length === 0) return null;
-            const durationMs = computeRadarFxDurationMs(fx.kind, battleSpeed);
-
-            return (
-              <g
-                key={fx.id}
-                data-testid={`radar-fx-${fx.id}`}
-                data-fx-kind={fx.kind}
-                data-fx-duration={durationMs}
-                className="pointer-events-none"
-              >
-                {targets.map(({ id: targetId, pos: to }) => {
-                  const dx = to.x - from.x;
-                  const dy = to.y - from.y;
-                  const dist = Math.max(1, Math.hypot(dx, dy));
-                  const angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
-                  const isBeam = fx.kind === 'railgun' || fx.kind === 'heal';
-                  const accent = fx.kind === 'heal' ? '#34d399' : fx.accentHex;
-
-                  if (isBeam) {
-                    return (
-                      <g
-                        key={targetId}
-                        transform={`translate(${from.x}, ${from.y}) rotate(${angleDeg.toFixed(
-                          2
-                        )})`}
-                      >
-                        <g
-                          className="anim-radar-beam"
-                          style={
-                            { '--fx-dur': `${durationMs}ms` } as CSSProperties
-                          }
-                        >
-                          <rect
-                            x="0"
-                            y={fx.kind === 'railgun' ? -3 : -2}
-                            width={dist}
-                            height={fx.kind === 'railgun' ? 6 : 4}
-                            rx="2"
-                            fill={accent}
-                            fillOpacity="0.45"
-                          />
-                          <rect
-                            x="0"
-                            y="-1"
-                            width={dist}
-                            height="2"
-                            rx="1"
-                            fill={fx.kind === 'heal' ? '#a7f3d0' : '#fef9c3'}
-                          />
-                        </g>
-                      </g>
-                    );
-                  }
-
-                  return (
-                    <g
-                      key={targetId}
-                      transform={`translate(${from.x}, ${from.y})`}
-                    >
-                      <g
-                        className="anim-radar-projectile"
-                        style={
-                          {
-                            '--dx': `${dx.toFixed(1)}px`,
-                            '--dy': `${dy.toFixed(1)}px`,
-                            '--fx-dur': `${durationMs}ms`,
-                          } as CSSProperties
-                        }
-                      >
-                        <g transform={`rotate(${angleDeg.toFixed(2)})`}>
-                          <rect
-                            x={fx.kind === 'missile' ? -11 : -8}
-                            y={fx.kind === 'missile' ? -2.4 : -1.8}
-                            width={fx.kind === 'missile' ? 16 : 13}
-                            height={fx.kind === 'missile' ? 4.8 : 3.6}
-                            rx="2"
-                            fill={accent}
-                          />
-                          <circle cx="4" cy="0" r="2.2" fill="#ffffff" />
-                        </g>
-                      </g>
-                    </g>
-                  );
-                })}
-              </g>
-            );
-          })}
       </svg>
+
+      {/* Firefox-Safe HTML Visual Effects Overlay (translate3d + opacity only; zero animated SVG transforms) */}
+      <BattleVfxOverlay
+        battle={battle}
+        containerRef={containerRef}
+        markerElementsRef={markerElementsRef}
+        svgPosMap={posMap}
+        vw={vw}
+        vh={vh}
+        battleSpeed={battleSpeed}
+        vfxConfig={vfxConfig}
+        playerWeaponId={playerWeaponId}
+        manualAimLine={manualAimLine}
+        hitFlashUnitIds={fxHitTargetIds}
+        defeatFadingUnitIds={defeatFadingSet}
+      />
 
       {/* Collapsible Tactical Legend (closed by default, persisted in localStorage) */}
       <div className="absolute top-1.5 right-1.5 z-30 flex flex-col items-end">
@@ -2082,8 +1883,8 @@ export function BattleRadarView({
         </div>
       )}
 
-      {/* Staggered Floating Popups (max 6 simultaneous; buffs/status rendered compact & tight-anchored) */}
-      {!animationsSkipped && staggeredPopups.length > 0 && (
+      {/* Staggered Floating Popups (max 6 simultaneous; kept when Effects=Off, skipped on reduced motion) */}
+      {vfxConfig.showFloatingNumbers && staggeredPopups.length > 0 && (
         <div className="pointer-events-none absolute inset-0 overflow-hidden">
           {staggeredPopups.map((item) => {
             const isSmall = isCompactPopupTone(item.popup.tone);

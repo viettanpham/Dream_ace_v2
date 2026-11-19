@@ -459,10 +459,10 @@ export function computeRadarFxDurationMs(
 ): number {
   const baseMs =
     kind === 'missile'
-      ? 460
+      ? 480
       : kind === 'railgun' || kind === 'heal'
-      ? 420
-      : 350;
+      ? 440
+      : 400;
   const safeSpeed = Math.max(1, battleSpeed);
   return Math.max(90, Math.round(baseMs / safeSpeed));
 }

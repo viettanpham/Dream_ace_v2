@@ -73,6 +73,11 @@ import {
   writeSpeechBubblesEnabled,
   type RowExposureState,
 } from '../utils/battleDisplay';
+import {
+  readBattleEffectsMode,
+  writeBattleEffectsMode,
+  type BattleEffectsMode,
+} from '../utils/battleVfx';
 import { BattleRadarView } from './BattleRadarView';
 import { BattleStatsModal } from './BattleStatsModal';
 import { BattleUnitCard } from './BattleUnitCard';
@@ -100,6 +105,7 @@ function getTeamAccentVar(unit: CombatUnit): string {
 export function BattleScreen() {
   const { lang, t } = useI18n();
   const battle = useGameStore((s) => s.battle);
+  const pilot = useGameStore((s) => s.pilot);
   const adminConfig = useGameStore((s) => s.adminConfig);
   const battleSpeed = useGameStore((s) => s.battleSpeed);
   const skipAnimations = useGameStore((s) => s.skipAnimations);
@@ -147,6 +153,9 @@ export function BattleScreen() {
   const [speechBubblesEnabled, setSpeechBubblesEnabled] = useState<boolean>(
     () => readSpeechBubblesEnabled()
   );
+  const [effectsMode, setEffectsMode] = useState<BattleEffectsMode>(() =>
+    readBattleEffectsMode()
+  );
   const [cardToast, setCardToast] = useState<string | null>(null);
 
   const toggleSpeechBubbles = () => {
@@ -156,6 +165,22 @@ export function BattleScreen() {
       return next;
     });
   };
+
+  const handleSetEffectsMode = (mode: BattleEffectsMode) => {
+    setEffectsMode(mode);
+    writeBattleEffectsMode(mode);
+  };
+
+  const playerWeaponId = useMemo(() => {
+    if (!battle) return null;
+    const gear = pilot.gears[battle.deployedGearId];
+    const weaponInstanceId = gear?.equipped?.main_weapon;
+    if (!weaponInstanceId) return null;
+    const item = pilot.inventory.find(
+      (entry) => entry.instanceId === weaponInstanceId
+    );
+    return item?.templateId ?? null;
+  }, [battle, pilot]);
 
   const bypassFx = skipAnimations || battleSpeed === 10;
 
@@ -189,8 +214,8 @@ export function BattleScreen() {
     if (!battle || battle.fxEvents.length === 0) return;
     const ids = battle.fxEvents.map((f) => f.id);
     const fxCleanupMs = Math.max(
-      140,
-      Math.round(500 / Math.max(1, Math.min(3, battleSpeed)))
+      120,
+      Math.round(680 / Math.max(1, battleSpeed))
     );
     const timer = window.setTimeout(() => {
       clearExpiredFx(ids);
@@ -677,9 +702,11 @@ export function BattleScreen() {
           canPlayerManualAct={canPlayerManualAct}
           hasSingleAllySkill={hasSingleAllySkill}
           autoBattleEnabled={autoBattleEnabled}
-          skipAnimations={bypassFx}
+          skipAnimations={skipAnimations}
           speechBubblesEnabled={speechBubblesEnabled}
           battleSpeed={battleSpeed}
+          effectsMode={effectsMode}
+          playerWeaponId={playerWeaponId}
           layoutMode={layoutMode}
           onSelectEnemy={(id) => {
             selectTarget(id);
@@ -1647,6 +1674,37 @@ export function BattleScreen() {
                   }`}
                 >
                   {spd}x
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Visual Effects Density (Full / Compact / Off) — persisted in localStorage */}
+          <div className="space-y-2" data-testid="battle-effects-setting">
+            <div className="text-[12px] font-semibold uppercase tracking-wider text-slate-400">
+              {t('battle.effectsLabel')}
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {(
+                [
+                  { id: 'full', label: t('battle.effectsFull') },
+                  { id: 'compact', label: t('battle.effectsCompact') },
+                  { id: 'off', label: t('battle.effectsOff') },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  data-testid={`battle-effects-${opt.id}`}
+                  aria-pressed={effectsMode === opt.id}
+                  onClick={() => handleSetEffectsMode(opt.id)}
+                  className={`min-h-[44px] rounded-lg border text-[13px] font-bold cursor-pointer transition-colors ${
+                    effectsMode === opt.id
+                      ? 'border-sky-400 bg-sky-500 text-slate-950'
+                      : 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
+                  }`}
+                >
+                  {opt.label}
                 </button>
               ))}
             </div>
