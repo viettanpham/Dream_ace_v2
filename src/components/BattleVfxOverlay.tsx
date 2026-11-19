@@ -75,6 +75,8 @@ interface BattleVfxOverlayProps {
   rowSlides?: RowSlideEffect[];
   renderedPopupCount?: number;
   effectsDebugEnabled?: boolean;
+  osReducedMotion?: boolean;
+  autoReducedNoticeVisible?: boolean;
 }
 
 function isFinitePositive(n: number): boolean {
@@ -286,6 +288,8 @@ export function BattleVfxOverlay({
   rowSlides = [],
   renderedPopupCount = 0,
   effectsDebugEnabled = false,
+  osReducedMotion = false,
+  autoReducedNoticeVisible = false,
 }: BattleVfxOverlayProps) {
   const { t } = useI18n();
   const [unitQueue, setUnitQueue] = useState<UnitEffectQueueState<QueuedUnitVfx>>(
@@ -609,7 +613,8 @@ export function BattleVfxOverlay({
   const renderedStatusCount = vfxConfig.showStatusEffects
     ? activeStatusEffects.filter((st) => Boolean(unitCenter(st.unitId))).length
     : 0;
-  const renderedSlideCount = !vfxConfig.animationsSkipped ? rowSlides.length : 0;
+  const renderedSlideCount =
+    !vfxConfig.animationsSkipped && !vfxConfig.reducedMotion ? rowSlides.length : 0;
   const debugRenderedCount =
     renderedFxCount +
     renderedPopupCount +
@@ -617,24 +622,33 @@ export function BattleVfxOverlay({
     renderedSlideCount;
 
   const containerRectNow = containerRef.current?.getBoundingClientRect() ?? null;
+  const showDebugLine = effectsDebugEnabled || autoReducedNoticeVisible;
 
   return (
     <div
       data-testid="radar-vfx-overlay"
       data-effects-mode={vfxConfig.mode}
+      data-reduced-motion={vfxConfig.reducedMotion ? 'true' : 'false'}
       data-particles-enabled={vfxConfig.showDecorativeParticles ? 'true' : 'false'}
       className="pointer-events-none absolute inset-0 overflow-hidden z-20"
     >
-      {/* Hidden unless "Effects debug" is enabled in the "..." menu */}
-      {effectsDebugEnabled && (
+      {/* Shown when "Effects debug" is ON, or automatically for 3s at battle start when reduced motion resolves to true */}
+      {showDebugLine && (
         <div
           data-testid="radar-effects-debug-counter"
           data-created={debugCreatedCount}
           data-active={debugActiveCount}
           data-rendered={debugRenderedCount}
-          className="pointer-events-none absolute top-1.5 left-1.5 z-30 rounded border border-amber-400/70 bg-[#050a12]/90 px-2 py-0.5 font-mono-nums text-[11px] font-semibold text-amber-200 shadow"
+          data-mode={vfxConfig.mode}
+          data-reduced-resolved={vfxConfig.reducedMotion ? 'true' : 'false'}
+          data-reduced-os={osReducedMotion ? 'true' : 'false'}
+          data-speed={battleSpeed}
+          data-auto-notice={autoReducedNoticeVisible ? 'true' : 'false'}
+          className="pointer-events-none absolute top-1.5 left-1.5 z-30 max-w-[88%] rounded border border-amber-400/70 bg-[#050a12]/92 px-2 py-0.5 font-mono-nums text-[11px] font-semibold text-amber-200 shadow truncate"
         >
-          FX {debugCreatedCount} / {debugActiveCount} / {debugRenderedCount}
+          FX {vfxConfig.mode} · RM:{vfxConfig.reducedMotion ? 'ON' : 'OFF'}(OS:
+          {osReducedMotion ? 'reduce' : 'no'}) · {battleSpeed}x ·{' '}
+          {debugCreatedCount}/{debugActiveCount}/{debugRenderedCount}
         </div>
       )}
 
@@ -691,8 +705,9 @@ export function BattleVfxOverlay({
         </div>
       )}
 
-      {/* Short compositor-only slide animation when the engine moves a unit to another row */}
+      {/* Short compositor-only slide animation when the engine moves a unit to another row (skipped in reduced motion) */}
       {!vfxConfig.animationsSkipped &&
+        !vfxConfig.reducedMotion &&
         rowSlides.map((slide) => {
           const fromPt = resolveSvgPointInOverlay(
             slide.fromPos,
@@ -758,6 +773,7 @@ export function BattleVfxOverlay({
               data-weapon-vfx={isHealFx ? 'heal' : weaponStyle}
               data-fx-duration={durationMs}
               data-used-fallback={snap.usedFallback ? 'true' : 'false'}
+              data-reduced-marker={vfxConfig.reducedMotion ? 'true' : 'false'}
               className="pointer-events-none absolute inset-0"
             >
               {targetIds.map((targetId, tIdx) => {
@@ -840,131 +856,159 @@ export function BattleVfxOverlay({
 
                 return (
                   <div key={targetId} className="absolute inset-0">
-                    {/* 1) PROJECTILE OR BEAM */}
-                    {vfxConfig.showProjectiles && !isSecondaryAreaHit && (
-                      <>
-                        {weaponStyle === 'beam' && (
-                          <div
-                            data-testid={`vfx-beam-${fx.id}-${targetId}`}
-                            className="vfx-beam-fire absolute"
-                            style={
-                              {
-                                left: from.leftCss,
-                                top: from.topCss,
-                                width: `${dist.toFixed(1)}px`,
-                                height: isAlly ? '6px' : '8px',
-                                marginTop: isAlly ? '-3px' : '-4px',
-                                transformOrigin: '0% 50%',
-                                borderRadius: isAlly ? '9999px' : '2px',
-                                background: isAlly
-                                  ? `linear-gradient(180deg, transparent, ${palette.primary}, #ffffff, ${palette.primary}, transparent)`
-                                  : `repeating-linear-gradient(90deg, ${palette.primary} 0px, ${palette.core} 8px, #ef4444 14px)`,
-                                boxShadow: `0 0 10px ${palette.glow}`,
-                                '--ang': `${angleDeg.toFixed(2)}deg`,
-                                '--vfx-dur': `${vfxDurationMs}ms`,
-                              } as CSSProperties
-                            }
-                          />
-                        )}
-
-                        {weaponStyle === 'missile' && (
-                          <>
+                    {/* 1) PROJECTILE OR BEAM (fade-only static instant line/marker under reduced motion) */}
+                    {vfxConfig.showProjectiles &&
+                      !isSecondaryAreaHit &&
+                      (vfxConfig.reducedMotion ? (
+                        <div
+                          data-testid={
+                            weaponStyle === 'beam'
+                              ? `vfx-beam-${fx.id}-${targetId}`
+                              : weaponStyle === 'missile'
+                              ? `vfx-missile-${fx.id}-${targetId}`
+                              : `vfx-cannon-${fx.id}-${targetId}`
+                          }
+                          data-reduced-marker="true"
+                          className="vfx-reduced-marker absolute"
+                          style={
+                            {
+                              left: from.leftCss,
+                              top: from.topCss,
+                              width: `${dist.toFixed(1)}px`,
+                              height: weaponStyle === 'beam' ? '5px' : '3px',
+                              marginTop: weaponStyle === 'beam' ? '-2.5px' : '-1.5px',
+                              transformOrigin: '0% 50%',
+                              transform: `rotate(${angleDeg.toFixed(2)}deg)`,
+                              borderRadius: '9999px',
+                              background: `linear-gradient(90deg, transparent 0%, ${palette.primary} 45%, ${palette.core} 100%)`,
+                              '--vfx-dur': `${Math.max(160, Math.round(vfxDurationMs * 0.65))}ms`,
+                            } as CSSProperties
+                          }
+                        />
+                      ) : (
+                        <>
+                          {weaponStyle === 'beam' && (
                             <div
-                              data-testid={`vfx-missile-${fx.id}-${targetId}`}
-                              className="vfx-missile-arc absolute"
+                              data-testid={`vfx-beam-${fx.id}-${targetId}`}
+                              className="vfx-beam-fire absolute"
                               style={
                                 {
                                   left: from.leftCss,
                                   top: from.topCss,
-                                  width: '18px',
-                                  height: '8px',
-                                  marginLeft: '-9px',
-                                  marginTop: '-4px',
-                                  // Distinct team shapes: ally pointed nose, enemy notched diamond
-                                  clipPath: isAlly
-                                    ? 'polygon(0% 15%, 72% 0%, 100% 50%, 72% 100%, 0% 85%, 18% 50%)'
-                                    : 'polygon(0% 50%, 28% 0%, 100% 25%, 82% 50%, 100% 75%, 28% 100%)',
-                                  background: `linear-gradient(90deg, ${palette.primary}, ${palette.core})`,
-                                  boxShadow: `0 0 8px ${palette.glow}`,
-                                  '--mx1': `${relMx1.toFixed(1)}px`,
-                                  '--my1': `${relMy1.toFixed(1)}px`,
-                                  '--mx2': `${relMx2.toFixed(1)}px`,
-                                  '--my2': `${relMy2.toFixed(1)}px`,
-                                  '--dx': `${relEndX.toFixed(1)}px`,
-                                  '--dy': `${relEndY.toFixed(1)}px`,
-                                  '--ang1': `${ang1.toFixed(2)}deg`,
-                                  '--ang2': `${ang2.toFixed(2)}deg`,
-                                  '--ang3': `${ang3.toFixed(2)}deg`,
+                                  width: `${dist.toFixed(1)}px`,
+                                  height: isAlly ? '6px' : '8px',
+                                  marginTop: isAlly ? '-3px' : '-4px',
+                                  transformOrigin: '0% 50%',
+                                  borderRadius: isAlly ? '9999px' : '2px',
+                                  background: isAlly
+                                    ? `linear-gradient(180deg, transparent, ${palette.primary}, #ffffff, ${palette.primary}, transparent)`
+                                    : `repeating-linear-gradient(90deg, ${palette.primary} 0px, ${palette.core} 8px, #ef4444 14px)`,
+                                  boxShadow: `0 0 10px ${palette.glow}`,
+                                  '--ang': `${angleDeg.toFixed(2)}deg`,
                                   '--vfx-dur': `${vfxDurationMs}ms`,
                                 } as CSSProperties
                               }
                             />
-                            {/* Decorative smoke trail puffs (Full mode at x1..x3 only) */}
-                            {vfxConfig.showDecorativeParticles &&
-                              [
-                                {
-                                  leftCss: puff1LeftCss,
-                                  topCss: puff1TopCss,
-                                  delay: Math.round(vfxDurationMs * 0.24),
-                                },
-                                {
-                                  leftCss: puff2LeftCss,
-                                  topCss: puff2TopCss,
-                                  delay: Math.round(vfxDurationMs * 0.48),
-                                },
-                              ].map((puff, pIdx) => (
-                                <span
-                                  key={pIdx}
-                                  data-testid={`vfx-particle-smoke-${fx.id}-${pIdx}`}
-                                  className="vfx-smoke-puff absolute rounded-full"
-                                  style={
-                                    {
-                                      left: puff.leftCss,
-                                      top: puff.topCss,
-                                      width: '9px',
-                                      height: '9px',
-                                      marginLeft: '-4.5px',
-                                      marginTop: '-4.5px',
-                                      backgroundColor: 'rgba(203, 213, 225, 0.55)',
-                                      animationDelay: `${puff.delay}ms`,
-                                      '--vfx-dur': `${Math.max(120, Math.round(vfxDurationMs * 0.65))}ms`,
-                                    } as CSSProperties
-                                  }
-                                />
-                              ))}
-                          </>
-                        )}
+                          )}
 
-                        {(weaponStyle === 'cannon' || weaponStyle === 'area') && (
-                          <div
-                            data-testid={`vfx-cannon-${fx.id}-${targetId}`}
-                            className="vfx-cannon-fly absolute"
-                            style={
-                              {
-                                left: from.leftCss,
-                                top: from.topCss,
-                                width: weaponStyle === 'area' ? '22px' : '20px',
-                                height: weaponStyle === 'area' ? '7px' : '5px',
-                                marginLeft: '-10px',
-                                marginTop: '-2.5px',
-                                // Distinct team shape: ally tapered lance, enemy blocky bolt
-                                borderRadius: isAlly ? '2px 9999px 9999px 2px' : '1px',
-                                background: `linear-gradient(90deg, transparent 0%, ${palette.primary} 42%, ${palette.core} 100%)`,
-                                boxShadow: `0 0 8px ${palette.glow}`,
-                                '--dx1': `${(relEndX * 0.14).toFixed(1)}px`,
-                                '--dy1': `${(relEndY * 0.14).toFixed(1)}px`,
-                                '--dx2': `${(relEndX * 0.86).toFixed(1)}px`,
-                                '--dy2': `${(relEndY * 0.86).toFixed(1)}px`,
-                                '--dx': `${relEndX.toFixed(1)}px`,
-                                '--dy': `${relEndY.toFixed(1)}px`,
-                                '--ang': `${angleDeg.toFixed(2)}deg`,
-                                '--vfx-dur': `${vfxDurationMs}ms`,
-                              } as CSSProperties
-                            }
-                          />
-                        )}
-                      </>
-                    )}
+                          {weaponStyle === 'missile' && (
+                            <>
+                              <div
+                                data-testid={`vfx-missile-${fx.id}-${targetId}`}
+                                className="vfx-missile-arc absolute"
+                                style={
+                                  {
+                                    left: from.leftCss,
+                                    top: from.topCss,
+                                    width: '18px',
+                                    height: '8px',
+                                    marginLeft: '-9px',
+                                    marginTop: '-4px',
+                                    // Distinct team shapes: ally pointed nose, enemy notched diamond
+                                    clipPath: isAlly
+                                      ? 'polygon(0% 15%, 72% 0%, 100% 50%, 72% 100%, 0% 85%, 18% 50%)'
+                                      : 'polygon(0% 50%, 28% 0%, 100% 25%, 82% 50%, 100% 75%, 28% 100%)',
+                                    background: `linear-gradient(90deg, ${palette.primary}, ${palette.core})`,
+                                    boxShadow: `0 0 8px ${palette.glow}`,
+                                    '--mx1': `${relMx1.toFixed(1)}px`,
+                                    '--my1': `${relMy1.toFixed(1)}px`,
+                                    '--mx2': `${relMx2.toFixed(1)}px`,
+                                    '--my2': `${relMy2.toFixed(1)}px`,
+                                    '--dx': `${relEndX.toFixed(1)}px`,
+                                    '--dy': `${relEndY.toFixed(1)}px`,
+                                    '--ang1': `${ang1.toFixed(2)}deg`,
+                                    '--ang2': `${ang2.toFixed(2)}deg`,
+                                    '--ang3': `${ang3.toFixed(2)}deg`,
+                                    '--vfx-dur': `${vfxDurationMs}ms`,
+                                  } as CSSProperties
+                                }
+                              />
+                              {/* Decorative smoke trail puffs (Full mode at x1..x3 only) */}
+                              {vfxConfig.showDecorativeParticles &&
+                                [
+                                  {
+                                    leftCss: puff1LeftCss,
+                                    topCss: puff1TopCss,
+                                    delay: Math.round(vfxDurationMs * 0.24),
+                                  },
+                                  {
+                                    leftCss: puff2LeftCss,
+                                    topCss: puff2TopCss,
+                                    delay: Math.round(vfxDurationMs * 0.48),
+                                  },
+                                ].map((puff, pIdx) => (
+                                  <span
+                                    key={pIdx}
+                                    data-testid={`vfx-particle-smoke-${fx.id}-${pIdx}`}
+                                    className="vfx-smoke-puff absolute rounded-full"
+                                    style={
+                                      {
+                                        left: puff.leftCss,
+                                        top: puff.topCss,
+                                        width: '9px',
+                                        height: '9px',
+                                        marginLeft: '-4.5px',
+                                        marginTop: '-4.5px',
+                                        backgroundColor: 'rgba(203, 213, 225, 0.55)',
+                                        animationDelay: `${puff.delay}ms`,
+                                        '--vfx-dur': `${Math.max(120, Math.round(vfxDurationMs * 0.65))}ms`,
+                                      } as CSSProperties
+                                    }
+                                  />
+                                ))}
+                            </>
+                          )}
+
+                          {(weaponStyle === 'cannon' || weaponStyle === 'area') && (
+                            <div
+                              data-testid={`vfx-cannon-${fx.id}-${targetId}`}
+                              className="vfx-cannon-fly absolute"
+                              style={
+                                {
+                                  left: from.leftCss,
+                                  top: from.topCss,
+                                  width: weaponStyle === 'area' ? '22px' : '20px',
+                                  height: weaponStyle === 'area' ? '7px' : '5px',
+                                  marginLeft: '-10px',
+                                  marginTop: '-2.5px',
+                                  // Distinct team shape: ally tapered lance, enemy blocky bolt
+                                  borderRadius: isAlly ? '2px 9999px 9999px 2px' : '1px',
+                                  background: `linear-gradient(90deg, transparent 0%, ${palette.primary} 42%, ${palette.core} 100%)`,
+                                  boxShadow: `0 0 8px ${palette.glow}`,
+                                  '--dx1': `${(relEndX * 0.14).toFixed(1)}px`,
+                                  '--dy1': `${(relEndY * 0.14).toFixed(1)}px`,
+                                  '--dx2': `${(relEndX * 0.86).toFixed(1)}px`,
+                                  '--dy2': `${(relEndY * 0.86).toFixed(1)}px`,
+                                  '--dx': `${relEndX.toFixed(1)}px`,
+                                  '--dy': `${relEndY.toFixed(1)}px`,
+                                  '--ang': `${angleDeg.toFixed(2)}deg`,
+                                  '--vfx-dur': `${vfxDurationMs}ms`,
+                                } as CSSProperties
+                              }
+                            />
+                          )}
+                        </>
+                      ))}
 
                     {/* 2) TARGET IMPACT / OUTCOME EFFECT */}
                     {vfxConfig.showMainImpactOrHeal && outcome === 'dodge' && (

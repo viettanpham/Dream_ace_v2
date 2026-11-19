@@ -46,7 +46,10 @@ import {
 } from '../utils/battleDisplay';
 import {
   resolveEffectiveVfxConfig,
+  resolveReducedMotion,
+  useFxSettings,
   type BattleEffectsMode,
+  type ReducedMotionSetting,
 } from '../utils/battleVfx';
 import {
   BattleVfxOverlay,
@@ -65,6 +68,7 @@ interface BattleRadarViewProps {
   speechBubblesEnabled?: boolean;
   battleSpeed?: BattleSpeed;
   effectsMode?: BattleEffectsMode;
+  reducedMotionMode?: ReducedMotionSetting;
   effectsDebugEnabled?: boolean;
   showStatusLabels?: boolean;
   playerWeaponId?: string | null;
@@ -1055,9 +1059,10 @@ export function BattleRadarView({
   skipAnimations,
   speechBubblesEnabled = true,
   battleSpeed = 1,
-  effectsMode = 'full',
-  effectsDebugEnabled = false,
-  showStatusLabels = true,
+  effectsMode: effectsModeProp,
+  reducedMotionMode: reducedMotionModeProp,
+  effectsDebugEnabled: effectsDebugProp,
+  showStatusLabels: showStatusLabelsProp,
   playerWeaponId = null,
   layoutMode: layoutModeProp,
   onSelectEnemy,
@@ -1066,20 +1071,50 @@ export function BattleRadarView({
 }: BattleRadarViewProps) {
   const { lang, t } = useI18n();
   const detectedMode = useBattleLayoutMode();
-  const prefersReducedMotion = usePrefersReducedMotion();
+  const [fxSettings] = useFxSettings();
+  const osReducedMotion = usePrefersReducedMotion();
+  const effectiveEffectsMode = effectsModeProp ?? fxSettings.effectsMode;
+  const effectiveReducedMotionMode =
+    reducedMotionModeProp ?? fxSettings.reducedMotionMode;
+  const effectiveDebugEnabled = effectsDebugProp ?? fxSettings.effectsDebug;
+  const effectiveShowStatusLabels =
+    showStatusLabelsProp ?? fxSettings.showStatusLabels;
+  const resolvedReducedMotion = resolveReducedMotion(
+    effectiveReducedMotionMode,
+    osReducedMotion
+  );
   const layoutMode = layoutModeProp ?? detectedMode;
   const isLandscape = layoutMode !== 'phone-portrait';
   const vfxConfig = useMemo(
     () =>
       resolveEffectiveVfxConfig(
-        effectsMode,
+        effectiveEffectsMode,
         battleSpeed,
-        prefersReducedMotion,
+        resolvedReducedMotion,
         skipAnimations
       ),
-    [effectsMode, battleSpeed, prefersReducedMotion, skipAnimations]
+    [effectiveEffectsMode, battleSpeed, resolvedReducedMotion, skipAnimations]
   );
   const animationsSkipped = vfxConfig.animationsSkipped;
+
+  // Auto-show the FX debug line for 3 seconds at battle start when reduced-motion resolves to true
+  const [autoReducedNoticeVisible, setAutoReducedNoticeVisible] = useState(false);
+  const lastNoticedBattleKeyRef = useRef<string | null>(null);
+  const battleNoticeKey = `${battle.sectorId}:${battle.deployedGearId}:${battle.round <= 1 ? 'start' : 'mid'}`;
+
+  useEffect(() => {
+    if (!resolvedReducedMotion) {
+      setAutoReducedNoticeVisible(false);
+      return;
+    }
+    if (lastNoticedBattleKeyRef.current === battleNoticeKey) return;
+    lastNoticedBattleKeyRef.current = battleNoticeKey;
+    setAutoReducedNoticeVisible(true);
+    const timer = window.setTimeout(() => {
+      setAutoReducedNoticeVisible(false);
+    }, 3000);
+    return () => window.clearTimeout(timer);
+  }, [resolvedReducedMotion, battleNoticeKey]);
 
   const [legendOpen, setLegendOpen] = useState<boolean>(() =>
     readRadarLegendOpen()
@@ -1682,6 +1717,7 @@ export function BattleRadarView({
       ref={containerRef}
       data-testid="battle-radar-container"
       data-animations-skipped={animationsSkipped ? 'true' : 'false'}
+      data-reduced-motion={resolvedReducedMotion ? 'true' : 'false'}
       style={{ touchAction: 'pan-y' }}
       className="relative flex-1 min-h-0 w-full h-full flex items-center justify-center overflow-hidden rounded-lg border border-slate-800/90 bg-[#050A12] select-none touch-pan-y"
     >
@@ -1898,7 +1934,7 @@ export function BattleRadarView({
               animationsSkipped={animationsSkipped}
               hoverTooltip={hoverTooltip}
               autoBadgeText={autoBadgeText}
-              showStatusLabels={showStatusLabels}
+              showStatusLabels={effectiveShowStatusLabels}
               formatStatusShortText={(st) => getStatusShortLabel(lang, st.type)}
               formatStatusTooltip={formatStatusTooltip}
               onMarkerRef={registerMarkerRef}
@@ -1928,7 +1964,9 @@ export function BattleRadarView({
         defeatFadingUnitIds={defeatFadingSet}
         rowSlides={rowSlides}
         renderedPopupCount={vfxConfig.showFloatingNumbers ? staggeredPopups.length : 0}
-        effectsDebugEnabled={effectsDebugEnabled}
+        effectsDebugEnabled={effectiveDebugEnabled}
+        osReducedMotion={osReducedMotion}
+        autoReducedNoticeVisible={autoReducedNoticeVisible}
       />
 
       {/* Collapsible Tactical Legend (closed by default, persisted in localStorage) */}

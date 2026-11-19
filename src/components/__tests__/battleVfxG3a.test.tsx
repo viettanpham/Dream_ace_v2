@@ -279,8 +279,20 @@ describe('G3a Pure Functions: Weapon VFX selection, FIFO queue limit, speed scal
       animationsSkipped: false,
     });
 
-    // prefers-reduced-motion: skip everything
+    // Reduced motion: keep core combat feedback (floating numbers, hit/projectile markers, status) and skip decorative/ambient effects
     expect(resolveEffectiveVfxConfig('full', 1, true, false)).toMatchObject({
+      showProjectiles: true,
+      showMainImpactOrHeal: true,
+      showStatusEffects: true,
+      showDecorativeParticles: false,
+      showAmbientSweep: false,
+      showFloatingNumbers: true,
+      reducedMotion: true,
+      animationsSkipped: false,
+    });
+
+    // Explicit skipAnimations: skip everything
+    expect(resolveEffectiveVfxConfig('full', 1, false, true)).toMatchObject({
       showProjectiles: false,
       showMainImpactOrHeal: false,
       showStatusEffects: false,
@@ -567,7 +579,7 @@ describe('G3a Component Tests: Manual-only aim line, HTML-only VFX overlay, redu
     ).not.toBeNull();
   });
 
-  it('skips all visual effects when prefers-reduced-motion is active', () => {
+  it('preserves core combat feedback (fade-only markers & popups) and skips ambient sweep when reduced motion is active', () => {
     mockReducedMotion(true);
 
     const player = makeUnit('p1', 'ZARA', 'ally', 'front', { isPlayer: true });
@@ -602,6 +614,7 @@ describe('G3a Component Tests: Manual-only aim line, HTML-only VFX overlay, redu
           skipAnimations: false,
           battleSpeed: 1,
           effectsMode: 'full',
+          reducedMotionMode: 'system',
           layoutMode: 'pc',
           onSelectEnemy: vi.fn(),
           onSelectAlly: vi.fn(),
@@ -610,20 +623,23 @@ describe('G3a Component Tests: Manual-only aim line, HTML-only VFX overlay, redu
       );
     });
 
-    expect(
-      container!.querySelector('[data-testid="radar-fx-fx_beam"]')
-    ).toBeNull();
+    const radarEl = container!.querySelector('[data-testid="battle-radar-container"]');
+    expect(radarEl?.getAttribute('data-reduced-motion')).toBe('true');
+
+    // Core combat feedback stays visible (projectile as fade-only reduced marker, hit flash, damage popup)
+    const fxBeam = container!.querySelector('[data-testid="radar-fx-fx_beam"]');
+    expect(fxBeam).not.toBeNull();
+    expect(fxBeam?.getAttribute('data-reduced-marker')).toBe('true');
     expect(
       container!.querySelector('[data-testid="radar-hit-flash-e1"]')
-    ).toBeNull();
-    expect(
-      container!.querySelector('[data-testid="radar-defeat-fade-e1"]')
-    ).toBeNull();
-    expect(
-      container!.querySelector('[data-testid="radar-sweep-layer"]')
-    ).toBeNull();
+    ).not.toBeNull();
     expect(
       container!.querySelector('[data-testid="damage-popup"]')
+    ).not.toBeNull();
+
+    // Decorative ambient sweep is skipped
+    expect(
+      container!.querySelector('[data-testid="radar-sweep-layer"]')
     ).toBeNull();
   });
 
@@ -698,8 +714,12 @@ describe('G3a Component Tests: Manual-only aim line, HTML-only VFX overlay, redu
       offBtn.click();
     });
 
-    // Persisted to localStorage; FX projectiles removed; floating damage number still visible
-    expect(window.localStorage.getItem(BATTLE_EFFECTS_STORAGE_KEY)).toBe('off');
+    // Persisted to dreamAce.fx.v2; FX projectiles removed; floating damage number still visible
+    expect(readBattleEffectsMode()).toBe('off');
+    expect(
+      JSON.parse(window.localStorage.getItem(BATTLE_EFFECTS_STORAGE_KEY) || '{}')
+        .effectsMode
+    ).toBe('off');
     expect(
       container!.querySelector('[data-testid="radar-fx-fx_menu_test"]')
     ).toBeNull();

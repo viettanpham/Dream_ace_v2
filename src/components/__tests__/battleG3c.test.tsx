@@ -1081,7 +1081,10 @@ describe('G3c-4: Status effects labels in Card & Radar views + Effects menu togg
       toggleStatusBtn.click();
     });
 
-    expect(localStorage.getItem(SHOW_STATUS_LABELS_STORAGE_KEY)).toBe('0');
+    expect(
+      JSON.parse(localStorage.getItem(SHOW_STATUS_LABELS_STORAGE_KEY) || '{}')
+        .showStatusLabels
+    ).toBe(false);
     expect(readShowStatusLabels()).toBe(false);
     expect(toggleStatusBtn.getAttribute('aria-pressed')).toBe('false');
     expect(

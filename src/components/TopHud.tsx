@@ -22,6 +22,7 @@ import {
   useBattleLayoutMode,
 } from '../utils/battleDisplay';
 import { BottomSheet } from './BottomSheet';
+import { EffectsSettingsPanel } from './EffectsSettingsPanel';
 import { LanguageToggle } from './LanguageToggle';
 import { StatBar } from './StatBar';
 
@@ -332,11 +333,16 @@ export function TopHud() {
 
             <button
               type="button"
+              data-testid="tophud-settings-btn"
               onClick={() => setSettingsOpen(true)}
               aria-label={t('mobile.settings')}
-              className="md:hidden min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg border border-slate-800 bg-slate-900 hover:bg-slate-800 text-slate-200 transition-colors cursor-pointer"
+              title={t('mobile.settingsTitle')}
+              className="min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 md:h-9 md:px-2.5 flex items-center justify-center gap-1.5 rounded-lg md:rounded border border-slate-800 bg-slate-900 hover:bg-slate-800 text-slate-200 transition-colors cursor-pointer"
             >
-              <Settings className="w-5 h-5" />
+              <Settings className="w-5 h-5 md:w-4 md:h-4" />
+              <span className="hidden lg:inline text-[12px] font-semibold">
+                {t('fx.sectionTitle')}
+              </span>
             </button>
           </div>
         </header>
@@ -474,6 +480,9 @@ export function TopHud() {
               </button>
             </div>
           </div>
+
+          {/* Effects Settings (Full/Compact/Off, Reduced Motion, Status Labels, Debug & Test Preview) */}
+          <EffectsSettingsPanel />
 
           {/* Utility Buttons */}
           <div className="grid grid-cols-1 gap-2">

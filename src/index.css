@@ -910,66 +910,87 @@
   will-change: transform;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .anim-ship-hover,
-  .anim-ship-hover-hero,
-  .anim-thruster,
-  .anim-shield-bubble,
-  .anim-lunge-right,
-  .anim-lunge-left,
-  .anim-hit,
-  .anim-evade,
-  .anim-shield,
-  .anim-cast,
-  .anim-impact-flash,
-  .anim-explosion-ring,
-  .anim-explosion-spark,
-  .anim-bolt,
-  .anim-missile,
-  .anim-beam,
-  .anim-radar,
-  .anim-radar-sweep,
-  .anim-radar-star,
-  .anim-token-hover,
-  .anim-reticle-pulse,
-  .anim-radar-impact,
-  .anim-radar-projectile,
-  .anim-radar-beam,
-  .anim-radar-hit-flash,
-  .anim-radar-defeat-fade,
-  .anim-turn-active,
-  .anim-turn-arrow,
-  .anim-conveyor-shift,
-  .anim-raid-pulse,
-  .anim-lane-flow,
-  .vfx-cannon-fly,
-  .vfx-beam-fire,
-  .vfx-missile-arc,
-  .vfx-smoke-puff,
-  .vfx-ring-expand,
-  .vfx-crit-flash,
-  .vfx-hit-flash-html,
-  .vfx-defeat-html,
-  .vfx-shield-shard-left,
-  .vfx-shield-shard-right,
-  .vfx-particle-rise,
-  .vfx-particle-fall,
-  .vfx-debuff-shake,
-  .vfx-dodge-slide,
-  .vfx-stealth-veil,
-  .vfx-row-slide,
-  .vfx-html-sweep,
-  .vfx-low-hp-pulse {
-    animation: none;
+@keyframes vfx-reduced-fade {
+  0% {
+    opacity: 0;
   }
-  .meter-fill,
-  .meter-trail {
-    transition: none;
+  18% {
+    opacity: 0.96;
   }
-  .anim-popup,
-  .anim-popup-tight {
-    animation: float-popup-reduced 800ms linear both;
+  78% {
+    opacity: 0.92;
   }
+  100% {
+    opacity: 0;
+  }
+}
+
+.vfx-reduced-marker {
+  animation: vfx-reduced-fade var(--vfx-dur, 260ms) linear both;
+  will-change: opacity;
+}
+
+/* Explicit reduced-motion container scope (controlled by user's Reduced Motion setting,
+   so Firefox/Windows OS flag never silently disables full FX when setting is Off).
+   When active: skip decorative/ambient motion, keep core combat feedback as simple fade without movement. */
+[data-reduced-motion="true"] .anim-ship-hover,
+[data-reduced-motion="true"] .anim-ship-hover-hero,
+[data-reduced-motion="true"] .anim-thruster,
+[data-reduced-motion="true"] .anim-shield-bubble,
+[data-reduced-motion="true"] .anim-lunge-right,
+[data-reduced-motion="true"] .anim-lunge-left,
+[data-reduced-motion="true"] .anim-hit,
+[data-reduced-motion="true"] .anim-evade,
+[data-reduced-motion="true"] .anim-shield,
+[data-reduced-motion="true"] .anim-cast,
+[data-reduced-motion="true"] .anim-impact-flash,
+[data-reduced-motion="true"] .anim-explosion-ring,
+[data-reduced-motion="true"] .anim-explosion-spark,
+[data-reduced-motion="true"] .anim-bolt,
+[data-reduced-motion="true"] .anim-missile,
+[data-reduced-motion="true"] .anim-beam,
+[data-reduced-motion="true"] .anim-radar,
+[data-reduced-motion="true"] .anim-radar-sweep,
+[data-reduced-motion="true"] .anim-radar-star,
+[data-reduced-motion="true"] .anim-token-hover,
+[data-reduced-motion="true"] .anim-reticle-pulse,
+[data-reduced-motion="true"] .anim-turn-active,
+[data-reduced-motion="true"] .anim-turn-arrow,
+[data-reduced-motion="true"] .anim-conveyor-shift,
+[data-reduced-motion="true"] .anim-raid-pulse,
+[data-reduced-motion="true"] .anim-lane-flow,
+[data-reduced-motion="true"] .vfx-smoke-puff,
+[data-reduced-motion="true"] .vfx-shield-shard-left,
+[data-reduced-motion="true"] .vfx-shield-shard-right,
+[data-reduced-motion="true"] .vfx-row-slide,
+[data-reduced-motion="true"] .vfx-html-sweep,
+[data-reduced-motion="true"] .vfx-low-hp-pulse {
+  animation: none;
+}
+
+[data-reduced-motion="true"] .meter-fill,
+[data-reduced-motion="true"] .meter-trail {
+  transition: none;
+}
+
+[data-reduced-motion="true"] .anim-popup,
+[data-reduced-motion="true"] .anim-popup-tight {
+  animation: float-popup-reduced 700ms linear both;
+}
+
+[data-reduced-motion="true"] .vfx-cannon-fly,
+[data-reduced-motion="true"] .vfx-beam-fire,
+[data-reduced-motion="true"] .vfx-missile-arc,
+[data-reduced-motion="true"] .vfx-ring-expand,
+[data-reduced-motion="true"] .vfx-crit-flash,
+[data-reduced-motion="true"] .vfx-hit-flash-html,
+[data-reduced-motion="true"] .vfx-defeat-html,
+[data-reduced-motion="true"] .vfx-particle-rise,
+[data-reduced-motion="true"] .vfx-particle-fall,
+[data-reduced-motion="true"] .vfx-debuff-shake,
+[data-reduced-motion="true"] .vfx-dodge-slide,
+[data-reduced-motion="true"] .vfx-stealth-veil {
+  animation: vfx-reduced-fade var(--vfx-dur, 260ms) linear both;
 }
 
 /* Firefox-safe opacity-only gentle pulse for low-HP (<25%) radar ring arc (zero SVG transform) */

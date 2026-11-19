@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type {
   BattleEvent,
   BattleSpeed,
@@ -10,6 +11,8 @@ import type {
 } from '../types/game';
 
 export type BattleEffectsMode = 'full' | 'compact' | 'off';
+
+export type ReducedMotionSetting = 'system' | 'off' | 'on';
 
 export type WeaponVfxStyle = 'cannon' | 'beam' | 'missile' | 'area';
 
@@ -29,11 +32,27 @@ export type StatusVfxKind =
   | 'stealth_enter'
   | 'stealth_reveal';
 
-export const BATTLE_EFFECTS_STORAGE_KEY = 'starfront_battle_effects_mode_v1';
+export const FX_SETTINGS_STORAGE_KEY = 'dreamAce.fx.v2';
+export const BATTLE_EFFECTS_STORAGE_KEY = FX_SETTINGS_STORAGE_KEY;
 export const MAX_SIMULTANEOUS_EFFECTS_PER_UNIT = 2;
+
+export interface FxSettings {
+  effectsMode: BattleEffectsMode;
+  reducedMotionMode: ReducedMotionSetting;
+  showStatusLabels: boolean;
+  effectsDebug: boolean;
+}
+
+export const DEFAULT_FX_SETTINGS: FxSettings = {
+  effectsMode: 'full',
+  reducedMotionMode: 'off',
+  showStatusLabels: true,
+  effectsDebug: false,
+};
 
 export interface EffectiveVfxConfig {
   mode: BattleEffectsMode;
+  reducedMotion: boolean;
   showProjectiles: boolean;
   showMainImpactOrHeal: boolean;
   showStatusEffects: boolean;
@@ -61,32 +80,151 @@ export interface UnitEffectQueueState<T extends { id: string }> {
   pendingByUnit: Record<string, T[]>;
 }
 
-/**
- * Reads persisted Battle Effects setting (Full / Compact / Off). Defaults to 'full'.
- */
-export function readBattleEffectsMode(): BattleEffectsMode {
-  if (typeof window === 'undefined') return 'full';
-  try {
-    const raw = window.localStorage.getItem(BATTLE_EFFECTS_STORAGE_KEY);
-    if (raw === 'full' || raw === 'compact' || raw === 'off') {
-      return raw;
+const fxSettingsListeners = new Set<() => void>();
+
+export function subscribeFxSettings(listener: () => void): () => void {
+  fxSettingsListeners.add(listener);
+  return () => {
+    fxSettingsListeners.delete(listener);
+  };
+}
+
+function emitFxSettingsChanged(): void {
+  fxSettingsListeners.forEach((fn) => {
+    try {
+      fn();
+    } catch {
+      // Ignore subscriber errors
     }
-    return 'full';
+  });
+}
+
+/**
+ * Reads persisted FX settings ONLY from the v2 key (`dreamAce.fx.v2`).
+ * Stale legacy keys (e.g. starfront_battle_effects_mode_v1) are ignored.
+ * Defaults: effectsMode='full', reducedMotionMode='off', showStatusLabels=true, effectsDebug=false.
+ */
+export function readFxSettings(): FxSettings {
+  if (typeof window === 'undefined') return { ...DEFAULT_FX_SETTINGS };
+  try {
+    const raw = window.localStorage.getItem(FX_SETTINGS_STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_FX_SETTINGS };
+    const parsed = JSON.parse(raw) as Partial<FxSettings> | null;
+    if (!parsed || typeof parsed !== 'object') {
+      return { ...DEFAULT_FX_SETTINGS };
+    }
+    const effectsMode: BattleEffectsMode =
+      parsed.effectsMode === 'full' ||
+      parsed.effectsMode === 'compact' ||
+      parsed.effectsMode === 'off'
+        ? parsed.effectsMode
+        : DEFAULT_FX_SETTINGS.effectsMode;
+    const reducedMotionMode: ReducedMotionSetting =
+      parsed.reducedMotionMode === 'system' ||
+      parsed.reducedMotionMode === 'off' ||
+      parsed.reducedMotionMode === 'on'
+        ? parsed.reducedMotionMode
+        : DEFAULT_FX_SETTINGS.reducedMotionMode;
+    const showStatusLabels =
+      typeof parsed.showStatusLabels === 'boolean'
+        ? parsed.showStatusLabels
+        : DEFAULT_FX_SETTINGS.showStatusLabels;
+    const effectsDebug =
+      typeof parsed.effectsDebug === 'boolean'
+        ? parsed.effectsDebug
+        : DEFAULT_FX_SETTINGS.effectsDebug;
+
+    return {
+      effectsMode,
+      reducedMotionMode,
+      showStatusLabels,
+      effectsDebug,
+    };
   } catch {
-    return 'full';
+    return { ...DEFAULT_FX_SETTINGS };
   }
 }
 
 /**
- * Persists Battle Effects setting (Full / Compact / Off) to localStorage.
+ * Persists full FX settings object to `dreamAce.fx.v2` and notifies mounted subscribers.
  */
-export function writeBattleEffectsMode(mode: BattleEffectsMode): void {
+export function writeFxSettings(settings: FxSettings): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(BATTLE_EFFECTS_STORAGE_KEY, mode);
+    window.localStorage.setItem(FX_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
   } catch {
     // Ignore storage quota/privacy errors
   }
+  emitFxSettingsChanged();
+}
+
+/**
+ * Merges a partial FX settings update into `dreamAce.fx.v2` and returns the new state.
+ */
+export function updateFxSettings(partial: Partial<FxSettings>): FxSettings {
+  const next: FxSettings = {
+    ...readFxSettings(),
+    ...partial,
+  };
+  writeFxSettings(next);
+  return next;
+}
+
+/**
+ * React hook keeping any mounted FX UI or battle overlay in sync with `dreamAce.fx.v2`.
+ */
+export function useFxSettings(): [FxSettings, (partial: Partial<FxSettings>) => void] {
+  const [settings, setSettings] = useState<FxSettings>(() => readFxSettings());
+
+  useEffect(() => {
+    const sync = () => setSettings(readFxSettings());
+    const unsub = subscribeFxSettings(sync);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === null || e.key === FX_SETTINGS_STORAGE_KEY) {
+        sync();
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => {
+      unsub();
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []);
+
+  const update = (partial: Partial<FxSettings>) => {
+    const next = updateFxSettings(partial);
+    setSettings(next);
+  };
+
+  return [settings, update];
+}
+
+/**
+ * Resolves effective reduced-motion flag from the user's explicit setting and the OS media query.
+ * Default setting is 'off' (full effects regardless of the OS flag).
+ */
+export function resolveReducedMotion(
+  setting: ReducedMotionSetting,
+  osPrefersReducedMotion: boolean
+): boolean {
+  if (setting === 'on') return true;
+  if (setting === 'off') return false;
+  return Boolean(osPrefersReducedMotion);
+}
+
+/**
+ * Reads persisted Battle Effects setting (Full / Compact / Off) from `dreamAce.fx.v2`.
+ * Defaults to 'full' and ignores stale legacy keys.
+ */
+export function readBattleEffectsMode(): BattleEffectsMode {
+  return readFxSettings().effectsMode;
+}
+
+/**
+ * Persists Battle Effects setting (Full / Compact / Off) into `dreamAce.fx.v2`.
+ */
+export function writeBattleEffectsMode(mode: BattleEffectsMode): void {
+  updateFxSettings({ effectsMode: mode });
 }
 
 /**
@@ -268,7 +406,12 @@ export function shouldSkipDecorativeParticles(
 
 /**
  * Resolves exact rendering flags from Effects setting (Full / Compact / Off),
- * battle speed (x1..x10), prefers-reduced-motion, and skipAnimations.
+ * battle speed (x1..x10), resolved reduced-motion flag, and explicit skipAnimations.
+ *
+ * Reduced-motion NEVER removes core combat feedback: floating damage/heal numbers,
+ * status text, hit flash, and projectile markers remain visible (rendered as simple
+ * fade/instant markers with no movement), while decorative particles, ambient sweeps,
+ * and large movements are skipped.
  */
 export function resolveEffectiveVfxConfig(
   effectsMode: BattleEffectsMode,
@@ -276,10 +419,11 @@ export function resolveEffectiveVfxConfig(
   reducedMotion: boolean,
   skipAnimations: boolean
 ): EffectiveVfxConfig {
-  // prefers-reduced-motion or skipAnimations disables all animated effects cleanly
-  if (reducedMotion || skipAnimations) {
+  // Explicit user "Skip animations" toggle disables animated effects
+  if (skipAnimations) {
     return {
       mode: effectsMode,
+      reducedMotion,
       showProjectiles: false,
       showMainImpactOrHeal: false,
       showStatusEffects: false,
@@ -294,9 +438,26 @@ export function resolveEffectiveVfxConfig(
   if (effectsMode === 'off') {
     return {
       mode: 'off',
+      reducedMotion,
       showProjectiles: false,
       showMainImpactOrHeal: false,
       showStatusEffects: false,
+      showDecorativeParticles: false,
+      showFloatingNumbers: true,
+      showAmbientSweep: false,
+      animationsSkipped: false,
+    };
+  }
+
+  // Reduced-motion mode: preserve ALL core combat feedback (numbers, status text,
+  // hit flash, projectile instant/fade marker), skip decorative particles & ambient sweeps.
+  if (reducedMotion) {
+    return {
+      mode: effectsMode,
+      reducedMotion: true,
+      showProjectiles: true,
+      showMainImpactOrHeal: true,
+      showStatusEffects: true,
       showDecorativeParticles: false,
       showFloatingNumbers: true,
       showAmbientSweep: false,
@@ -312,6 +473,7 @@ export function resolveEffectiveVfxConfig(
   if (effectsMode === 'compact' || isHighSpeed) {
     return {
       mode: effectsMode,
+      reducedMotion: false,
       showProjectiles: true,
       showMainImpactOrHeal: true,
       showStatusEffects: true,
@@ -325,6 +487,7 @@ export function resolveEffectiveVfxConfig(
   // Full mode at x1 / x2 / x3
   return {
     mode: 'full',
+    reducedMotion: false,
     showProjectiles: true,
     showMainImpactOrHeal: true,
     showStatusEffects: true,

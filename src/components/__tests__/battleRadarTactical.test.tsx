@@ -597,7 +597,7 @@ describe('5) Animations respect prefers-reduced-motion and scale with battle spe
     expect(computeDefeatFadeDurationMs(2)).toBe(200);
   });
 
-  it('skips attack FX, hit flash, defeat fade, radar sweep, and animated popups when prefers-reduced-motion is set', () => {
+  it('preserves core feedback under reduced motion and skips all animated FX when skipAnimations is enabled', () => {
     const battleWithFx = makeBattle(
       [
         makeUnit('p1', 'ZARA', 'ally', 'front', { isPlayer: true }),
@@ -664,7 +664,7 @@ describe('5) Animations respect prefers-reduced-motion and scale with battle spe
       container!.querySelector('[data-testid="radar-sweep-layer"]')
     ).not.toBeNull();
 
-    // 2) Reduced motion (prefers-reduced-motion: reduce): all animations are skipped even when skipAnimations=false
+    // 2) Reduced motion (mode='system' + OS reduce): ambient sweep skipped, core feedback stays visible as fade-only markers
     act(() => {
       root!.unmount();
     });
@@ -681,6 +681,47 @@ describe('5) Animations respect prefers-reduced-motion and scale with battle spe
           hasSingleAllySkill: false,
           autoBattleEnabled: false,
           skipAnimations: false,
+          battleSpeed: 1,
+          reducedMotionMode: 'system',
+          layoutMode: 'phone-portrait',
+          onSelectEnemy: vi.fn(),
+          onSelectAlly: vi.fn(),
+          onInspectUnit: vi.fn(),
+        })
+      );
+    });
+
+    expect(
+      container!
+        .querySelector('[data-testid="battle-radar-container"]')
+        ?.getAttribute('data-reduced-motion')
+    ).toBe('true');
+    expect(
+      container!
+        .querySelector('[data-testid="radar-fx-fx_1"]')
+        ?.getAttribute('data-reduced-marker')
+    ).toBe('true');
+    expect(
+      container!.querySelector('[data-testid="radar-hit-flash-e1"]')
+    ).not.toBeNull();
+    expect(
+      container!.querySelector('[data-testid="damage-popup"]')
+    ).not.toBeNull();
+    expect(
+      container!.querySelector('[data-testid="radar-sweep-layer"]')
+    ).toBeNull();
+
+    // 3) Explicit skipAnimations=true: all animated FX and popups are skipped
+    act(() => {
+      root!.render(
+        createElement(BattleRadarView, {
+          battle: battleWithFx,
+          activeUnitId: 'p1',
+          validBasicTargetIds: new Set(['e1']),
+          canPlayerManualAct: false,
+          hasSingleAllySkill: false,
+          autoBattleEnabled: false,
+          skipAnimations: true,
           battleSpeed: 1,
           layoutMode: 'phone-portrait',
           onSelectEnemy: vi.fn(),

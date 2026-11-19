@@ -1349,5 +1349,19 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'stats.openCombatLog': 'Mở Nhật ký chiến đấu',
   'stats.colKillsSimple': 'Hạ',
   'battle.showStatusLabels': 'Hiện tên hiệu ứng',
+
+  // FX-fix2: Tuỳ chỉnh giảm chuyển động, lưu v2 & xem thử hiệu ứng
+  'fx.sectionTitle': 'Hiệu ứng',
+  'fx.reducedMotionLabel': 'Giảm chuyển động',
+  'fx.reducedMotionSystem': 'Theo hệ thống',
+  'fx.reducedMotionOff': 'Tắt (luôn hiệu ứng đầy đủ)',
+  'fx.reducedMotionOn': 'Bật',
+  'fx.osFlagReduce': 'HĐH: giảm',
+  'fx.osFlagNormal': 'HĐH: thường',
+  'fx.testBtn': 'Test hiệu ứng',
+  'fx.previewHint': 'Bấm "Test hiệu ứng" để xem thử sát thương, đạn, hồi máu & buff.',
+  'fx.previewAlly': 'PHE TA',
+  'fx.previewEnemy': 'MỤC TIÊU',
+  'fx.reducedMotionNotice': 'Đang bật Giảm chuyển động (chỉ mờ dần hiệu ứng chính)',
 };
 

@@ -24,7 +24,6 @@ import {
   ShieldAlert,
   Sparkles,
   Square,
-  Tag,
   X,
   Zap,
   ZapOff,
@@ -80,15 +79,11 @@ import {
 import {
   computeFxCleanupDelayMs,
   POPUP_CLEANUP_DELAY_MS,
-  readBattleEffectsMode,
-  writeBattleEffectsMode,
-  type BattleEffectsMode,
+  useFxSettings,
 } from '../utils/battleVfx';
 import {
   readCombatLogMode,
-  readShowStatusLabels,
   writeCombatLogMode,
-  writeShowStatusLabels,
   type CombatLogChannel,
   type CombatLogDisplayMode,
 } from '../utils/combatLogFormat';
@@ -97,6 +92,7 @@ import { BattleStatsModal } from './BattleStatsModal';
 import { BattleUnitCard } from './BattleUnitCard';
 import { BottomSheet } from './BottomSheet';
 import { CombatLogList } from './CombatLogList';
+import { EffectsSettingsPanel } from './EffectsSettingsPanel';
 import { ErrorBoundary } from './ErrorBoundary';
 import { SkillIcon } from './SkillIcon';
 import { StatBar } from './StatBar';
@@ -172,17 +168,11 @@ export function BattleScreen() {
   const [speechBubblesEnabled, setSpeechBubblesEnabled] = useState<boolean>(
     () => readSpeechBubblesEnabled()
   );
-  const [effectsMode, setEffectsMode] = useState<BattleEffectsMode>(() =>
-    readBattleEffectsMode()
-  );
-  const [effectsDebugEnabled, setEffectsDebugEnabled] = useState<boolean>(false);
+  const [fxSettings] = useFxSettings();
   const [combatLogMode, setCombatLogMode] = useState<CombatLogDisplayMode>(() =>
     readCombatLogMode()
   );
   const [logChannel, setLogChannel] = useState<CombatLogChannel>('all');
-  const [showStatusLabels, setShowStatusLabels] = useState<boolean>(() =>
-    readShowStatusLabels()
-  );
   const [cardToast, setCardToast] = useState<string | null>(null);
   const popupCleanupTimersRef = useRef<Map<string, number>>(new Map());
   const fxCleanupTimersRef = useRef<Map<string, number>>(new Map());
@@ -234,19 +224,6 @@ export function BattleScreen() {
     setSpeechBubblesEnabled((prev) => {
       const next = !prev;
       writeSpeechBubblesEnabled(next);
-      return next;
-    });
-  };
-
-  const handleSetEffectsMode = (mode: BattleEffectsMode) => {
-    setEffectsMode(mode);
-    writeBattleEffectsMode(mode);
-  };
-
-  const handleToggleShowStatusLabels = () => {
-    setShowStatusLabels((prev) => {
-      const next = !prev;
-      writeShowStatusLabels(next);
       return next;
     });
   };
@@ -861,7 +838,7 @@ export function BattleScreen() {
         exploding={battle.explodedUnitIds.includes(unit.id)}
         skipAnimations={bypassFx}
         autoActive={unit.isPlayer && autoBattleEnabled}
-        showStatusLabels={showStatusLabels}
+        showStatusLabels={fxSettings.showStatusLabels}
         popups={battle.popups.filter((p) => p.unitId === unit.id)}
         onSelect={
           isEnemy
@@ -989,9 +966,10 @@ export function BattleScreen() {
           skipAnimations={skipAnimations}
           speechBubblesEnabled={speechBubblesEnabled}
           battleSpeed={battleSpeed}
-          effectsMode={effectsMode}
-          effectsDebugEnabled={effectsDebugEnabled}
-          showStatusLabels={showStatusLabels}
+          effectsMode={fxSettings.effectsMode}
+          reducedMotionMode={fxSettings.reducedMotionMode}
+          effectsDebugEnabled={fxSettings.effectsDebug}
+          showStatusLabels={fxSettings.showStatusLabels}
           playerWeaponId={playerWeaponId}
           layoutMode={layoutMode}
           onSelectEnemy={(id) => {
@@ -2058,55 +2036,8 @@ export function BattleScreen() {
             </div>
           </div>
 
-          {/* Visual Effects Density (Full / Compact / Off) — persisted in localStorage */}
-          <div className="space-y-2" data-testid="battle-effects-setting">
-            <div className="text-[12px] font-semibold uppercase tracking-wider text-slate-400">
-              {t('battle.effectsLabel')}
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              {(
-                [
-                  { id: 'full', label: t('battle.effectsFull') },
-                  { id: 'compact', label: t('battle.effectsCompact') },
-                  { id: 'off', label: t('battle.effectsOff') },
-                ] as const
-              ).map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  data-testid={`battle-effects-${opt.id}`}
-                  aria-pressed={effectsMode === opt.id}
-                  onClick={() => handleSetEffectsMode(opt.id)}
-                  className={`min-h-[44px] rounded-lg border text-[13px] font-bold cursor-pointer transition-colors ${
-                    effectsMode === opt.id
-                      ? 'border-sky-400 bg-sky-500 text-slate-950'
-                      : 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              data-testid="battle-toggle-status-labels"
-              onClick={handleToggleShowStatusLabels}
-              aria-pressed={showStatusLabels}
-              className={`w-full min-h-[44px] px-3.5 rounded-lg border text-[13px] font-semibold flex items-center justify-between cursor-pointer ${
-                showStatusLabels
-                  ? 'border-sky-400 bg-sky-500/20 text-sky-200'
-                  : 'border-slate-700 bg-slate-900 text-slate-300'
-              }`}
-            >
-              <span className="inline-flex items-center gap-2.5">
-                <Tag className="w-4 h-4 text-sky-400" />
-                <span>{t('battle.showStatusLabels')}</span>
-              </span>
-              <span className="font-mono-nums text-[12px]">
-                {showStatusLabels ? 'ON' : 'OFF'}
-              </span>
-            </button>
-          </div>
+          {/* Visual Effects (Full/Compact/Off, Reduced Motion, Status Labels, Debug & Test Preview) */}
+          <EffectsSettingsPanel compact />
 
           <div className="grid grid-cols-1 gap-2">
             <button
@@ -2159,26 +2090,6 @@ export function BattleScreen() {
               </span>
               <span className="font-mono-nums text-[12px]">
                 {skipAnimations ? 'ON' : 'OFF'}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              data-testid="battle-toggle-effects-debug"
-              onClick={() => setEffectsDebugEnabled((prev) => !prev)}
-              aria-pressed={effectsDebugEnabled}
-              className={`min-h-[44px] px-3.5 rounded-lg border text-[13px] font-semibold flex items-center justify-between cursor-pointer ${
-                effectsDebugEnabled
-                  ? 'border-amber-400 bg-amber-500/20 text-amber-200'
-                  : 'border-slate-700 bg-slate-900 text-slate-300'
-              }`}
-            >
-              <span className="inline-flex items-center gap-2.5">
-                <Info className="w-4 h-4 text-amber-400" />
-                <span>{t('battle.effectsDebug')}</span>
-              </span>
-              <span className="font-mono-nums text-[12px]">
-                {effectsDebugEnabled ? 'ON' : 'OFF'}
               </span>
             </button>
 

@@ -47,6 +47,7 @@ import {
   isCompactPopupTone,
   usePrefersReducedMotion,
 } from '../utils/battleDisplay';
+import { resolveReducedMotion, useFxSettings } from '../utils/battleVfx';
 
 interface BattleUnitCardProps {
   unit: CombatUnit;
@@ -309,8 +310,13 @@ export const BattleUnitCard = memo(function BattleUnitCard({
   onInspect,
 }: BattleUnitCardProps) {
   const { lang, t } = useI18n();
-  const prefersReducedMotion = usePrefersReducedMotion();
-  const effectiveSkip = skipAnimations || prefersReducedMotion;
+  const [fxSettings] = useFxSettings();
+  const osReducedMotion = usePrefersReducedMotion();
+  const resolvedReducedMotion = resolveReducedMotion(
+    fxSettings.reducedMotionMode,
+    osReducedMotion
+  );
+  const skipCardMotion = skipAnimations || resolvedReducedMotion;
 
   const longPressTimerRef = useRef<number | null>(null);
   const longPressFiredRef = useRef(false);
@@ -383,7 +389,7 @@ export const BattleUnitCard = memo(function BattleUnitCard({
       };
 
   const rowClass = isActiveTurn
-    ? effectiveSkip
+    ? skipCardMotion
       ? 'shadow-[0_0_0_1px_var(--turn-active)]'
       : 'anim-turn-active'
     : 'bg-[#0C121D]/95 hover:bg-[#111927]';
@@ -431,6 +437,7 @@ export const BattleUnitCard = memo(function BattleUnitCard({
       data-unit-collapsed="false"
       data-acting={isActiveTurn ? 'true' : 'false'}
       data-targeted={isTargeted ? 'true' : 'false'}
+      data-reduced-motion={resolvedReducedMotion ? 'true' : 'false'}
       role={isClickable ? 'button' : undefined}
       tabIndex={isClickable ? 0 : undefined}
       onClick={isClickable ? handleRowClick : undefined}
@@ -453,10 +460,10 @@ export const BattleUnitCard = memo(function BattleUnitCard({
         isClickable ? 'cursor-pointer' : ''
       } ${isStealthed ? 'border-dashed opacity-75' : ''} ${
         frontBlocked ? 'opacity-65' : ''
-      } ${getAnimClass(unit, effectiveSkip)}`}
+      } ${getAnimClass(unit, skipCardMotion)}`}
     >
-      {/* Compact Staggered Floating Popups (max 6, tight-anchored for buffs/status) */}
-      {!effectiveSkip &&
+      {/* Compact Staggered Floating Popups (max 6, tight-anchored for buffs/status; kept visible under reduced motion as fade-only) */}
+      {!skipAnimations &&
         popups.slice(-6).map((pop, idx) => {
           const isSmall = isCompactPopupTone(pop.tone);
           return (

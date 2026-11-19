@@ -1347,6 +1347,20 @@ export const EN_TRANSLATIONS = {
   'stats.openCombatLog': 'Open Combat Log',
   'stats.colKillsSimple': 'Kills',
   'battle.showStatusLabels': 'Show status labels',
+
+  // FX-fix2: Reduced motion override, v2 storage & preview
+  'fx.sectionTitle': 'Effects',
+  'fx.reducedMotionLabel': 'Reduced motion',
+  'fx.reducedMotionSystem': 'Follow system',
+  'fx.reducedMotionOff': 'Off (Full FX)',
+  'fx.reducedMotionOn': 'On',
+  'fx.osFlagReduce': 'OS: reduce',
+  'fx.osFlagNormal': 'OS: normal',
+  'fx.testBtn': 'Test effects',
+  'fx.previewHint': 'Click "Test effects" to preview damage, projectile, heal & buff.',
+  'fx.previewAlly': 'ALLY',
+  'fx.previewEnemy': 'TARGET',
+  'fx.reducedMotionNotice': 'Reduced motion active (fade-only core FX)',
 } as const;
 
 export type TranslationKey = keyof typeof EN_TRANSLATIONS;

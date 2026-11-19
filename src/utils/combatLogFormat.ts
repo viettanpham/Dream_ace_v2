@@ -13,6 +13,11 @@ import type {
   StatusEffectType,
   UnitBattleStats,
 } from '../types/game';
+import {
+  FX_SETTINGS_STORAGE_KEY,
+  readFxSettings,
+  updateFxSettings,
+} from './battleVfx';
 
 export type CombatLogChannel = 'all' | 'ally' | 'enemy' | 'system';
 export type CombatLogDisplayMode = 'docked' | 'popup';
@@ -37,7 +42,7 @@ export type CombatLogValueTone =
 export const DOCKED_LOG_MAX_ENTRIES = 200;
 export const POPUP_LOG_PAGE_SIZE = 200;
 export const COMBAT_LOG_MODE_STORAGE_KEY = 'starfront_combat_log_mode_v1';
-export const SHOW_STATUS_LABELS_STORAGE_KEY = 'starfront_show_status_labels_v1';
+export const SHOW_STATUS_LABELS_STORAGE_KEY = FX_SETTINGS_STORAGE_KEY;
 
 const DEBUFF_STATUS_TYPES = new Set<StatusEffectType>([
   'burn',
@@ -116,26 +121,11 @@ export function writeCombatLogMode(mode: CombatLogDisplayMode): void {
 }
 
 export function readShowStatusLabels(): boolean {
-  try {
-    if (typeof window === 'undefined' || !window.localStorage) return true;
-    const raw = window.localStorage.getItem(SHOW_STATUS_LABELS_STORAGE_KEY);
-    if (raw === '0' || raw === 'false') return false;
-    return true;
-  } catch {
-    return true;
-  }
+  return readFxSettings().showStatusLabels;
 }
 
 export function writeShowStatusLabels(enabled: boolean): void {
-  try {
-    if (typeof window === 'undefined' || !window.localStorage) return;
-    window.localStorage.setItem(
-      SHOW_STATUS_LABELS_STORAGE_KEY,
-      enabled ? '1' : '0'
-    );
-  } catch {
-    // Ignore storage quota or private mode failures
-  }
+  updateFxSettings({ showStatusLabels: enabled });
 }
 
 export function isSystemOrKillLogEntry(entry: CombatLogEntry): boolean {
