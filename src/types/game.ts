@@ -344,6 +344,130 @@ export interface EnchantAttemptResult {
   successRate: number;
 }
 
+export type TacticsConditionKind =
+  | 'always'
+  | 'my_hp_below'
+  | 'my_shield_zero'
+  | 'my_sp_gte'
+  | 'my_sp_lt'
+  | 'any_ally_hp_below'
+  | 'any_ally_has_debuff'
+  | 'enemy_count_gte'
+  | 'target_has_shield'
+  | 'target_hp_below'
+  | 'any_enemy_stealthed'
+  | 'round_eq'
+  | 'first_round'
+  | 'boss_present'
+  | 'my_buff_not_active'
+  | 'skill_off_cooldown';
+
+export type TacticsTargetSelector =
+  | 'lowest_hp_enemy'
+  | 'highest_hp_enemy'
+  | 'highest_atk_enemy'
+  | 'fastest_enemy'
+  | 'enemy_support_first'
+  | 'enemy_sniper_first'
+  | 'front_row_first'
+  | 'back_row_first'
+  | 'random_enemy'
+  | 'same_as_last_turn'
+  | 'self'
+  | 'lowest_hp_ally'
+  | 'all_allies';
+
+export interface TacticsCondition {
+  kind: TacticsConditionKind;
+  value?: number; // percentage (0..100), SP amount, enemy count, or round number
+  buffType?: StatusEffectType; // used by my_buff_not_active
+  skillId?: string; // used by skill_off_cooldown
+}
+
+export interface TacticsActionSpec {
+  type: ActionType;
+  skillId?: string;
+}
+
+export interface TacticsRule {
+  id: string;
+  enabled: boolean;
+  condition: TacticsCondition;
+  action: TacticsActionSpec;
+  targetSelector: TacticsTargetSelector;
+}
+
+export interface AutoSafetyConfig {
+  stopOnLowHpEnabled: boolean;
+  stopOnLowHpPct: number; // default 25
+  stopOnEliteReady: boolean;
+  stopOnBossPresent: boolean;
+  autoRetreatLowHpEnabled: boolean; // OFF by default
+  autoRetreatLowHpPct: number; // default 15
+}
+
+export type TacticsPresetId =
+  | 'class_default'
+  | 'balanced'
+  | 'focus_weak'
+  | 'defensive';
+
+export interface GearTacticsProfile {
+  rules: TacticsRule[];
+  safety: AutoSafetyConfig;
+}
+
+export type AutoRepeatLimit = 1 | 5 | 10 | 'infinite';
+
+export type AutoStopReason =
+  | 'completed'
+  | 'defeat'
+  | 'retreat'
+  | 'low_hp'
+  | 'elite_ready'
+  | 'boss_present'
+  | 'auto_retreat'
+  | 'inventory_full'
+  | 'manual_stop';
+
+export interface AutoRepeatSession {
+  active: boolean;
+  limit: AutoRepeatLimit;
+  sectorId: string;
+  completedRuns: number;
+  wins: number;
+  totalExp: number;
+  totalCredits: number;
+  totalWarPoints: number;
+  totalDrops: ItemInstance[];
+  stopReason: AutoStopReason | null;
+}
+
+export type TeamColorRole = 'me' | 'ally' | 'enemy' | 'boss';
+
+export interface TurnQueueEntry {
+  unitId: string;
+  name: string;
+  classId: MechClassId;
+  side: CombatSide;
+  isPlayer: boolean;
+  isBoss: boolean;
+  teamRole: TeamColorRole;
+  effectiveSpeed: number;
+  baseSpeed: number;
+  isSlowed: boolean;
+  isSpeedBoosted: boolean;
+  phase: 'acted' | 'current' | 'upcoming' | 'next_round';
+}
+
+export interface TurnQueueView {
+  round: number;
+  acted: TurnQueueEntry[];
+  current: TurnQueueEntry | null;
+  upcoming: TurnQueueEntry[];
+  nextRound: TurnQueueEntry[];
+}
+
 export interface GearUnit {
   classId: MechClassId;
   owned: boolean;
@@ -354,6 +478,7 @@ export interface GearUnit {
   equipped: EquippedSlotIds;
   skillLevels: Record<string, number>; // learned skillId -> 1..5
   equippedSkillBar: string[]; // up to 6 active skills (class + general only)
+  tactics: GearTacticsProfile;
   battlesWon: number;
   battlesFought: number;
 }
@@ -470,6 +595,9 @@ export interface CombatLogEntry {
   round: number;
   actorName: string;
   actorSide?: CombatSide;
+  actorIsPlayer?: boolean;
+  actorIsBoss?: boolean;
+  autoRuleNumber?: number; // >0 => [AUTO #N], 0 => [AUTO] fallback
   tag: CombatLogTag;
   templateKey: CombatLogTemplateKey;
   params: Record<string, string | number>;
@@ -518,6 +646,8 @@ export interface BattleState {
   round: number;
   selectedTargetId: string | null;
   selectedAllyTargetId: string | null;
+  lastPlayerTargetId: string | null;
+  autoStopNotice: AutoStopReason | null;
   log: CombatLogEntry[];
   popups: FloatingPopup[];
   fxEvents: CombatFxEvent[];

@@ -8,6 +8,7 @@ import {
   calculateBattleRewards,
   chooseAiDecision,
   createInitialBattleState,
+  reconcileRemainingTurnOrder,
   resolveUnitAction,
   sortTurnOrder,
 } from '../engine/combat';
@@ -41,16 +42,30 @@ import {
   getTotalAvailablePointsForLevel,
   resetGearStatAllocations,
 } from '../engine/stats';
+import {
+  chooseAction,
+  createBlankTacticsRule,
+  createPresetTactics,
+  evaluateAutoSafety,
+  sanitizeGearTactics,
+  shouldStopAutoRepeat,
+} from '../engine/tactics';
 import type {
   ActionType,
   AdminConfig,
+  AutoRepeatLimit,
+  AutoRepeatSession,
+  AutoSafetyConfig,
+  AutoStopReason,
   BaseTab,
   BattleSpeed,
   BattleState,
+  CombatLogEntry,
   CombatUnit,
   EnchantAttemptResult,
   EquipmentSlot,
   EquipValidationResult,
+  GearTacticsProfile,
   ItemInstance,
   ItemRarity,
   Language,
@@ -59,6 +74,8 @@ import type {
   ScreenState,
   SkillValidationResult,
   StatBlock,
+  TacticsPresetId,
+  TacticsRule,
 } from '../types/game';
 import { soundFx } from '../utils/sound';
 
@@ -82,6 +99,10 @@ interface GameStoreState {
   shopSubTab: ShopSubTab;
   battle: BattleState | null;
   adminPanelOpen: boolean;
+  autoBattleEnabled: boolean;
+  tacticsModalOpen: boolean;
+  autoRepeatLimit: AutoRepeatLimit;
+  autoRepeatSession: AutoRepeatSession | null;
 
   // Language
   setLanguage: (lang: Language) => void;
@@ -115,6 +136,22 @@ interface GameStoreState {
     cost: number;
   };
 
+  // Auto Battle & Per-Gear Tactics actions
+  setAutoBattleEnabled: (enabled: boolean) => void;
+  toggleAutoBattle: () => void;
+  setTacticsModalOpen: (open: boolean) => void;
+  setActiveGearTactics: (tactics: GearTacticsProfile) => void;
+  loadTacticsPreset: (presetId: TacticsPresetId) => void;
+  addTacticsRule: () => void;
+  updateTacticsRule: (ruleId: string, patch: Partial<TacticsRule>) => void;
+  deleteTacticsRule: (ruleId: string) => void;
+  reorderTacticsRules: (fromIndex: number, toIndex: number) => void;
+  updateTacticsSafety: (patch: Partial<AutoSafetyConfig>) => void;
+  setAutoRepeatLimit: (limit: AutoRepeatLimit) => void;
+  startAutoRepeat: (limit?: AutoRepeatLimit, sectorId?: string) => void;
+  stopAutoRepeat: (reason?: AutoStopReason) => void;
+  clearAutoRepeatSummary: () => void;
+
   // Equipment, Shop & Enchant actions
   equipItem: (instanceId: string) => EquipValidationResult;
   unequipSlot: (slot: EquipmentSlot) => void;
@@ -129,6 +166,7 @@ interface GameStoreState {
   selectTarget: (unitId: string) => void;
   selectAllyTarget: (unitId: string) => void;
   performPlayerAction: (action: ActionType, skillId?: string) => void;
+  performAutoPlayerTurn: () => void;
   performAiTurn: () => void;
   retreatBattle: () => void;
   forceWinBattle: () => void;
@@ -166,20 +204,37 @@ interface GameStoreState {
 }
 
 function findNextAliveTurnIndex(
-  battle: BattleState,
+  turnOrder: string[],
+  units: CombatUnit[],
   startFromIndex: number
 ): { nextIndex: number; wrappedRound: boolean } {
-  const total = battle.turnOrder.length;
+  const total = turnOrder.length;
   for (let step = 1; step <= total; step++) {
     const idx = (startFromIndex + step) % total;
-    const unitId = battle.turnOrder[idx];
-    const unit = battle.units.find((u) => u.id === unitId);
+    const unitId = turnOrder[idx];
+    const unit = units.find((u) => u.id === unitId);
     if (unit && unit.alive) {
       const wrappedRound = startFromIndex + step >= total;
       return { nextIndex: idx, wrappedRound };
     }
   }
   return { nextIndex: startFromIndex, wrappedRound: false };
+}
+
+function enrichLogEntries(
+  entries: CombatLogEntry[],
+  actor: CombatUnit,
+  autoRuleNumber?: number
+): CombatLogEntry[] {
+  return entries.map((e, idx) => ({
+    ...e,
+    actorSide: e.actorSide ?? actor.side,
+    actorIsPlayer: e.actorName === actor.name ? actor.isPlayer : e.actorIsPlayer,
+    actorIsBoss: e.actorName === actor.name ? Boolean(actor.isBoss) : e.actorIsBoss,
+    // Tag the primary action log entry with [AUTO #N] when executed by Auto tactics
+    autoRuleNumber:
+      autoRuleNumber !== undefined && idx === 0 ? autoRuleNumber : e.autoRuleNumber,
+  }));
 }
 
 function playCue(
@@ -288,10 +343,40 @@ function finalizeBattleOutcome(
   const enemies = updatedUnits.filter((u) => u.side === 'enemy');
   const aliveAllies = updatedUnits.filter((u) => u.side === 'ally' && u.alive);
 
+  // Update Auto-Repeat batch session if active
+  let nextAutoRepeat = state.autoRepeatSession;
+  if (state.autoRepeatSession?.active) {
+    const updatedSession: AutoRepeatSession = {
+      ...state.autoRepeatSession,
+      completedRuns: state.autoRepeatSession.completedRuns + 1,
+      wins: state.autoRepeatSession.wins + (won ? 1 : 0),
+      totalExp: state.autoRepeatSession.totalExp + rewards.expGained,
+      totalCredits: state.autoRepeatSession.totalCredits + rewards.creditsGained,
+      totalWarPoints:
+        state.autoRepeatSession.totalWarPoints + rewards.warPointsGained,
+      totalDrops: [...state.autoRepeatSession.totalDrops, ...droppedItems],
+    };
+    const stopCheck = shouldStopAutoRepeat(
+      updatedSession,
+      won ? 'victory' : 'defeat',
+      retreated,
+      nextPilot.inventory.length,
+      BALANCE_CONFIG.maxInventorySize
+    );
+    nextAutoRepeat = stopCheck.stop
+      ? {
+          ...updatedSession,
+          active: false,
+          stopReason: updatedSession.stopReason ?? stopCheck.reason,
+        }
+      : updatedSession;
+  }
+
   return {
     pilot: nextPilot,
     shopStock: refreshedShopStock,
     hasSaveData: true,
+    autoRepeatSession: nextAutoRepeat,
     battle: {
       ...battle,
       units: updatedUnits,
@@ -336,6 +421,10 @@ export const useGameStore = create<GameStoreState>()(
       shopSubTab: 'buy',
       battle: null,
       adminPanelOpen: false,
+      autoBattleEnabled: false,
+      tacticsModalOpen: false,
+      autoRepeatLimit: 1,
+      autoRepeatSession: null,
 
       setLanguage: (language) => {
         soundFx.playClick();
@@ -559,6 +648,207 @@ export const useGameStore = create<GameStoreState>()(
           set({ pilot: res.pilot, hasSaveData: true });
         }
         return { ok: res.ok, reason: res.reason, cost: res.cost };
+      },
+
+      // ---- AUTO BATTLE & PER-GEAR TACTICS ACTIONS ----
+      setAutoBattleEnabled: (enabled) => {
+        soundFx.playClick();
+        set((state) => ({
+          autoBattleEnabled: enabled,
+          battle: state.battle
+            ? {
+                ...state.battle,
+                autoStopNotice: enabled ? null : state.battle.autoStopNotice,
+              }
+            : null,
+        }));
+      },
+
+      toggleAutoBattle: () => {
+        const next = !get().autoBattleEnabled;
+        get().setAutoBattleEnabled(next);
+      },
+
+      setTacticsModalOpen: (tacticsModalOpen) => {
+        soundFx.playClick();
+        set({ tacticsModalOpen });
+      },
+
+      setActiveGearTactics: (tactics) => {
+        const state = get();
+        const id = state.pilot.activeGearId;
+        const gear = state.pilot.gears[id];
+        const clean = sanitizeGearTactics(gear.classId, tactics);
+        set({
+          pilot: {
+            ...state.pilot,
+            gears: {
+              ...state.pilot.gears,
+              [id]: {
+                ...gear,
+                tactics: clean,
+              },
+            },
+          },
+          hasSaveData: true,
+        });
+      },
+
+      loadTacticsPreset: (presetId) => {
+        const state = get();
+        const id = state.pilot.activeGearId;
+        const gear = state.pilot.gears[id];
+        soundFx.playConfirm();
+        const preset = createPresetTactics(
+          gear.classId,
+          presetId,
+          gear.equippedSkillBar
+        );
+        get().setActiveGearTactics(preset);
+      },
+
+      addTacticsRule: () => {
+        const state = get();
+        const id = state.pilot.activeGearId;
+        const gear = state.pilot.gears[id];
+        if (gear.tactics.rules.length >= BALANCE_CONFIG.maxTacticsRules) return;
+        soundFx.playClick();
+        get().setActiveGearTactics({
+          ...gear.tactics,
+          rules: [...gear.tactics.rules, createBlankTacticsRule()],
+        });
+      },
+
+      updateTacticsRule: (ruleId, patch) => {
+        const state = get();
+        const id = state.pilot.activeGearId;
+        const gear = state.pilot.gears[id];
+        const nextRules = gear.tactics.rules.map((r) =>
+          r.id === ruleId ? { ...r, ...patch } : r
+        );
+        get().setActiveGearTactics({
+          ...gear.tactics,
+          rules: nextRules,
+        });
+      },
+
+      deleteTacticsRule: (ruleId) => {
+        const state = get();
+        const id = state.pilot.activeGearId;
+        const gear = state.pilot.gears[id];
+        soundFx.playClick();
+        get().setActiveGearTactics({
+          ...gear.tactics,
+          rules: gear.tactics.rules.filter((r) => r.id !== ruleId),
+        });
+      },
+
+      reorderTacticsRules: (fromIndex, toIndex) => {
+        const state = get();
+        const id = state.pilot.activeGearId;
+        const gear = state.pilot.gears[id];
+        const rules = [...gear.tactics.rules];
+        if (
+          fromIndex < 0 ||
+          toIndex < 0 ||
+          fromIndex >= rules.length ||
+          toIndex >= rules.length ||
+          fromIndex === toIndex
+        ) {
+          return;
+        }
+        const [moved] = rules.splice(fromIndex, 1);
+        rules.splice(toIndex, 0, moved);
+        soundFx.playClick();
+        get().setActiveGearTactics({
+          ...gear.tactics,
+          rules,
+        });
+      },
+
+      updateTacticsSafety: (patch) => {
+        const state = get();
+        const id = state.pilot.activeGearId;
+        const gear = state.pilot.gears[id];
+        get().setActiveGearTactics({
+          ...gear.tactics,
+          safety: {
+            ...gear.tactics.safety,
+            ...patch,
+          },
+        });
+      },
+
+      setAutoRepeatLimit: (autoRepeatLimit) => {
+        soundFx.playClick();
+        set({ autoRepeatLimit });
+      },
+
+      startAutoRepeat: (limit, sectorId) => {
+        const state = get();
+        const chosenLimit = limit ?? state.autoRepeatLimit;
+        const chosenSector =
+          sectorId ?? state.battle?.sectorId ?? state.selectedSectorId;
+
+        if (state.pilot.inventory.length >= BALANCE_CONFIG.maxInventorySize) {
+          set({
+            autoRepeatLimit: chosenLimit,
+            autoRepeatSession: {
+              active: false,
+              limit: chosenLimit,
+              sectorId: chosenSector,
+              completedRuns: 0,
+              wins: 0,
+              totalExp: 0,
+              totalCredits: 0,
+              totalWarPoints: 0,
+              totalDrops: [],
+              stopReason: 'inventory_full',
+            },
+          });
+          return;
+        }
+
+        soundFx.playConfirm();
+        set({
+          autoRepeatLimit: chosenLimit,
+          autoBattleEnabled: true,
+          autoRepeatSession: {
+            active: true,
+            limit: chosenLimit,
+            sectorId: chosenSector,
+            completedRuns: 0,
+            wins: 0,
+            totalExp: 0,
+            totalCredits: 0,
+            totalWarPoints: 0,
+            totalDrops: [],
+            stopReason: null,
+          },
+        });
+
+        // If not currently in an ongoing battle, start immediately
+        if (!state.battle || state.battle.summary) {
+          get().startBattle(chosenSector);
+        }
+      },
+
+      stopAutoRepeat: (reason = 'manual_stop') => {
+        const state = get();
+        if (!state.autoRepeatSession) return;
+        soundFx.playClick();
+        set({
+          autoRepeatSession: {
+            ...state.autoRepeatSession,
+            active: false,
+            stopReason: state.autoRepeatSession.stopReason ?? reason,
+          },
+        });
+      },
+
+      clearAutoRepeatSummary: () => {
+        soundFx.playClick();
+        set({ autoRepeatSession: null });
       },
 
       selectSector: (sectorId) => {
@@ -821,6 +1111,12 @@ export const useGameStore = create<GameStoreState>()(
         );
         playCue(resolution.soundCue, bypassFx);
 
+        const targetedEnemy =
+          resolvedTargetId &&
+          battle.units.some((u) => u.id === resolvedTargetId && u.side === 'enemy')
+            ? resolvedTargetId
+            : battle.lastPlayerTargetId;
+
         const aliveEnemies = resolution.updatedUnits.filter(
           (u) => u.side === 'enemy' && u.alive
         );
@@ -828,7 +1124,8 @@ export const useGameStore = create<GameStoreState>()(
           (u) => u.side === 'ally' && u.alive
         );
 
-        const nextLog = [...battle.log, ...resolution.logEntries].slice(-80);
+        const enrichedLogs = enrichLogEntries(resolution.logEntries, activeUnit);
+        const nextLog = [...battle.log, ...enrichedLogs].slice(-80);
         const nextPopups = bypassFx
           ? []
           : [...battle.popups, ...resolution.popups];
@@ -859,20 +1156,19 @@ export const useGameStore = create<GameStoreState>()(
           return;
         }
 
-        const updatedBattleBase: BattleState = {
-          ...battle,
-          units: resolution.updatedUnits,
-          log: nextLog,
-          popups: nextPopups,
-          fxEvents: nextFx,
-          explodedUnitIds: nextExploded,
-        };
+        // Reconcile upcoming units in current round by live Speed DESC
+        const reconciledOrder = reconcileRemainingTurnOrder(
+          battle.turnOrder,
+          battle.activeTurnIndex,
+          resolution.updatedUnits
+        );
         const { nextIndex, wrappedRound } = findNextAliveTurnIndex(
-          updatedBattleBase,
+          reconciledOrder,
+          resolution.updatedUnits,
           battle.activeTurnIndex
         );
 
-        let nextTurnOrder = battle.turnOrder;
+        let nextTurnOrder = reconciledOrder;
         let finalTurnIndex = nextIndex;
         if (wrappedRound) {
           nextTurnOrder = sortTurnOrder(resolution.updatedUnits);
@@ -891,7 +1187,12 @@ export const useGameStore = create<GameStoreState>()(
 
         set({
           battle: {
-            ...updatedBattleBase,
+            ...battle,
+            units: resolution.updatedUnits,
+            log: nextLog,
+            popups: nextPopups,
+            fxEvents: nextFx,
+            explodedUnitIds: nextExploded,
             turnOrder: nextTurnOrder,
             activeTurnIndex: finalTurnIndex,
             round: wrappedRound ? battle.round + 1 : battle.round,
@@ -901,6 +1202,174 @@ export const useGameStore = create<GameStoreState>()(
             selectedAllyTargetId: currentAllyStillAlive
               ? battle.selectedAllyTargetId
               : aliveAllies[0]?.id ?? null,
+            lastPlayerTargetId: targetedEnemy,
+            autoStopNotice: null,
+            isResolving: false,
+          },
+        });
+      },
+
+      performAutoPlayerTurn: () => {
+        const state = get();
+        const { battle } = state;
+        if (!battle || battle.summary || battle.isResolving || !state.autoBattleEnabled) {
+          return;
+        }
+
+        const activeUnitId = battle.turnOrder[battle.activeTurnIndex];
+        const activeUnit = battle.units.find((u) => u.id === activeUnitId);
+        if (!activeUnit || !activeUnit.isPlayer || !activeUnit.alive) return;
+
+        const deployedGear = state.pilot.gears[battle.deployedGearId];
+        const tactics = deployedGear.tactics;
+
+        // 1. Evaluate Safety Stops before executing Auto turn
+        const safetyEval = evaluateAutoSafety(battle, activeUnit, tactics.safety);
+        if (safetyEval.shouldRetreat) {
+          set((prev) => ({
+            autoBattleEnabled: false,
+            autoRepeatSession: prev.autoRepeatSession?.active
+              ? {
+                  ...prev.autoRepeatSession,
+                  stopReason: 'auto_retreat',
+                }
+              : prev.autoRepeatSession,
+          }));
+          get().retreatBattle();
+          return;
+        }
+        if (safetyEval.shouldStopAuto && safetyEval.reason) {
+          soundFx.playEvade();
+          set((prev) => ({
+            autoBattleEnabled: false,
+            autoRepeatSession: prev.autoRepeatSession?.active
+              ? {
+                  ...prev.autoRepeatSession,
+                  active: false,
+                  stopReason: safetyEval.reason,
+                }
+              : prev.autoRepeatSession,
+            battle: prev.battle
+              ? { ...prev.battle, autoStopNotice: safetyEval.reason }
+              : null,
+          }));
+          return;
+        }
+
+        // 2. Evaluate pure Tactics engine (top-to-bottom priority)
+        const choice = chooseAction(battle, activeUnit, tactics, Math.random);
+        const autoRuleNumber =
+          choice.matchedRuleIndex !== null ? choice.matchedRuleIndex + 1 : 0;
+
+        const bypassFx = state.skipAnimations || state.battleSpeed === 10;
+        const resolution = resolveUnitAction(
+          battle.units,
+          activeUnit.id,
+          choice.action,
+          choice.targetId,
+          battle.round,
+          state.adminConfig,
+          Math.random,
+          choice.skillId
+        );
+        playCue(resolution.soundCue, bypassFx);
+
+        const targetedEnemy =
+          choice.targetId &&
+          battle.units.some((u) => u.id === choice.targetId && u.side === 'enemy')
+            ? choice.targetId
+            : battle.lastPlayerTargetId;
+
+        const aliveEnemies = resolution.updatedUnits.filter(
+          (u) => u.side === 'enemy' && u.alive
+        );
+        const aliveAllies = resolution.updatedUnits.filter(
+          (u) => u.side === 'ally' && u.alive
+        );
+
+        const enrichedLogs = enrichLogEntries(
+          resolution.logEntries,
+          activeUnit,
+          autoRuleNumber
+        );
+        const nextLog = [...battle.log, ...enrichedLogs].slice(-80);
+        const nextPopups = bypassFx
+          ? []
+          : [...battle.popups, ...resolution.popups];
+        const nextFx =
+          bypassFx || !resolution.fxEvent
+            ? []
+            : [...battle.fxEvents, resolution.fxEvent];
+        const nextExploded =
+          bypassFx || resolution.destroyedUnitIds.length === 0
+            ? []
+            : [...battle.explodedUnitIds, ...resolution.destroyedUnitIds];
+
+        if (aliveEnemies.length === 0 || aliveAllies.length === 0) {
+          const won = aliveEnemies.length === 0;
+          set(
+            finalizeBattleOutcome(
+              state,
+              battle,
+              resolution.updatedUnits,
+              won,
+              false,
+              nextLog,
+              nextPopups,
+              nextFx,
+              nextExploded
+            )
+          );
+          return;
+        }
+
+        const reconciledOrder = reconcileRemainingTurnOrder(
+          battle.turnOrder,
+          battle.activeTurnIndex,
+          resolution.updatedUnits
+        );
+        const { nextIndex, wrappedRound } = findNextAliveTurnIndex(
+          reconciledOrder,
+          resolution.updatedUnits,
+          battle.activeTurnIndex
+        );
+
+        let nextTurnOrder = reconciledOrder;
+        let finalTurnIndex = nextIndex;
+        if (wrappedRound) {
+          nextTurnOrder = sortTurnOrder(resolution.updatedUnits);
+          const firstAliveIdx = nextTurnOrder.findIndex((id) =>
+            resolution.updatedUnits.some((u) => u.id === id && u.alive)
+          );
+          finalTurnIndex = Math.max(0, firstAliveIdx);
+        }
+
+        const currentTargetStillAlive = aliveEnemies.some(
+          (e) => e.id === (targetedEnemy ?? battle.selectedTargetId)
+        );
+        const currentAllyStillAlive = aliveAllies.some(
+          (a) => a.id === battle.selectedAllyTargetId
+        );
+
+        set({
+          battle: {
+            ...battle,
+            units: resolution.updatedUnits,
+            log: nextLog,
+            popups: nextPopups,
+            fxEvents: nextFx,
+            explodedUnitIds: nextExploded,
+            turnOrder: nextTurnOrder,
+            activeTurnIndex: finalTurnIndex,
+            round: wrappedRound ? battle.round + 1 : battle.round,
+            selectedTargetId: currentTargetStillAlive
+              ? targetedEnemy ?? battle.selectedTargetId
+              : aliveEnemies[0]?.id ?? null,
+            selectedAllyTargetId: currentAllyStillAlive
+              ? battle.selectedAllyTargetId
+              : aliveAllies[0]?.id ?? null,
+            lastPlayerTargetId: targetedEnemy,
+            autoStopNotice: null,
             isResolving: false,
           },
         });
@@ -916,13 +1385,26 @@ export const useGameStore = create<GameStoreState>()(
 
         if (!activeUnit || !activeUnit.alive) {
           const { nextIndex, wrappedRound } = findNextAliveTurnIndex(
-            battle,
+            battle.turnOrder,
+            battle.units,
             battle.activeTurnIndex
           );
+          let nextTurnOrder = battle.turnOrder;
+          let finalTurnIndex = nextIndex;
+          if (wrappedRound) {
+            nextTurnOrder = sortTurnOrder(battle.units);
+            finalTurnIndex = Math.max(
+              0,
+              nextTurnOrder.findIndex((id) =>
+                battle.units.some((u) => u.id === id && u.alive)
+              )
+            );
+          }
           set({
             battle: {
               ...battle,
-              activeTurnIndex: nextIndex,
+              turnOrder: nextTurnOrder,
+              activeTurnIndex: finalTurnIndex,
               round: wrappedRound ? battle.round + 1 : battle.round,
             },
           });
@@ -937,7 +1419,11 @@ export const useGameStore = create<GameStoreState>()(
 
         const bypassFx = state.skipAnimations || state.battleSpeed === 10;
         const decision = playerIsCharging
-          ? { action: 'attack' as ActionType, targetId: battle.selectedTargetId, skillId: undefined }
+          ? {
+              action: 'attack' as ActionType,
+              targetId: battle.selectedTargetId,
+              skillId: undefined,
+            }
           : chooseAiDecision(activeUnit, battle.units);
 
         const resolution = resolveUnitAction(
@@ -959,7 +1445,8 @@ export const useGameStore = create<GameStoreState>()(
           (u) => u.side === 'ally' && u.alive
         );
 
-        const nextLog = [...battle.log, ...resolution.logEntries].slice(-80);
+        const enrichedLogs = enrichLogEntries(resolution.logEntries, activeUnit);
+        const nextLog = [...battle.log, ...enrichedLogs].slice(-80);
         const nextPopups = bypassFx
           ? []
           : [...battle.popups, ...resolution.popups];
@@ -990,20 +1477,19 @@ export const useGameStore = create<GameStoreState>()(
           return;
         }
 
-        const updatedBattleBase: BattleState = {
-          ...battle,
-          units: resolution.updatedUnits,
-          log: nextLog,
-          popups: nextPopups,
-          fxEvents: nextFx,
-          explodedUnitIds: nextExploded,
-        };
+        // Reconcile upcoming units in current round by live Speed DESC
+        const reconciledOrder = reconcileRemainingTurnOrder(
+          battle.turnOrder,
+          battle.activeTurnIndex,
+          resolution.updatedUnits
+        );
         const { nextIndex, wrappedRound } = findNextAliveTurnIndex(
-          updatedBattleBase,
+          reconciledOrder,
+          resolution.updatedUnits,
           battle.activeTurnIndex
         );
 
-        let nextTurnOrder = battle.turnOrder;
+        let nextTurnOrder = reconciledOrder;
         let finalTurnIndex = nextIndex;
         if (wrappedRound) {
           nextTurnOrder = sortTurnOrder(resolution.updatedUnits);
@@ -1022,7 +1508,12 @@ export const useGameStore = create<GameStoreState>()(
 
         set({
           battle: {
-            ...updatedBattleBase,
+            ...battle,
+            units: resolution.updatedUnits,
+            log: nextLog,
+            popups: nextPopups,
+            fxEvents: nextFx,
+            explodedUnitIds: nextExploded,
             turnOrder: nextTurnOrder,
             activeTurnIndex: finalTurnIndex,
             round: wrappedRound ? battle.round + 1 : battle.round,
@@ -1136,7 +1627,11 @@ export const useGameStore = create<GameStoreState>()(
 
       returnToHangar: () => {
         soundFx.playClick();
-        set({ battle: null, screen: 'HANGAR' });
+        set({
+          battle: null,
+          screen: 'HANGAR',
+          autoRepeatSession: null,
+        });
       },
 
       toggleMute: () => {

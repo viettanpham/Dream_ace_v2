@@ -6,6 +6,7 @@ import {
   KeyRound,
   Lock,
   Plus,
+  SlidersHorizontal,
   Sparkles,
   X,
 } from 'lucide-react';
@@ -56,6 +57,7 @@ export function SkillView() {
   const equipSkillToBar = useGameStore((s) => s.equipSkillToBar);
   const unequipSkillFromBar = useGameStore((s) => s.unequipSkillFromBar);
   const openWarPointShop = useGameStore((s) => s.openWarPointShop);
+  const setTacticsModalOpen = useGameStore((s) => s.setTacticsModalOpen);
 
   const [filter, setFilter] = useState<SkillFilter>('all');
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -231,14 +233,26 @@ export function SkillView() {
             </h2>
             <p className="text-xs text-slate-400">{t('skill.barHint')}</p>
           </div>
-          <button
-            type="button"
-            onClick={openWarPointShop}
-            className="h-8 px-3 inline-flex items-center gap-1.5 rounded border border-purple-500/50 bg-purple-500/15 hover:bg-purple-500/25 text-purple-200 text-xs font-semibold transition-colors cursor-pointer"
-          >
-            <KeyRound className="w-3.5 h-3.5" />
-            <span>{t('skill.getCardInWpShop')}</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setTacticsModalOpen(true)}
+              className="h-8 px-3 inline-flex items-center gap-1.5 rounded border border-emerald-500/50 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 text-xs font-semibold transition-colors cursor-pointer"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span>
+                {t('auto.tacticsBtn')} ({activeGear.tactics.rules.length})
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={openWarPointShop}
+              className="h-8 px-3 inline-flex items-center gap-1.5 rounded border border-purple-500/50 bg-purple-500/15 hover:bg-purple-500/25 text-purple-200 text-xs font-semibold transition-colors cursor-pointer"
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              <span>{t('skill.getCardInWpShop')}</span>
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">

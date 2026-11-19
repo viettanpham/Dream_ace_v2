@@ -49,10 +49,14 @@ export const BALANCE_CONFIG = {
   // ---- Garage Unlock Prices (by number of Gears currently owned) ----
   garageUnlockPrices: [0, 800, 2000, 4500] as readonly number[],
 
-  // ---- Shop Economy ----
+  // ---- Shop & Cargo Economy ----
   shopStockSize: 12,
   shopRefreshCost: 120,
   shopSellRatio: 0.4,
+  maxInventorySize: 60,
+
+  // ---- Auto Battle Tactics ----
+  maxTacticsRules: 8,
 
   // ---- Enchant (+0 to +10) ----
   enchantMaxLevel: 10,

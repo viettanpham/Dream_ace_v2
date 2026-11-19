@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { AFFIX_SUFFIX_MAP, getItemTemplate } from '../data/items';
 import { useGameStore } from '../store/useGameStore';
 import type {
+  AutoStopReason,
   BattleSkillUsability,
   CombatLogEntry,
   CombatLogTag,
@@ -17,7 +18,13 @@ import type {
   SkillTargetType,
   StatKey,
   StatusEffectType,
+  TacticsCondition,
+  TacticsPresetId,
+  TacticsRule,
+  TacticsTargetSelector,
+  TeamColorRole,
 } from '../types/game';
+import { BALANCE_CONFIG } from '../data/balance';
 import { EN_TRANSLATIONS, type TranslationKey } from './en';
 import { VI_TRANSLATIONS } from './vi';
 
@@ -155,6 +162,68 @@ export function getArchetypeLabel(
   return translate(lang, `archetype.${archetype}` as TranslationKey);
 }
 
+export function getTeamTagLabel(lang: Language, role: TeamColorRole): string {
+  if (role === 'me' || role === 'ally') {
+    return translate(lang, 'queue.teamTag.ally');
+  }
+  if (role === 'boss') {
+    return translate(lang, 'queue.teamTag.boss');
+  }
+  return translate(lang, 'queue.teamTag.enemy');
+}
+
+export function getAutoStopReasonLabel(
+  lang: Language,
+  reason: AutoStopReason
+): string {
+  return translate(lang, `auto.repeatReason.${reason}` as TranslationKey, {
+    max: BALANCE_CONFIG.maxInventorySize,
+  });
+}
+
+export function getTacticsPresetLabel(
+  lang: Language,
+  presetId: TacticsPresetId
+): string {
+  return translate(lang, `auto.preset.${presetId}` as TranslationKey);
+}
+
+export function getTacticsTargetLabel(
+  lang: Language,
+  selector: TacticsTargetSelector
+): string {
+  return translate(lang, `auto.target.${selector}` as TranslationKey);
+}
+
+export function formatTacticsConditionText(
+  lang: Language,
+  cond: TacticsCondition
+): string {
+  const buffLabel = cond.buffType ? getStatusLabel(lang, cond.buffType) : '';
+  const skillLabel = cond.skillId ? getSkillName(lang, cond.skillId) : '—';
+  return translate(lang, `auto.cond.${cond.kind}` as TranslationKey, {
+    value: cond.value ?? 0,
+    buff: buffLabel,
+    skill: skillLabel,
+  });
+}
+
+export function formatTacticsRuleSentence(
+  lang: Language,
+  rule: TacticsRule
+): string {
+  const ifWord = translate(lang, 'auto.colIf');
+  const condStr = formatTacticsConditionText(lang, rule.condition);
+  const actionStr =
+    rule.action.type === 'defend'
+      ? translate(lang, 'auto.actionDefend')
+      : rule.action.type === 'skill' && rule.action.skillId
+      ? getSkillName(lang, rule.action.skillId)
+      : translate(lang, 'auto.actionAttack');
+  const targetStr = getTacticsTargetLabel(lang, rule.targetSelector);
+  return `${ifWord} ${condStr} → ${actionStr} → ${targetStr}`;
+}
+
 /**
  * Formats randomized ItemInstance name: Template Name + Affix-based Suffix (+Enchant).
  */
@@ -253,6 +322,19 @@ export function formatEquipValidationReason(
 }
 
 export function formatCombatLogMessage(
+  lang: Language,
+  entry: CombatLogEntry
+): string {
+  const autoPrefix =
+    entry.autoRuleNumber !== undefined
+      ? entry.autoRuleNumber > 0
+        ? `[AUTO #${entry.autoRuleNumber}] `
+        : '[AUTO] '
+      : '';
+  return `${autoPrefix}${formatCombatLogBody(lang, entry)}`;
+}
+
+function formatCombatLogBody(
   lang: Language,
   entry: CombatLogEntry
 ): string {

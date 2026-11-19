@@ -26,8 +26,9 @@ import type {
 import { generateItemInstance, generateShopStock } from './equipment';
 import { isSkillAllowedForClass, MAX_ACTIVE_SKILL_BAR } from './skills';
 import { createDefaultGearUnit, createDefaultPilotAccount } from './stats';
+import { createDefaultTacticsForClass, sanitizeGearTactics } from './tactics';
 
-export const CURRENT_SAVE_VERSION = 5;
+export const CURRENT_SAVE_VERSION = 6;
 
 export interface PersistedCampaignState {
   pilot: PilotAccount;
@@ -310,6 +311,7 @@ export function migrateSaveData(
           equipped: cleanEquipped,
           skillLevels,
           equippedSkillBar,
+          tactics: sanitizeGearTactics(cls.id, rawGear.tactics),
           battlesWon: Math.max(0, Number(rawGear.battlesWon) || 0),
           battlesFought: Math.max(0, Number(rawGear.battlesFought) || 0),
         };
@@ -457,6 +459,7 @@ export function migrateSaveData(
         equipped: equippedIds,
         skillLevels,
         equippedSkillBar,
+        tactics: createDefaultTacticsForClass(cls.id),
         battlesWon: Math.max(0, Number(legacyPlayer.battlesWon) || 0),
         battlesFought: Math.max(0, Number(legacyPlayer.battlesFought) || 0),
       };

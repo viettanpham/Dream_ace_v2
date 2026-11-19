@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { AdminPanel } from './components/AdminPanel';
+import { AutoTacticsModal } from './components/AutoTacticsModal';
 import { BattleScreen } from './components/BattleScreen';
 import { HangarScreen } from './components/HangarScreen';
 import { TitleScreen } from './components/TitleScreen';
@@ -42,6 +43,7 @@ export default function App() {
       <TopHud />
       {(screen === 'HANGAR' || screen === 'SHOP') && <HangarScreen />}
       {screen === 'BATTLE' && <BattleScreen />}
+      <AutoTacticsModal />
       <AdminPanel />
     </div>
   );

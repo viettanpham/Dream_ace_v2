@@ -19,6 +19,7 @@ import type {
 } from '../types/game';
 import { sumGearEquipmentStats, sumGearSpecialTraits } from './equipment';
 import { type GearPassiveBonuses, getGearPassiveBonuses } from './skills';
+import { createDefaultTacticsForClass } from './tactics';
 
 /**
  * EXP required to advance from `level` to `level + 1`.
@@ -219,6 +220,7 @@ export function createDefaultGearUnit(
     equipped: { ...EMPTY_EQUIPPED_SLOT_IDS },
     skillLevels,
     equippedSkillBar: [...starterSkills],
+    tactics: createDefaultTacticsForClass(classId),
     battlesWon: 0,
     battlesFought: 0,
   };

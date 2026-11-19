@@ -3,6 +3,7 @@ import { getExpForNextLevel } from '../engine/stats';
 import { getClassName, useI18n } from '../i18n';
 import { useGameStore } from '../store/useGameStore';
 import { LanguageToggle } from './LanguageToggle';
+import { StatBar } from './StatBar';
 
 export function TopHud() {
   const { lang, t } = useI18n();
@@ -15,7 +16,6 @@ export function TopHud() {
 
   const activeGear = pilot.gears[pilot.activeGearId];
   const expNeeded = getExpForNextLevel(activeGear.level);
-  const expPct = Math.min(100, Math.round((activeGear.exp / expNeeded) * 100));
 
   return (
     <header className="h-14 shrink-0 border-b border-slate-800/90 bg-[#0A0F18]/95 px-4 sm:px-6 flex items-center justify-between gap-4">
@@ -41,13 +41,16 @@ export function TopHud() {
             [{getClassName(lang, activeGear.classId)} {t('common.levelShort')}
             {activeGear.level}]
           </span>
-          <div
-            className="hidden lg:block w-16 h-1.5 bg-slate-800 rounded-sm overflow-hidden"
-            title={`${activeGear.exp} / ${expNeeded} EXP`}
-          >
-            <div
-              className="h-full bg-amber-400 meter-fill"
-              style={{ transform: `scaleX(${expPct / 100})` }}
+          <div className="hidden lg:block w-16">
+            <StatBar
+              value={activeGear.exp}
+              max={expNeeded}
+              valueText=""
+              fillClassName="bg-amber-400"
+              trackClassName="bg-slate-800"
+              heightClassName="h-1.5"
+              showTrail={false}
+              title={`${activeGear.exp} / ${expNeeded} EXP`}
             />
           </div>
         </div>

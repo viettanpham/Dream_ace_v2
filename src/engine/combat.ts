@@ -31,6 +31,9 @@ import type {
   SkillDefinition,
   StatBlock,
   StatusEffectType,
+  TeamColorRole,
+  TurnQueueEntry,
+  TurnQueueView,
   UnitAnimState,
 } from '../types/game';
 import { sumGearEquipmentStats, sumGearSpecialTraits } from './equipment';
@@ -283,16 +286,114 @@ function buildCombatUnit(params: {
   };
 }
 
+export function getTeamColorRole(unit: CombatUnit): TeamColorRole {
+  if (unit.isPlayer) return 'me';
+  if (unit.side === 'ally') return 'ally';
+  if (unit.isBoss) return 'boss';
+  return 'enemy';
+}
+
+function compareUnitTurnPriority(a: CombatUnit, b: CombatUnit): number {
+  const spdDiff = getEffectiveUnitSpeed(b) - getEffectiveUnitSpeed(a);
+  if (spdDiff !== 0) return spdDiff;
+  if (a.isPlayer !== b.isPlayer) return a.isPlayer ? -1 : 1;
+  if (a.side !== b.side) return a.side === 'ally' ? -1 : 1;
+  const baseSpdDiff = b.derived.speed - a.derived.speed;
+  if (baseSpdDiff !== 0) return baseSpdDiff;
+  return a.id.localeCompare(b.id);
+}
+
 export function sortTurnOrder(units: CombatUnit[]): string[] {
-  return [...units]
-    .sort((a, b) => {
-      const spdDiff = getEffectiveUnitSpeed(b) - getEffectiveUnitSpeed(a);
-      if (spdDiff !== 0) return spdDiff;
-      if (a.isPlayer !== b.isPlayer) return a.isPlayer ? -1 : 1;
-      if (a.side !== b.side) return a.side === 'ally' ? -1 : 1;
-      return a.id.localeCompare(b.id);
-    })
-    .map((u) => u.id);
+  return [...units].sort(compareUnitTurnPriority).map((u) => u.id);
+}
+
+/**
+ * Re-sorts ONLY the units that have NOT YET ACTED in the current round
+ * (indices > activeTurnIndex) by current effective Speed descending,
+ * so mid-round Slow / Speed-Up buffs immediately keep the upcoming queue
+ * strictly ordered by Speed without shifting already-acted units.
+ */
+export function reconcileRemainingTurnOrder(
+  turnOrder: string[],
+  activeTurnIndex: number,
+  units: CombatUnit[]
+): string[] {
+  const unitMap = new Map(units.map((u) => [u.id, u]));
+  const actedAndCurrent = turnOrder.slice(0, activeTurnIndex + 1);
+  const remaining = turnOrder.slice(activeTurnIndex + 1);
+
+  const sortedRemaining = [...remaining].sort((idA, idB) => {
+    const a = unitMap.get(idA);
+    const b = unitMap.get(idB);
+    if (!a && !b) return idA.localeCompare(idB);
+    if (!a) return 1;
+    if (!b) return -1;
+    return compareUnitTurnPriority(a, b);
+  });
+
+  return [...actedAndCurrent, ...sortedRemaining];
+}
+
+function toTurnQueueEntry(
+  unit: CombatUnit,
+  phase: TurnQueueEntry['phase']
+): TurnQueueEntry {
+  return {
+    unitId: unit.id,
+    name: unit.name,
+    classId: unit.classId,
+    side: unit.side,
+    isPlayer: unit.isPlayer,
+    isBoss: Boolean(unit.isBoss),
+    teamRole: getTeamColorRole(unit),
+    effectiveSpeed: getEffectiveUnitSpeed(unit),
+    baseSpeed: unit.derived.speed,
+    isSlowed: hasStatus(unit, 'slow'),
+    isSpeedBoosted: hasStatus(unit, 'spd_up'),
+    phase,
+  };
+}
+
+/**
+ * Builds the exact structured Turn Queue for the current round (acted / current / upcoming)
+ * plus a clean Round N+1 preview sorted strictly by Speed descending.
+ */
+export function buildTurnQueue(battle: BattleState): TurnQueueView {
+  const unitMap = new Map(battle.units.map((u) => [u.id, u]));
+  const acted: TurnQueueEntry[] = [];
+  let current: TurnQueueEntry | null = null;
+  const upcomingUnits: CombatUnit[] = [];
+
+  for (let i = 0; i < battle.turnOrder.length; i++) {
+    const u = unitMap.get(battle.turnOrder[i]);
+    if (!u || !u.alive) continue;
+    if (i < battle.activeTurnIndex) {
+      acted.push(toTurnQueueEntry(u, 'acted'));
+    } else if (i === battle.activeTurnIndex) {
+      current = toTurnQueueEntry(u, 'current');
+    } else {
+      upcomingUnits.push(u);
+    }
+  }
+
+  // Upcoming units in current round always ordered by live effective Speed DESC
+  const upcoming = [...upcomingUnits]
+    .sort(compareUnitTurnPriority)
+    .map((u) => toTurnQueueEntry(u, 'upcoming'));
+
+  // Next round preview: all alive units sorted by live effective Speed DESC
+  const aliveUnits = battle.units.filter((u) => u.alive);
+  const nextRound = [...aliveUnits]
+    .sort(compareUnitTurnPriority)
+    .map((u) => toTurnQueueEntry(u, 'next_round'));
+
+  return {
+    round: battle.round,
+    acted,
+    current,
+    upcoming,
+    nextRound,
+  };
 }
 
 export function createInitialBattleState(
@@ -444,6 +545,8 @@ export function createInitialBattleState(
     round: 1,
     selectedTargetId: firstEnemyId,
     selectedAllyTargetId: playerUnit.id,
+    lastPlayerTargetId: null,
+    autoStopNotice: null,
     log: [openingLog],
     popups: [],
     fxEvents: [],

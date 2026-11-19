@@ -9,15 +9,24 @@ import {
   OPENING_CARDS_LIST,
   SKILLS_LIST,
 } from '../../data/skills';
-import type { CombatUnit, ItemRarity } from '../../types/game';
+import type {
+  AutoRepeatSession,
+  BattleState,
+  CombatUnit,
+  GearTacticsProfile,
+  ItemRarity,
+} from '../../types/game';
 import {
+  buildTurnQueue,
   calculateBattleRewards,
   calculateSingleEnemyReward,
   chooseAiDecision,
   createInitialBattleState,
   getEffectiveUnitSpeed,
   hasStatus,
+  reconcileRemainingTurnOrder,
   resolveUnitAction,
+  sortTurnOrder,
 } from '../combat';
 import {
   equipItemOnGear,
@@ -54,6 +63,14 @@ import {
   getExpForNextLevel,
   resetGearStatAllocations,
 } from '../stats';
+import {
+  chooseAction,
+  createDefaultAutoSafety,
+  createPresetTactics,
+  evaluateAutoSafety,
+  sanitizeGearTactics,
+  shouldStopAutoRepeat,
+} from '../tactics';
 
 function createSequenceRng(values: number[]): () => number {
   let idx = 0;
@@ -1155,3 +1172,658 @@ describe('11. Battle Skill Mechanics (SP, CD, Once-Per-Battle, Silence, Siege, C
     ).toBe(true);
   });
 });
+
+describe('12. Turn Queue Ordering & Mid-Round Speed Changes', () => {
+  function makeSpeedUnit(
+    id: string,
+    speed: number,
+    side: 'ally' | 'enemy',
+    opts?: { isPlayer?: boolean; isBoss?: boolean; slowed?: boolean; boosted?: boolean }
+  ): CombatUnit {
+    const statuses: CombatUnit['statuses'] = [];
+    if (opts?.slowed) statuses.push({ type: 'slow', turnsRemaining: 2, isDebuff: true });
+    if (opts?.boosted) statuses.push({ type: 'spd_up', turnsRemaining: 2, magnitude: 0.5 });
+    return {
+      id,
+      name: id,
+      callsign: id,
+      side,
+      row: 'front',
+      isPlayer: Boolean(opts?.isPlayer),
+      classId: 'striker',
+      isBoss: Boolean(opts?.isBoss),
+      level: 5,
+      skillLevel: 1,
+      skillLevels: {},
+      equippedSkillIds: [],
+      skillCooldowns: {},
+      usedOnceSkills: [],
+      stats: { ...EMPTY_STAT_BLOCK },
+      derived: {
+        maxHp: 200,
+        maxShield: 100,
+        maxSp: 50,
+        speed,
+        attackPower: 30,
+        defenseRating: 15,
+        dodgeChance: 5,
+        critChance: 10,
+        skillPower: 25,
+        armorPiercePct: 0,
+        splashPct: 0,
+        spRegenPerTurn: 0,
+        passiveSkillDmgPct: 0,
+      },
+      hp: 200,
+      shield: 100,
+      sp: 50,
+      isDefending: false,
+      alive: true,
+      statuses,
+      animState: 'idle',
+    };
+  }
+
+  it('sorts strictly descending by effective Speed with deterministic tie-breakers', () => {
+    const units = [
+      makeSpeedUnit('e_slow', 15, 'enemy'),
+      makeSpeedUnit('e_fast', 22, 'enemy'),
+      makeSpeedUnit('a_tie_npc', 21, 'ally'),
+      makeSpeedUnit('e_tie', 21, 'enemy'),
+      makeSpeedUnit('a_tie_me', 21, 'ally', { isPlayer: true }),
+    ];
+
+    const order = sortTurnOrder(units);
+    // 22 first, then 21 ties: player > ally > enemy, then 15 last
+    expect(order).toEqual([
+      'e_fast',
+      'a_tie_me',
+      'a_tie_npc',
+      'e_tie',
+      'e_slow',
+    ]);
+  });
+
+  it('re-sorts remaining upcoming units mid-round on Slow/Speed-Up and separates Round N from Round N+1', () => {
+    const units = [
+      makeSpeedUnit('e_22', 22, 'enemy'),
+      makeSpeedUnit('a_21', 21, 'ally', { isPlayer: true }),
+      makeSpeedUnit('e_18', 18, 'enemy'),
+      makeSpeedUnit('a_15', 15, 'ally'),
+    ];
+    const initialOrder = sortTurnOrder(units);
+    expect(initialOrder).toEqual(['e_22', 'a_21', 'e_18', 'a_15']);
+
+    // e_22 acted (idx 0), a_21 is currently acting (idx 1) and applies Slow to e_18 (18 * 0.7 = 13 < 15)
+    const updatedUnits = units.map((u) =>
+      u.id === 'e_18'
+        ? { ...u, statuses: [{ type: 'slow' as const, turnsRemaining: 2, isDebuff: true }] }
+        : u
+    );
+
+    const reconciled = reconcileRemainingTurnOrder(initialOrder, 1, updatedUnits);
+    // Already acted (e_22) and current (a_21) stay untouched; remaining re-sort: a_15 (15) ahead of e_18 (13)
+    expect(reconciled).toEqual(['e_22', 'a_21', 'a_15', 'e_18']);
+
+    const mockBattle: BattleState = {
+      sectorId: SECTORS_CATALOG[0].id,
+      deployedGearId: 'striker',
+      round: 2,
+      turnOrder: reconciled,
+      activeTurnIndex: 1,
+      units: updatedUnits,
+      selectedTargetId: null,
+      selectedAllyTargetId: null,
+      lastPlayerTargetId: null,
+      autoStopNotice: null,
+      log: [],
+      fxEvents: [],
+      popups: [],
+      explodedUnitIds: [],
+      isResolving: false,
+      summary: null,
+    };
+
+    const queue = buildTurnQueue(mockBattle);
+    expect(queue.round).toBe(2);
+    expect(queue.acted.map((e) => e.unitId)).toEqual(['e_22']);
+    expect(queue.current?.unitId).toBe('a_21');
+    // Upcoming in Round 2 strictly DESC: 15 then 13
+    expect(queue.upcoming.map((e) => e.unitId)).toEqual(['a_15', 'e_18']);
+    expect(queue.upcoming.map((e) => e.effectiveSpeed)).toEqual([15, 13]);
+    // Round 3 preview strictly DESC across all living units: 22, 21, 15, 13 (SPD 15 NEVER precedes 22/21)
+    expect(queue.nextRound.map((e) => e.unitId)).toEqual([
+      'e_22',
+      'a_21',
+      'a_15',
+      'e_18',
+    ]);
+    expect(queue.nextRound.map((e) => e.effectiveSpeed)).toEqual([22, 21, 15, 13]);
+  });
+});
+
+describe('13. Auto Tactics chooseAction (Priority, Conditions, Selectors, Fallback, Determinism)', () => {
+  function setupTacticsFixture() {
+    const pilot = createDefaultPilotAccount('Ace', 'support');
+    pilot.gears.support.level = 25;
+    pilot.gears.support.skillLevels = {
+      sup_nanite_mend: 2,
+      sup_system_purge: 1,
+      sup_lidar_sweep: 1,
+      sup_war_hymn: 1,
+      gen_hull_brace: 1,
+    };
+    pilot.gears.support.equippedSkillBar = [
+      'sup_nanite_mend',
+      'sup_system_purge',
+      'sup_lidar_sweep',
+      'sup_war_hymn',
+      'gen_hull_brace',
+    ];
+    const battle = createInitialBattleState(
+      pilot,
+      SECTORS_CATALOG[0].id,
+      createSequenceRng([0.1, 0.35, 0.6, 0.85])
+    );
+
+    const units = battle.units.map((u, idx) => {
+      if (u.isPlayer) {
+        return {
+          ...u,
+          hp: 180,
+          shield: 40,
+          sp: 60,
+          derived: { ...u.derived, maxHp: 200, maxShield: 100, maxSp: 80 },
+        };
+      }
+      if (u.side === 'ally') {
+        return {
+          ...u,
+          hp: idx === 1 ? 60 : 190, // ally #1 is at 30% HP
+          derived: { ...u.derived, maxHp: 200 },
+        };
+      }
+      return u;
+    });
+
+    // Customize 4 enemies to test every enemy target selector cleanly
+    const enemyIds = units.filter((u) => u.side === 'enemy').map((u) => u.id);
+    const customizedUnits = units.map((u) => {
+      if (u.id === enemyIds[0]) {
+        return {
+          ...u,
+          row: 'front' as const,
+          archetype: 'gunship' as const,
+          classId: 'siege' as const,
+          hp: 50, // lowest HP
+          shield: 0,
+          isBoss: false,
+          derived: { ...u.derived, maxHp: 200, attackPower: 20, speed: 12 },
+        };
+      }
+      if (u.id === enemyIds[1]) {
+        return {
+          ...u,
+          row: 'front' as const,
+          archetype: 'drone' as const,
+          classId: 'striker' as const,
+          hp: 250, // highest HP
+          shield: 120, // has shield
+          isBoss: true, // boss
+          derived: { ...u.derived, maxHp: 300, attackPower: 35, speed: 18 },
+        };
+      }
+      if (u.id === enemyIds[2]) {
+        return {
+          ...u,
+          row: 'back' as const,
+          archetype: 'repair_ship' as const,
+          classId: 'support' as const,
+          hp: 140,
+          shield: 20,
+          isBoss: false,
+          derived: { ...u.derived, maxHp: 200, attackPower: 15, speed: 24 },
+        };
+      }
+      if (u.id === enemyIds[3]) {
+        return {
+          ...u,
+          row: 'back' as const,
+          archetype: 'sniper' as const,
+          classId: 'interceptor' as const,
+          hp: 110,
+          shield: 0,
+          isBoss: false,
+          derived: { ...u.derived, maxHp: 180, attackPower: 80, speed: 40 }, // highest ATK & fastest
+        };
+      }
+      return u;
+    });
+
+    const state: BattleState = {
+      ...battle,
+      round: 1,
+      units: customizedUnits,
+      lastPlayerTargetId: enemyIds[2],
+    };
+    const actor = state.units.find((u) => u.isPlayer)!;
+    return { state, actor, enemyIds };
+  }
+
+  it('evaluates rules top-to-bottom, skips disabled/unusable rules, and falls back to lowest-HP Attack', () => {
+    const { state, actor, enemyIds } = setupTacticsFixture();
+
+    const tactics: GearTacticsProfile = {
+      safety: createDefaultAutoSafety(),
+      rules: [
+        // Rule 1 disabled -> skipped
+        {
+          id: 'r1',
+          enabled: false,
+          condition: { kind: 'always' },
+          action: { type: 'defend' },
+          targetSelector: 'self',
+        },
+        // Rule 2 skill on cooldown -> skipped
+        {
+          id: 'r2',
+          enabled: true,
+          condition: { kind: 'always' },
+          action: { type: 'skill', skillId: 'sup_war_hymn' },
+          targetSelector: 'all_allies',
+        },
+        // Rule 3 condition true (ally #1 at 30% < 45%) & usable -> FIRES!
+        {
+          id: 'r3',
+          enabled: true,
+          condition: { kind: 'any_ally_hp_below', value: 45 },
+          action: { type: 'skill', skillId: 'sup_nanite_mend' },
+          targetSelector: 'lowest_hp_ally',
+        },
+        // Rule 4 lower priority
+        {
+          id: 'r4',
+          enabled: true,
+          condition: { kind: 'always' },
+          action: { type: 'attack' },
+          targetSelector: 'highest_hp_enemy',
+        },
+      ],
+    };
+
+    const actorWithCd: CombatUnit = {
+      ...actor,
+      skillCooldowns: { sup_war_hymn: 2 },
+    };
+    const res = chooseAction(state, actorWithCd, tactics, () => 0.5);
+    expect(res.action).toBe('skill');
+    expect(res.skillId).toBe('sup_nanite_mend');
+    expect(res.matchedRuleIndex).toBe(2);
+    expect(res.targetId).toBe('ally_npc_1');
+
+    // When no rule matches -> fallback to basic attack on lowest-HP enemy with matchedRuleIndex = null
+    const noMatchTactics: GearTacticsProfile = {
+      safety: createDefaultAutoSafety(),
+      rules: [
+        {
+          id: 'r_miss',
+          enabled: true,
+          condition: { kind: 'my_hp_below', value: 10 },
+          action: { type: 'defend' },
+          targetSelector: 'self',
+        },
+      ],
+    };
+    const fallbackRes = chooseAction(state, actor, noMatchTactics, () => 0.5);
+    expect(fallbackRes.action).toBe('attack');
+    expect(fallbackRes.targetId).toBe(enemyIds[0]); // hp 50 (lowest)
+    expect(fallbackRes.matchedRuleIndex).toBeNull();
+  });
+
+  it('correctly evaluates target selectors and conditions deterministically', () => {
+    const { state, actor, enemyIds } = setupTacticsFixture();
+
+    const pickWith = (selector: GearTacticsProfile['rules'][number]['targetSelector'], rngVal = 0.5) =>
+      chooseAction(
+        state,
+        actor,
+        {
+          safety: createDefaultAutoSafety(),
+          rules: [
+            {
+              id: 'sel',
+              enabled: true,
+              condition: { kind: 'always' },
+              action: { type: 'attack' },
+              targetSelector: selector,
+            },
+          ],
+        },
+        () => rngVal
+      );
+
+    expect(pickWith('lowest_hp_enemy').targetId).toBe(enemyIds[0]);
+    expect(pickWith('highest_hp_enemy').targetId).toBe(enemyIds[1]);
+    expect(pickWith('highest_atk_enemy').targetId).toBe(enemyIds[3]);
+    expect(pickWith('fastest_enemy').targetId).toBe(enemyIds[3]);
+    expect(pickWith('enemy_support_first').targetId).toBe(enemyIds[2]);
+    expect(pickWith('enemy_sniper_first').targetId).toBe(enemyIds[3]);
+    expect(pickWith('front_row_first').targetId).toBe(enemyIds[0]); // front row lowest hp
+    expect(pickWith('back_row_first').targetId).toBe(enemyIds[3]); // back row lowest hp (110 < 140)
+    expect(pickWith('same_as_last_turn').targetId).toBe(enemyIds[2]);
+    expect(pickWith('random_enemy', 0.01).targetId).toBe(
+      pickWith('random_enemy', 0.01).targetId
+    );
+
+    // Conditions: boss_present, first_round, round_eq, target_has_shield, target_hp_below, my_sp_gte, my_buff_not_active, skill_off_cooldown
+    const condCheck = (
+      condition: GearTacticsProfile['rules'][number]['condition'],
+      targetSelector: GearTacticsProfile['rules'][number]['targetSelector'] = 'lowest_hp_enemy',
+      overrideState: BattleState = state,
+      overrideActor: CombatUnit = actor
+    ) =>
+      chooseAction(
+        overrideState,
+        overrideActor,
+        {
+          safety: createDefaultAutoSafety(),
+          rules: [
+            {
+              id: 'cond',
+              enabled: true,
+              condition,
+              action: { type: 'defend' },
+              targetSelector,
+            },
+          ],
+        },
+        () => 0.5
+      ).matchedRuleIndex === 0;
+
+    expect(condCheck({ kind: 'boss_present' })).toBe(true);
+    expect(condCheck({ kind: 'first_round' })).toBe(true);
+    expect(condCheck({ kind: 'round_eq', value: 1 })).toBe(true);
+    expect(condCheck({ kind: 'round_eq', value: 3 })).toBe(false);
+    expect(condCheck({ kind: 'target_has_shield' }, 'highest_hp_enemy')).toBe(true);
+    expect(condCheck({ kind: 'target_has_shield' }, 'lowest_hp_enemy')).toBe(false);
+    expect(condCheck({ kind: 'target_hp_below', value: 30 }, 'lowest_hp_enemy')).toBe(true); // 50/200 = 25%
+    expect(condCheck({ kind: 'my_sp_gte', value: 60 })).toBe(true);
+    expect(condCheck({ kind: 'my_sp_lt', value: 60 })).toBe(false);
+    expect(condCheck({ kind: 'my_shield_zero' })).toBe(false);
+    expect(
+      condCheck({ kind: 'my_shield_zero' }, 'self', state, { ...actor, shield: 0 })
+    ).toBe(true);
+    expect(condCheck({ kind: 'my_buff_not_active', buffType: 'def_up' })).toBe(true);
+    expect(
+      condCheck({ kind: 'skill_off_cooldown', skillId: 'gen_hull_brace' })
+    ).toBe(true);
+    expect(condCheck({ kind: 'enemy_count_gte', value: 4 })).toBe(true);
+    expect(condCheck({ kind: 'enemy_count_gte', value: 5 })).toBe(false);
+
+    // any_ally_has_debuff & any_enemy_stealthed
+    const debuffedState: BattleState = {
+      ...state,
+      units: state.units.map((u) =>
+        u.id === 'ally_npc_1'
+          ? { ...u, statuses: [{ type: 'burn', turnsRemaining: 2, isDebuff: true }] }
+          : u.id === enemyIds[2]
+          ? { ...u, statuses: [{ type: 'stealth', turnsRemaining: 2 }] }
+          : u
+      ),
+    };
+    expect(condCheck({ kind: 'any_ally_has_debuff' }, 'all_allies', debuffedState)).toBe(true);
+    expect(condCheck({ kind: 'any_enemy_stealthed' }, 'lowest_hp_enemy', debuffedState)).toBe(true);
+  });
+});
+
+describe('14. Tactics Engine Class-Lock Enforcement & v6 Save Migration', () => {
+  it('strips cross-class skills in sanitizeGearTactics, clamps max 8 rules, and blocks cross-class skills in chooseAction', () => {
+    const rawRules = Array.from({ length: 12 }, (_, idx) => ({
+      id: `r_${idx}`,
+      enabled: true,
+      condition: { kind: 'always' as const },
+      action:
+        idx === 0
+          ? { type: 'skill' as const, skillId: 'sup_nanite_mend' } // Support skill injected into Striker!
+          : idx === 1
+          ? { type: 'skill' as const, skillId: 'sge_starbreaker_lance' } // Siege skill injected into Striker!
+          : { type: 'skill' as const, skillId: 'gen_hull_brace' }, // General skill allowed
+      targetSelector: 'self' as const,
+    }));
+
+    const sanitized = sanitizeGearTactics('striker', {
+      rules: rawRules,
+      safety: createDefaultAutoSafety(),
+    });
+    expect(sanitized.rules).toHaveLength(BALANCE_CONFIG.maxTacticsRules);
+    expect(sanitized.rules[0].action).toEqual({ type: 'attack' });
+    expect(sanitized.rules[1].action).toEqual({ type: 'attack' });
+    expect(sanitized.rules[2].action).toEqual({
+      type: 'skill',
+      skillId: 'gen_hull_brace',
+    });
+
+    // Even if raw unsanitized tactics with a cross-class skill are passed directly to chooseAction, engine skips it!
+    const pilot = createDefaultPilotAccount('Kira', 'striker');
+    const battle = createInitialBattleState(pilot, SECTORS_CATALOG[0].id);
+    const player = battle.units.find((u) => u.isPlayer)!;
+    const tamperedTactics: GearTacticsProfile = {
+      safety: createDefaultAutoSafety(),
+      rules: [
+        {
+          id: 'cheat_cross',
+          enabled: true,
+          condition: { kind: 'always' },
+          action: { type: 'skill', skillId: 'sup_nanite_mend' },
+          targetSelector: 'self',
+        },
+        {
+          id: 'valid_def',
+          enabled: true,
+          condition: { kind: 'always' },
+          action: { type: 'defend' },
+          targetSelector: 'self',
+        },
+      ],
+    };
+
+    const chosen = chooseAction(battle, player, tamperedTactics, () => 0.5);
+    expect(chosen.action).toBe('defend');
+    expect(chosen.matchedRuleIndex).toBe(1);
+
+    // Preset generation produces only class-legal rules
+    for (const preset of ['class_default', 'balanced', 'focus_weak', 'defensive'] as const) {
+      const profile = createPresetTactics(
+        'interceptor',
+        preset,
+        pilot.gears.interceptor.equippedSkillBar
+      );
+      expect(profile.rules.length).toBeGreaterThan(0);
+      expect(profile.rules.length).toBeLessThanOrEqual(BALANCE_CONFIG.maxTacticsRules);
+    }
+  });
+
+  it('migrates v5 saves to v6 with per-Gear default tactics and strips illegal cross-class tactics rules', () => {
+    const v5Pilot = createDefaultPilotAccount('Nova', 'interceptor');
+    // Simulate older v5 gear missing tactics + tampered tactics on striker
+    const tamperedV5 = {
+      pilot: {
+        ...v5Pilot,
+        gears: {
+          ...v5Pilot.gears,
+          interceptor: { ...v5Pilot.gears.interceptor, tactics: undefined },
+          striker: {
+            ...v5Pilot.gears.striker,
+            tactics: {
+              safety: createDefaultAutoSafety(),
+              rules: [
+                {
+                  id: 'bad',
+                  enabled: true,
+                  condition: { kind: 'always' },
+                  action: { type: 'skill', skillId: 'sup_war_hymn' },
+                  targetSelector: 'all_allies',
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+
+    const migrated = migrateSaveData(tamperedV5, 5, () => 0.5);
+    expect(migrated.pilot.gears.interceptor.tactics.rules.length).toBeGreaterThan(0);
+    expect(migrated.pilot.gears.striker.tactics.rules[0].action).toEqual({
+      type: 'attack',
+    });
+  });
+});
+
+describe('15. Auto Safety Stops & Auto-Repeat Stop Conditions', () => {
+  it('evaluates low HP, auto-retreat, boss present, and elite ready safety triggers accurately', () => {
+    const pilot = createDefaultPilotAccount('Ace', 'striker');
+    pilot.gears.striker.level = 30;
+    pilot.gears.striker.skillLevels = { str_skyfall_protocol: 1 };
+    pilot.gears.striker.equippedSkillBar = ['str_skyfall_protocol'];
+
+    const battle = createInitialBattleState(pilot, SECTORS_CATALOG[0].id);
+    const player = battle.units.find((u) => u.isPlayer)!;
+    const baseSafety = createDefaultAutoSafety();
+
+    // Default safety has all stops OFF
+    expect(evaluateAutoSafety(battle, player, baseSafety)).toEqual({
+      shouldStopAuto: false,
+      shouldRetreat: false,
+      reason: null,
+    });
+
+    // 1) Low HP pause
+    const lowHpActor: CombatUnit = {
+      ...player,
+      hp: Math.floor(player.derived.maxHp * 0.2),
+    };
+    const lowHpStop = evaluateAutoSafety(battle, lowHpActor, {
+      ...baseSafety,
+      stopOnLowHpEnabled: true,
+      stopOnLowHpPct: 25,
+    });
+    expect(lowHpStop).toEqual({
+      shouldStopAuto: true,
+      shouldRetreat: false,
+      reason: 'low_hp',
+    });
+
+    // 2) Auto-retreat overrides low HP pause when HP < autoRetreatLowHpPct
+    const criticalActor: CombatUnit = {
+      ...player,
+      hp: Math.floor(player.derived.maxHp * 0.1),
+    };
+    const retreatStop = evaluateAutoSafety(battle, criticalActor, {
+      ...baseSafety,
+      stopOnLowHpEnabled: true,
+      stopOnLowHpPct: 25,
+      autoRetreatLowHpEnabled: true,
+      autoRetreatLowHpPct: 15,
+    });
+    expect(retreatStop).toEqual({
+      shouldStopAuto: true,
+      shouldRetreat: true,
+      reason: 'auto_retreat',
+    });
+
+    // 3) Boss present pause
+    const bossBattle: BattleState = {
+      ...battle,
+      units: battle.units.map((u, idx) =>
+        u.side === 'enemy' && idx === 4 ? { ...u, isBoss: true } : u
+      ),
+    };
+    const bossStop = evaluateAutoSafety(bossBattle, player, {
+      ...baseSafety,
+      stopOnBossPresent: true,
+    });
+    expect(bossStop.shouldStopAuto).toBe(true);
+    expect(bossStop.reason).toBe('boss_present');
+
+    // 4) Elite skill ready pause (requires sufficient SP)
+    const eliteReadyActor: CombatUnit = {
+      ...player,
+      sp: 80,
+      derived: { ...player.derived, maxSp: 100 },
+    };
+    const eliteStop = evaluateAutoSafety(battle, eliteReadyActor, {
+      ...baseSafety,
+      stopOnEliteReady: true,
+    });
+    expect(eliteStop.shouldStopAuto).toBe(true);
+    expect(eliteStop.reason).toBe('elite_ready');
+  });
+
+  it('stops Auto-Repeat on retreat, defeat, inventory full, or target run limit reached', () => {
+    const baseSession: AutoRepeatSession = {
+      active: true,
+      sectorId: SECTORS_CATALOG[0].id,
+      limit: 5,
+      completedRuns: 2,
+      wins: 2,
+      totalExp: 200,
+      totalCredits: 500,
+      totalWarPoints: 25,
+      totalDrops: [],
+      stopReason: null,
+    };
+
+    // Continues on victory under limit with free inventory space
+    expect(shouldStopAutoRepeat(baseSession, 'victory', false, 10)).toEqual({
+      stop: false,
+      reason: null,
+    });
+
+    // Stops on retreat
+    expect(shouldStopAutoRepeat(baseSession, 'defeat', true, 10)).toEqual({
+      stop: true,
+      reason: 'retreat',
+    });
+
+    // Stops on defeat
+    expect(shouldStopAutoRepeat(baseSession, 'defeat', false, 10)).toEqual({
+      stop: true,
+      reason: 'defeat',
+    });
+
+    // Stops on full inventory
+    expect(
+      shouldStopAutoRepeat(
+        baseSession,
+        'victory',
+        false,
+        BALANCE_CONFIG.maxInventorySize
+      )
+    ).toEqual({
+      stop: true,
+      reason: 'inventory_full',
+    });
+
+    // Stops when completedRuns reaches limit
+    expect(
+      shouldStopAutoRepeat({ ...baseSession, completedRuns: 5 }, 'victory', false, 10)
+    ).toEqual({
+      stop: true,
+      reason: 'completed',
+    });
+
+    // Infinite mode continues past 5 runs on victory
+    expect(
+      shouldStopAutoRepeat(
+        { ...baseSession, limit: 'infinite', completedRuns: 25 },
+        'victory',
+        false,
+        10
+      )
+    ).toEqual({
+      stop: false,
+      reason: null,
+    });
+  });
+});
+

@@ -33,6 +33,7 @@ import { useGameStore } from '../store/useGameStore';
 import type { MechClassId, StatBlock, StatKey } from '../types/game';
 import { soundFx } from '../utils/sound';
 import { FighterSvg } from './FighterSvg';
+import { StatBar } from './StatBar';
 
 export function GarageView() {
   const { lang, t } = useI18n();
@@ -261,7 +262,6 @@ export function GarageView() {
             const isSelected = pilot.activeGearId === cls.id;
             const power = calculateGearPowerRating(gear, pilot.inventory);
             const nextExp = getExpForNextLevel(gear.level);
-            const expPct = Math.min(100, Math.round((gear.exp / nextExp) * 100));
             const canAfford = pilot.credits >= nextGearPrice;
 
             return (
@@ -334,20 +334,16 @@ export function GarageView() {
 
                     {gear.owned && (
                       <>
-                        <div className="space-y-1">
-                          <div className="flex items-center justify-between text-[11px] font-mono-nums text-slate-400">
-                            <span>EXP</span>
-                            <span>
-                              {gear.exp} / {nextExp}
-                            </span>
-                          </div>
-                          <div className="h-1.5 w-full rounded-sm bg-slate-900 overflow-hidden">
-                            <div
-                              className="h-full bg-amber-400"
-                              style={{ width: `${expPct}%` }}
-                            />
-                          </div>
-                        </div>
+                        <StatBar
+                          label="EXP"
+                          value={gear.exp}
+                          max={nextExp}
+                          valueText={`${gear.exp} / ${nextExp}`}
+                          valueClassName="text-slate-400"
+                          fillClassName="bg-amber-400"
+                          heightClassName="h-1.5"
+                          showTrail={false}
+                        />
 
                         <div className="flex items-center justify-between text-[11px] font-mono-nums pt-0.5">
                           <span className="text-slate-400">
