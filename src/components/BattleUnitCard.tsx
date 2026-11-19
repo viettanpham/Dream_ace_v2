@@ -31,6 +31,7 @@ import {
   getClassName,
   getStatusDesc,
   getStatusLabel,
+  getStatusShortLabel,
   useI18n,
 } from '../i18n';
 import type {
@@ -59,6 +60,7 @@ interface BattleUnitCardProps {
   frontBlocked?: boolean;
   wingmanChatText?: string | null;
   popups: FloatingPopup[];
+  showStatusLabels?: boolean;
   onSelect?: () => void;
   onInspect?: () => void;
 }
@@ -302,6 +304,7 @@ export const BattleUnitCard = memo(function BattleUnitCard({
   autoActive = false,
   frontBlocked = false,
   popups,
+  showStatusLabels = true,
   onSelect,
   onInspect,
 }: BattleUnitCardProps) {
@@ -415,8 +418,8 @@ export const BattleUnitCard = memo(function BattleUnitCard({
   };
 
   const isClickable = (canTarget && Boolean(onSelect)) || Boolean(onInspect);
-  const visibleStatuses = unit.statuses.slice(0, 2);
-  const overflowStatuses = Math.max(0, unit.statuses.length - 2);
+  const visibleStatuses = unit.statuses.slice(0, 3);
+  const overflowStatuses = Math.max(0, unit.statuses.length - 3);
   const roleLabel = unit.archetype
     ? getArchetypeLabel(lang, unit.archetype)
     : getClassName(lang, unit.classId);
@@ -497,8 +500,8 @@ export const BattleUnitCard = memo(function BattleUnitCard({
         )}
       </div>
 
-      {/* 2. Short Name + Class & Level */}
-      <div className="w-[104px] sm:w-[116px] shrink-0 min-w-0">
+      {/* 2. Short Name + Class & Level + Dedicated Status Chips Line */}
+      <div className="w-[108px] sm:w-[132px] shrink-0 min-w-0">
         <div className="flex items-center gap-1 min-w-0">
           {unit.isBoss && (
             <Skull
@@ -533,6 +536,42 @@ export const BattleUnitCard = memo(function BattleUnitCard({
           {roleLabel} · {t('common.levelShort')}
           {unit.level}
         </div>
+        {visibleStatuses.length > 0 && (
+          <div
+            data-testid={`card-status-row-${unit.id}`}
+            className="mt-1 flex flex-wrap items-center gap-1"
+          >
+            {visibleStatuses.map((st, idx) => (
+              <span
+                key={`${st.type}-${idx}`}
+                data-testid={`card-status-chip-${unit.id}-${idx}`}
+                data-status-type={st.type}
+                title={`${getStatusLabel(lang, st.type)}: ${getStatusDesc(
+                  lang,
+                  st.type
+                )}`}
+                className={`px-1 py-0.5 rounded border inline-flex items-center gap-0.5 text-[10px] font-semibold leading-none ${getStatusBadgeStyle(
+                  st
+                )}`}
+              >
+                <StatusMiniIcon type={st.type} />
+                {showStatusLabels && (
+                  <span data-testid={`card-status-label-${unit.id}-${idx}`}>
+                    {getStatusShortLabel(lang, st.type)}
+                  </span>
+                )}
+              </span>
+            ))}
+            {overflowStatuses > 0 && (
+              <span
+                data-testid={`card-status-overflow-${unit.id}`}
+                className="text-[10px] font-mono-nums font-bold text-slate-300 px-0.5"
+              >
+                +{overflowStatuses}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 3. Fixed-Width Tabular HP Bar + Shield & SP Bars (zero layout shift via scaleX) */}
@@ -595,32 +634,8 @@ export const BattleUnitCard = memo(function BattleUnitCard({
         </div>
       </div>
 
-      {/* 4. Status Icons (up to 2 + overflow) & >=44px Info Button */}
+      {/* 4. >=44px Info Button */}
       <div className="shrink-0 flex items-center gap-1">
-        {visibleStatuses.length > 0 && (
-          <div className="hidden sm:flex items-center gap-0.5">
-            {visibleStatuses.map((st) => (
-              <span
-                key={st.type}
-                title={`${getStatusLabel(lang, st.type)}: ${getStatusDesc(
-                  lang,
-                  st.type
-                )}`}
-                className={`w-5 h-5 rounded border inline-flex items-center justify-center ${getStatusBadgeStyle(
-                  st
-                )}`}
-              >
-                <StatusMiniIcon type={st.type} />
-              </span>
-            ))}
-            {overflowStatuses > 0 && (
-              <span className="text-[12px] font-mono-nums font-bold text-slate-300 px-0.5">
-                +{overflowStatuses}
-              </span>
-            )}
-          </div>
-        )}
-
         {onInspect && (
           <button
             type="button"

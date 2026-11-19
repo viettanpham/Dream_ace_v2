@@ -8,7 +8,7 @@ import {
 } from 'react';
 import { HelpCircle, Radio, X } from 'lucide-react';
 import { getTeamColorRole, hasStatus } from '../engine/combat';
-import { getClassName, getStatusLabel, useI18n } from '../i18n';
+import { getClassName, getStatusLabel, getStatusShortLabel, useI18n } from '../i18n';
 import type {
   ActiveStatusEffect,
   BattleSpeed,
@@ -66,6 +66,7 @@ interface BattleRadarViewProps {
   battleSpeed?: BattleSpeed;
   effectsMode?: BattleEffectsMode;
   effectsDebugEnabled?: boolean;
+  showStatusLabels?: boolean;
   playerWeaponId?: string | null;
   layoutMode?: BattleLayoutMode;
   onSelectEnemy: (unitId: string) => void;
@@ -479,6 +480,8 @@ interface RadarUnitMarkerProps {
   animationsSkipped: boolean;
   hoverTooltip: string;
   autoBadgeText: string;
+  showStatusLabels: boolean;
+  formatStatusShortText: (st: ActiveStatusEffect) => string;
   formatStatusTooltip: (st: ActiveStatusEffect) => string;
   onMarkerRef: (unitId: string, el: SVGGElement | null) => void;
   onHoverUnit: (unitId: string | null) => void;
@@ -503,6 +506,8 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
   animationsSkipped,
   hoverTooltip,
   autoBadgeText,
+  showStatusLabels,
+  formatStatusShortText,
   formatStatusTooltip,
   onMarkerRef,
   onHoverUnit,
@@ -951,6 +956,42 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
                     </text>
                   </g>
                 )}
+                {showStatusLabels && (
+                  <g
+                    data-testid={`radar-status-labels-${unit.id}`}
+                    transform="translate(0, 12.5)"
+                  >
+                    <rect
+                      x={-Math.max(24, barW / 2 + 6)}
+                      y="-5.5"
+                      width={Math.max(48, barW + 12)}
+                      height="10.5"
+                      rx="2.5"
+                      fill="rgba(5, 10, 18, 0.88)"
+                    />
+                    <text
+                      data-testid={`radar-status-label-${unit.id}`}
+                      x="0"
+                      y="2.3"
+                      textAnchor="middle"
+                      fontSize="7.2"
+                      fontWeight="700"
+                      fill="#cbd5e1"
+                    >
+                      {statusLayout.visible
+                        .slice(0, 2)
+                        .map((st) => formatStatusShortText(st))
+                        .join(' · ')}
+                      {statusLayout.visible.length > 2 ||
+                      statusLayout.overflowCount > 0
+                        ? ` +${
+                            Math.max(0, statusLayout.visible.length - 2) +
+                            statusLayout.overflowCount
+                          }`
+                        : ''}
+                    </text>
+                  </g>
+                )}
               </g>
             )}
           </g>
@@ -1016,6 +1057,7 @@ export function BattleRadarView({
   battleSpeed = 1,
   effectsMode = 'full',
   effectsDebugEnabled = false,
+  showStatusLabels = true,
   playerWeaponId = null,
   layoutMode: layoutModeProp,
   onSelectEnemy,
@@ -1856,6 +1898,8 @@ export function BattleRadarView({
               animationsSkipped={animationsSkipped}
               hoverTooltip={hoverTooltip}
               autoBadgeText={autoBadgeText}
+              showStatusLabels={showStatusLabels}
+              formatStatusShortText={(st) => getStatusShortLabel(lang, st.type)}
               formatStatusTooltip={formatStatusTooltip}
               onMarkerRef={registerMarkerRef}
               onHoverUnit={setHoveredTargetId}

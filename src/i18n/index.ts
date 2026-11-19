@@ -163,6 +163,42 @@ export function getStatusDesc(
   return translate(lang, `status.${status}.desc` as TranslationKey);
 }
 
+const STATUS_SHORT_LABELS: Record<
+  StatusEffectType,
+  { en: string; vi: string }
+> = {
+  burn: { en: 'Burn', vi: 'Thiêu' },
+  shield_break: { en: 'ShdBrk', vi: 'VỡKhiên' },
+  slow: { en: 'Slow', vi: 'Chậm' },
+  silence: { en: 'Silence', vi: 'Câm' },
+  stealth: { en: 'Stealth', vi: 'Ẩn' },
+  vulnerable: { en: 'Expose', vi: 'Lộ' },
+  def_up: { en: 'DEF+', vi: 'THỦ+' },
+  def_down: { en: 'DEF-', vi: 'THỦ-' },
+  eva_up: { en: 'EVA+', vi: 'NÉ+' },
+  atk_up: { en: 'ATK+', vi: 'CÔNG+' },
+  spd_up: { en: 'SPD+', vi: 'TỐC+' },
+  primary_dmg_up: { en: 'WPN+', vi: 'VK+' },
+  skill_dmg_up: { en: 'SKL+', vi: 'KN+' },
+  sure_hit: { en: 'Lock', vi: 'Khóa' },
+  counter: { en: 'Riposte', vi: 'Phản' },
+  evade_all: { en: 'Mirage', vi: 'ẢoẢnh' },
+  invincible: { en: 'Stasis', vi: 'BấtTử' },
+  regen_hp: { en: 'Regen', vi: 'HồiHP' },
+  siege_mode: { en: 'Siege', vi: 'Pháo' },
+  siege_defense: { en: 'Bastion', vi: 'PháoĐài' },
+  charging: { en: 'Charge', vi: 'Nạp' },
+};
+
+export function getStatusShortLabel(
+  lang: Language,
+  status: StatusEffectType
+): string {
+  const pair = STATUS_SHORT_LABELS[status];
+  if (pair) return lang === 'vi' ? pair.vi : pair.en;
+  return getStatusLabel(lang, status);
+}
+
 export function getArchetypeLabel(
   lang: Language,
   archetype: EnemyArchetype

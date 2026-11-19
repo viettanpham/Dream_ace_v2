@@ -7,19 +7,36 @@ import {
   ChevronRight,
   Flame,
   Heart,
+  Package,
+  ScrollText,
   Shield,
+  Skull,
   Sparkles,
   Swords,
   Users,
   X,
 } from 'lucide-react';
+import { BALANCE_CONFIG } from '../data/balance';
+import { STAT_KEYS } from '../data/classes';
+import { RARITY_META } from '../data/items';
 import { aggregateBattleStats } from '../engine/battleStats';
-import { getClassName, getStatsSkillLabel, useI18n } from '../i18n';
+import { getEffectiveItemStats } from '../engine/equipment';
+import {
+  getClassName,
+  getItemInstanceName,
+  getRarityLabel,
+  getSectorName,
+  getSlotLabel,
+  getStatShort,
+  getStatsSkillLabel,
+  useI18n,
+} from '../i18n';
 import type {
   BattleState,
   MechClassId,
   UnitBattleStats,
 } from '../types/game';
+import { buildLiveBattleProgress } from '../utils/combatLogFormat';
 
 export type StatsTab = 'overview' | 'units' | 'charts';
 
@@ -29,6 +46,7 @@ interface BattleStatsModalProps {
   battle: BattleState;
   enrageBonusPct: number;
   initialTab?: StatsTab;
+  onOpenLog?: () => void;
 }
 
 type SortColumn =
@@ -85,6 +103,7 @@ export function BattleStatsModal({
   battle,
   enrageBonusPct,
   initialTab = 'overview',
+  onOpenLog,
 }: BattleStatsModalProps) {
   const { lang, t } = useI18n();
   const [activeTab, setActiveTab] = useState<StatsTab>(initialTab);
@@ -108,6 +127,11 @@ export function BattleStatsModal({
         battle?.round ?? 1
       ),
     [battle?.units, battle?.events, battle?.roundSnapshots, battle?.round]
+  );
+
+  const liveProgress = useMemo(
+    () => buildLiveBattleProgress(battle, stats),
+    [battle, stats]
   );
 
   const unitById = useMemo(
@@ -242,6 +266,452 @@ export function BattleStatsModal({
     });
   };
 
+  // ==================== MODE B: END-OF-BATTLE REPORT (SINGLE SCROLLABLE SHEET) ====================
+  if (battle.summary) {
+    const summary = battle.summary;
+    const isVictory = summary.outcome === 'victory';
+    const outcomeTitle = isVictory
+      ? t('summary.victory')
+      : summary.retreated
+      ? t('summary.retreatTitle')
+      : t('summary.defeat');
+
+    return (
+      <div
+        className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-end md:items-center justify-center md:p-6"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="battle-stats-modal-title"
+        data-testid="battle-stats-modal"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
+      >
+        <div
+          data-testid="battle-report-sheet"
+          className="w-full md:max-w-4xl h-[92dvh] md:h-[88dvh] rounded-t-2xl md:rounded-xl border border-slate-700/90 bg-[#0B111C] shadow-2xl flex flex-col overflow-hidden"
+        >
+          {/* Short Header: Outcome, Sector, Turns */}
+          <div className="shrink-0 px-4 sm:px-6 py-3 border-b border-slate-800 bg-[#090E17] flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Award
+                className={`w-5 h-5 shrink-0 ${
+                  isVictory ? 'text-emerald-400' : 'text-red-400'
+                }`}
+              />
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2
+                    id="battle-stats-modal-title"
+                    className="font-display text-xl sm:text-2xl font-bold text-slate-100 leading-tight truncate"
+                  >
+                    {t('stats.reportTitle')}
+                  </h2>
+                  <span
+                    data-testid="report-outcome-badge"
+                    className={`px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider ${
+                      isVictory
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                        : 'bg-red-500/20 text-red-300 border border-red-500/40'
+                    }`}
+                  >
+                    {outcomeTitle}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-xs font-mono-nums text-slate-400 mt-0.5">
+                  <span>{getSectorName(lang, summary.sectorId)}</span>
+                  <span>·</span>
+                  <span>
+                    {t('stats.roundsLabel')}:{' '}
+                    <strong className="text-slate-100">{summary.rounds}</strong>
+                  </span>
+                  <span>·</span>
+                  <span>
+                    {t('stats.turnLabel')}:{' '}
+                    <strong className="text-slate-100">
+                      {battle.turnCounter}
+                    </strong>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={t('common.close')}
+              className="min-w-[44px] min-h-[44px] rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white inline-flex items-center justify-center cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* One Scrollable Sheet: 1) Result & Rewards  2) Per-Unit Table  3) Log Shortcut */}
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 space-y-5 tactical-scroll">
+            {/* Section 1: Result & Rewards (no duplicated metrics) */}
+            <section
+              data-testid="report-section-rewards"
+              className="space-y-3"
+            >
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                {t('stats.sectionResultRewards')}
+              </h3>
+
+              {summary.leveledUp && (
+                <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 flex items-center justify-between gap-3">
+                  <div>
+                    <div className="font-display text-[15px] font-bold text-emerald-300">
+                      {t('summary.levelUp', {
+                        gear: getClassName(lang, summary.deployedGearId),
+                        prev: summary.previousLevel,
+                        next: summary.newLevel,
+                      })}
+                    </div>
+                    <div className="text-xs text-emerald-200/80">
+                      {t('summary.levelUpDesc')}
+                    </div>
+                  </div>
+                  <div className="font-mono-nums text-sm font-bold text-emerald-300 whitespace-nowrap">
+                    +{summary.statPointsGained} PTS
+                  </div>
+                </div>
+              )}
+
+              {summary.unlockedSectorId && (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3.5 py-2 text-xs font-semibold text-amber-300">
+                  {t('summary.sectorUnlocked', {
+                    sector: getSectorName(lang, summary.unlockedSectorId),
+                  })}
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                <div className="rounded-lg border border-slate-800 bg-[#0D1523] p-3">
+                  <div className="text-[11px] text-slate-400">
+                    {t('summary.expEarned', {
+                      gear: getClassName(lang, summary.deployedGearId),
+                    })}
+                  </div>
+                  <div className="mt-0.5 font-mono-nums text-lg font-bold text-amber-400">
+                    +{summary.expGained} EXP
+                  </div>
+                  <div className="text-[11px] font-mono-nums text-slate-500">
+                    {summary.newLevel >= BALANCE_CONFIG.maxLevel
+                      ? t('summary.maxLevelReached')
+                      : t('summary.battlesToNext', {
+                          count: summary.battlesToNextLevel,
+                          next: summary.newLevel + 1,
+                        })}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-slate-800 bg-[#0D1523] p-3">
+                  <div className="text-[11px] text-slate-400">
+                    {t('summary.creditsAwarded')}
+                  </div>
+                  <div className="mt-0.5 font-mono-nums text-lg font-bold text-slate-100">
+                    +{summary.creditsGained.toLocaleString()} CR
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-purple-500/35 bg-purple-500/10 p-3">
+                  <div className="text-[11px] text-purple-200">
+                    {t('summary.warPointsAwarded')}
+                  </div>
+                  <div className="mt-0.5 font-mono-nums text-lg font-bold text-purple-300">
+                    +{summary.warPointsGained} WP
+                  </div>
+                  {summary.baseCaptureBonusWp > 0 && (
+                    <div className="text-[11px] text-purple-300/80">
+                      {t('summary.captureBonusNote', {
+                        wp: summary.baseCaptureBonusWp,
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-lg border border-slate-800 bg-[#0D1523] p-3">
+                  <div className="text-[11px] text-slate-400">
+                    {t('summary.hostilesDestroyed')}
+                  </div>
+                  <div className="mt-0.5 font-mono-nums text-lg font-bold text-red-300">
+                    {summary.enemiesDestroyed}/{summary.totalEnemies}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-slate-800 bg-[#0D1523] p-3">
+                  <div className="text-[11px] text-slate-400">
+                    {t('summary.alliesSurviving')}
+                  </div>
+                  <div className="mt-0.5 font-mono-nums text-lg font-bold text-sky-300">
+                    {summary.alliesSurviving}/{battle.squadSize}
+                  </div>
+                </div>
+              </div>
+
+              {/* Salvaged Drops */}
+              {summary.droppedItems.length > 0 && (
+                <div className="rounded-lg border border-slate-800 bg-[#0D1523] p-3 space-y-2">
+                  <div className="flex items-center justify-between text-xs text-slate-400">
+                    <span className="inline-flex items-center gap-1.5 font-semibold text-slate-200">
+                      <Package className="w-3.5 h-3.5 text-amber-400" />
+                      <span>{t('summary.dropsTitle')}</span>
+                    </span>
+                    <span className="font-mono-nums">
+                      {t('common.itemCount', {
+                        count: summary.droppedItems.length,
+                      })}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    {summary.droppedItems.map((inst) => {
+                      const itemStats = getEffectiveItemStats(inst);
+                      return (
+                        <div
+                          key={inst.instanceId}
+                          className={`rounded border bg-[#090D14] px-3 py-2 flex items-center justify-between gap-2 ${
+                            RARITY_META[inst.rarity].borderClass
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div
+                              className={`text-xs font-semibold truncate ${
+                                RARITY_META[inst.rarity].textClass
+                              }`}
+                            >
+                              {getItemInstanceName(lang, inst)}
+                            </div>
+                            <div className="text-[11px] text-slate-400">
+                              {getSlotLabel(lang, inst.slot)} ·{' '}
+                              {getRarityLabel(lang, inst.rarity)} · T{inst.tier}
+                            </div>
+                          </div>
+                          <div className="text-right font-mono-nums text-[11px] text-emerald-400 shrink-0">
+                            {STAT_KEYS.filter((k) => itemStats[k] > 0)
+                              .map(
+                                (k) => `+${itemStats[k]} ${getStatShort(lang, k)}`
+                              )
+                              .join(' ')}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </section>
+
+            {/* Section 2: Clean Per-Unit Table (Damage, Healing, Taken, Kills) */}
+            <section data-testid="report-section-units" className="space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  {t('stats.sectionUnitsTable')}
+                </h3>
+                <span className="text-[11px] text-slate-500">
+                  {t('stats.expandHint')}
+                </span>
+              </div>
+
+              {sortedUnits.length === 0 ? (
+                <div className="rounded-lg border border-slate-800 bg-[#0D1523] py-8 text-center text-xs text-slate-400">
+                  {t('stats.noData')}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-slate-800 bg-[#0D1523] overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-800 bg-[#090E17] text-slate-400">
+                        <th className="py-2.5 px-3 font-semibold">
+                          {t('stats.colUnit')}
+                        </th>
+                        {(
+                          [
+                            ['damageDealt', t('stats.colDmg')],
+                            ['healingDone', t('stats.colHeal')],
+                            ['damageTakenTotal', t('stats.colTaken')],
+                            ['kills', t('stats.colKillsSimple')],
+                          ] as [SortColumn, string][]
+                        ).map(([col, label]) => (
+                          <th
+                            key={col}
+                            className="py-2.5 px-3 font-semibold whitespace-nowrap text-right"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => toggleSort(col)}
+                              className={`inline-flex items-center gap-1 cursor-pointer hover:text-white ${
+                                sortCol === col ? 'text-sky-300' : ''
+                              }`}
+                            >
+                              <span>{label}</span>
+                              {sortCol === col && (
+                                <span>{sortDesc ? '↓' : '↑'}</span>
+                              )}
+                            </button>
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/80">
+                      {sortedUnits.map((u) => {
+                        const isExpanded = expandedUnitId === u.unitId;
+                        const accent = getUnitAccentHex(u);
+                        const skillList = Object.values(u.skills ?? {}).sort(
+                          (a, b) =>
+                            b.damage + b.healing - (a.damage + a.healing)
+                        );
+                        return (
+                          <tr key={u.unitId}>
+                            <td colSpan={5} className="p-0">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setExpandedUnitId(
+                                    isExpanded ? null : u.unitId
+                                  )
+                                }
+                                className="w-full text-left hover:bg-slate-800/40 transition-colors cursor-pointer"
+                              >
+                                <div className="grid grid-cols-[minmax(140px,2fr)_repeat(4,minmax(64px,1fr))] items-center">
+                                  <div className="py-2.5 px-3 flex items-center gap-2 min-w-0">
+                                    {isExpanded ? (
+                                      <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                    ) : (
+                                      <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                                    )}
+                                    <span
+                                      className="text-xs font-bold shrink-0"
+                                      style={{ color: accent }}
+                                    >
+                                      {getClassBadgeSymbol(u.classId)}
+                                    </span>
+                                    <div className="min-w-0">
+                                      <div
+                                        className={`font-semibold truncate ${
+                                          u.alive
+                                            ? 'text-slate-100'
+                                            : 'text-slate-500 line-through'
+                                        }`}
+                                      >
+                                        {u.name}
+                                      </div>
+                                      <div className="text-[10px] text-slate-500">
+                                        {getClassName(lang, u.classId)}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="py-2.5 px-3 text-right font-mono-nums font-semibold text-red-300">
+                                    {u.damageDealt.toLocaleString()}
+                                  </div>
+                                  <div className="py-2.5 px-3 text-right font-mono-nums text-emerald-300">
+                                    {u.healingDone.toLocaleString()}
+                                  </div>
+                                  <div className="py-2.5 px-3 text-right font-mono-nums text-slate-200">
+                                    {u.damageTakenTotal.toLocaleString()}
+                                  </div>
+                                  <div className="py-2.5 px-3 text-right font-mono-nums font-semibold text-amber-300">
+                                    {u.kills}
+                                  </div>
+                                </div>
+                              </button>
+
+                              {isExpanded && (
+                                <div className="px-4 py-2.5 bg-[#090F1A] border-t border-slate-800/80 space-y-2">
+                                  {skillList.length === 0 ? (
+                                    <div className="text-xs text-slate-500">
+                                      {t('stats.noSkillUsage')}
+                                    </div>
+                                  ) : (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                                      {skillList.map((sk) => (
+                                        <div
+                                          key={sk.skillId}
+                                          className="rounded border border-slate-800 bg-[#0D1523] px-3 py-2 flex items-center justify-between gap-2"
+                                        >
+                                          <div className="min-w-0">
+                                            <div className="text-xs font-semibold text-slate-100 truncate">
+                                              {getStatsSkillLabel(
+                                                lang,
+                                                sk.skillId
+                                              )}
+                                            </div>
+                                            <div className="text-[10px] text-slate-400">
+                                              {t('stats.uses', {
+                                                count: sk.uses,
+                                              })}
+                                              {sk.crits > 0
+                                                ? ` · ${sk.crits} CRIT`
+                                                : ''}
+                                            </div>
+                                          </div>
+                                          <div className="text-right font-mono-nums text-xs shrink-0">
+                                            {sk.damage > 0 && (
+                                              <div className="text-red-300 font-semibold">
+                                                {sk.damage.toLocaleString()} DMG
+                                              </div>
+                                            )}
+                                            {sk.healing > 0 && (
+                                              <div className="text-emerald-300 font-semibold">
+                                                +{sk.healing.toLocaleString()} HP
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+
+            {/* Section 3: Combat Log Shortcut */}
+            <section
+              data-testid="report-section-log-shortcut"
+              className="rounded-lg border border-slate-800 bg-[#0D1523] p-3.5 flex items-center justify-between gap-3"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <ScrollText className="w-4 h-4 text-sky-400 shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-slate-100">
+                    {t('battle.combatLog')}
+                  </div>
+                  <div className="text-xs font-mono-nums text-slate-400">
+                    {t('battle.eventsCount', {
+                      count: battle.log?.length ?? 0,
+                    })}
+                  </div>
+                </div>
+              </div>
+              {onOpenLog && (
+                <button
+                  type="button"
+                  data-testid="report-open-log-btn"
+                  onClick={() => {
+                    onClose();
+                    onOpenLog();
+                  }}
+                  className="min-h-[40px] px-3.5 rounded-lg border border-sky-500/50 bg-sky-500/15 hover:bg-sky-500/25 text-sky-200 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer shrink-0"
+                >
+                  <ScrollText className="w-3.5 h-3.5" />
+                  <span>{t('stats.openCombatLog')}</span>
+                </button>
+              )}
+            </section>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ==================== MODE A: LIVE BATTLE PROGRESS ("DIỄN BIẾN") WHILE RUNNING ====================
   return (
     <div
       className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-end md:items-center justify-center md:p-6"
@@ -257,18 +727,28 @@ export function BattleStatsModal({
         {/* Header */}
         <div className="shrink-0 px-4 sm:px-6 py-3 border-b border-slate-800 bg-[#090E17] flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
-            <BarChart3 className="w-5 h-5 text-sky-400 shrink-0" />
+            <Activity className="w-5 h-5 text-emerald-400 shrink-0" />
             <div className="min-w-0">
-              <h2
-                id="battle-stats-modal-title"
-                className="font-display text-xl sm:text-2xl font-bold text-slate-100 leading-tight truncate"
-              >
-                {t('stats.title')}
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2
+                  id="battle-stats-modal-title"
+                  className="font-display text-xl sm:text-2xl font-bold text-slate-100 leading-tight truncate"
+                >
+                  {t('stats.progressTitle')}
+                </h2>
+                <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold uppercase tracking-wider shrink-0">
+                  {t('stats.liveUpdating')}
+                </span>
+              </div>
               <div className="flex flex-wrap items-center gap-2 text-xs font-mono-nums text-slate-400">
                 <span>
                   {t('stats.roundsLabel')}:{' '}
-                  <strong className="text-slate-100">{stats.rounds}</strong>
+                  <strong className="text-slate-100">{liveProgress.round}</strong>
+                </span>
+                <span>·</span>
+                <span>
+                  {t('stats.turnLabel')}:{' '}
+                  <strong className="text-slate-100">{liveProgress.turn}</strong>
                 </span>
                 <span>·</span>
                 {enragePct > 0 ? (
@@ -293,11 +773,11 @@ export function BattleStatsModal({
           </button>
         </div>
 
-        {/* Tab Bar: Overview | Units | Charts */}
+        {/* Tab Bar: Progress | Units | Charts */}
         <div className="shrink-0 px-4 sm:px-6 pt-2.5 pb-2 border-b border-slate-800 bg-[#0A101A] flex items-center gap-2">
           {(
             [
-              { id: 'overview', label: t('stats.tabOverview'), Icon: Activity },
+              { id: 'overview', label: t('stats.progressBtn'), Icon: Activity },
               { id: 'units', label: t('stats.tabUnits'), Icon: Users },
               { id: 'charts', label: t('stats.tabCharts'), Icon: BarChart3 },
             ] as const
@@ -325,212 +805,262 @@ export function BattleStatsModal({
         {/* Scrollable Body */}
         <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 space-y-5 tactical-scroll">
           {activeTab === 'overview' && (
-            <>
-              {/* Battle Momentum Bar */}
-              <div className="rounded-lg border border-slate-800 bg-[#0D1523] p-4 space-y-2.5">
-                <div className="flex items-center justify-between text-xs font-semibold gap-2">
-                  <span className="text-sky-300">
-                    {t('stats.teamAlly')} ({stats.ally.remainingHp.toLocaleString()} /{' '}
-                    {stats.ally.totalMaxHp.toLocaleString()} HP · {stats.ally.remainingHpPct}%)
-                  </span>
-                  <span className="text-slate-400 hidden sm:inline">
-                    {t('stats.momentumTitle')}
-                  </span>
-                  <span className="text-red-300">
-                    {t('stats.teamEnemy')} ({stats.enemy.remainingHp.toLocaleString()} /{' '}
-                    {stats.enemy.totalMaxHp.toLocaleString()} HP · {stats.enemy.remainingHpPct}%)
-                  </span>
-                </div>
-                <div className="h-3.5 rounded-full bg-slate-950 border border-slate-800 overflow-hidden flex">
-                  <div
-                    style={{ width: `${allyMomentumPct}%` }}
-                    className="h-full bg-gradient-to-r from-emerald-500 to-sky-400 transition-all duration-300"
-                  />
-                  <div
-                    style={{ width: `${enemyMomentumPct}%` }}
-                    className="h-full bg-gradient-to-r from-orange-500 to-red-500 transition-all duration-300"
-                  />
-                </div>
-              </div>
-
-              {/* 2-Column Team Totals: Allied Wing vs Hostile Fleet */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {[
-                  {
-                    team: stats.ally,
-                    title: t('stats.teamAlly'),
-                    border: 'border-sky-500/40',
-                    accent: 'text-sky-300',
-                  },
-                  {
-                    team: stats.enemy,
-                    title: t('stats.teamEnemy'),
-                    border: 'border-red-500/40',
-                    accent: 'text-red-300',
-                  },
-                ].map(({ team, title, border, accent }) => (
-                  <div
-                    key={team.side}
-                    className={`rounded-lg border ${border} bg-[#0D1523] p-4 space-y-2`}
-                  >
-                    <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                      <h3 className={`font-display text-xl font-bold ${accent}`}>
-                        {title}
-                      </h3>
-                      <span className="font-mono-nums text-xs text-slate-300">
-                        {team.aliveCount}/{team.totalCount}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                      <div className="flex justify-between gap-2">
-                        <span className="text-slate-400">{t('stats.damageDealt')}</span>
-                        <span className="font-mono-nums font-bold text-slate-100">
-                          {team.damageDealt.toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="flex justify-between gap-2">
-                        <span className="text-slate-400">{t('stats.damageTaken')}</span>
-                        <span className="font-mono-nums font-bold text-slate-100">
-                          {team.damageTakenTotal.toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="flex justify-between gap-2">
-                        <span className="text-slate-400">{t('stats.hpDamage')}</span>
-                        <span className="font-mono-nums text-red-300">
-                          {team.damageTakenHp.toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="flex justify-between gap-2">
-                        <span className="text-slate-400">{t('stats.shieldAbsorbed')}</span>
-                        <span className="font-mono-nums text-sky-300">
-                          {team.shieldAbsorbed.toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="flex justify-between gap-2">
-                        <span className="text-slate-400">{t('stats.healingDone')}</span>
-                        <span className="font-mono-nums text-emerald-300">
-                          {team.healingDone.toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="flex justify-between gap-2">
-                        <span className="text-slate-400">{t('stats.shieldGranted')}</span>
-                        <span className="font-mono-nums text-sky-300">
-                          {team.shieldGranted.toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="flex justify-between gap-2">
-                        <span className="text-slate-400">{t('stats.hitsAndCrits')}</span>
-                        <span className="font-mono-nums text-amber-300">
-                          {team.hits} / {team.crits} ({team.critRate}%)
-                        </span>
-                      </div>
-                      <div className="flex justify-between gap-2">
-                        <span className="text-slate-400">{t('stats.dodges')}</span>
-                        <span className="font-mono-nums text-slate-200">{team.dodges}</span>
-                      </div>
-                      <div className="flex justify-between gap-2">
-                        <span className="text-slate-400">{t('stats.killsDeaths')}</span>
-                        <span className="font-mono-nums text-slate-200">
-                          {team.kills} / {team.deaths}
-                        </span>
-                      </div>
-                      <div className="flex justify-between gap-2">
-                        <span className="text-slate-400">{t('stats.spSpent')}</span>
-                        <span className="font-mono-nums text-purple-300">
-                          {team.spSpent} SP
-                        </span>
-                      </div>
-                      <div className="flex justify-between gap-2">
-                        <span className="text-slate-400">{t('stats.turnsTaken')}</span>
-                        <span className="font-mono-nums text-slate-200">
-                          {team.turnsTaken}
-                        </span>
-                      </div>
-                      <div className="flex justify-between gap-2">
-                        <span className="text-slate-400">{t('stats.buffsDebuffs')}</span>
-                        <span className="font-mono-nums text-slate-200">
-                          {team.buffsApplied} / {team.debuffsApplied}
-                        </span>
-                      </div>
-                    </div>
+            <div data-testid="battle-live-progress-view" className="space-y-4">
+              {/* Top Row: Units Alive + Momentum + Active Buffs/Debuffs */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {/* Units Alive Per Side */}
+                <div
+                  data-testid="live-units-alive"
+                  className="rounded-lg border border-slate-800 bg-[#0D1523] p-3.5 space-y-2"
+                >
+                  <div className="text-xs font-semibold text-slate-400">
+                    {t('stats.unitsAlive')}
                   </div>
-                ))}
+                  <div className="flex items-center justify-between font-mono-nums text-base font-bold">
+                    <span className="text-sky-300">
+                      {t('stats.teamAlly')}: {liveProgress.allyAlive}/
+                      {liveProgress.allyTotal}
+                    </span>
+                    <span className="text-red-300">
+                      {t('stats.teamEnemy')}: {liveProgress.enemyAlive}/
+                      {liveProgress.enemyTotal}
+                    </span>
+                  </div>
+                  <div className="h-2.5 rounded-full bg-slate-950 border border-slate-800 overflow-hidden flex">
+                    <div
+                      style={{ width: `${allyMomentumPct}%` }}
+                      className="h-full bg-gradient-to-r from-emerald-500 to-sky-400 transition-all duration-300"
+                    />
+                    <div
+                      style={{ width: `${enemyMomentumPct}%` }}
+                      className="h-full bg-gradient-to-r from-orange-500 to-red-500 transition-all duration-300"
+                    />
+                  </div>
+                </div>
+
+                {/* Damage Dealt / Taken Per Side */}
+                <div
+                  data-testid="live-side-damage"
+                  className="rounded-lg border border-slate-800 bg-[#0D1523] p-3.5 space-y-1.5"
+                >
+                  <div className="text-xs font-semibold text-slate-400">
+                    {t('stats.damageDealt')} / {t('stats.damageTaken')}
+                  </div>
+                  <div className="flex items-center justify-between text-xs font-mono-nums">
+                    <span className="text-sky-300 font-semibold">
+                      {t('stats.teamAlly')}
+                    </span>
+                    <span className="text-slate-100">
+                      <strong className="text-amber-300">
+                        {liveProgress.allyDamageDealt.toLocaleString()}
+                      </strong>{' '}
+                      /{' '}
+                      <span className="text-red-300">
+                        {liveProgress.allyDamageTaken.toLocaleString()}
+                      </span>
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs font-mono-nums">
+                    <span className="text-red-300 font-semibold">
+                      {t('stats.teamEnemy')}
+                    </span>
+                    <span className="text-slate-100">
+                      <strong className="text-amber-300">
+                        {liveProgress.enemyDamageDealt.toLocaleString()}
+                      </strong>{' '}
+                      /{' '}
+                      <span className="text-red-300">
+                        {liveProgress.enemyDamageTaken.toLocaleString()}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Active Buffs / Debuffs Count */}
+                <div
+                  data-testid="live-active-effects"
+                  className="rounded-lg border border-slate-800 bg-[#0D1523] p-3.5 space-y-1.5"
+                >
+                  <div className="text-xs font-semibold text-slate-400">
+                    {t('stats.activeEffects')}
+                  </div>
+                  <div className="flex items-center justify-between font-mono-nums text-sm">
+                    <span className="inline-flex items-center gap-1.5 text-amber-300 font-bold">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      {t('stats.activeBuffs')}: {liveProgress.activeBuffsCount}
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 text-purple-300 font-bold">
+                      <Flame className="w-3.5 h-3.5" />
+                      {t('stats.activeDebuffs')}: {liveProgress.activeDebuffsCount}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] font-mono-nums text-slate-400">
+                    <span>
+                      {t('stats.teamAlly')}: {liveProgress.allyActiveBuffs}B /{' '}
+                      {liveProgress.allyActiveDebuffs}D
+                    </span>
+                    <span>
+                      {t('stats.teamEnemy')}: {liveProgress.enemyActiveBuffs}B /{' '}
+                      {liveProgress.enemyActiveDebuffs}D
+                    </span>
+                  </div>
+                </div>
               </div>
 
-              {/* MVP Badges */}
-              <div className="space-y-2.5">
-                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-300">
-                  <Award className="w-4 h-4" />
-                  <span>{t('stats.mvpSection')}</span>
-                </div>
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                  {[
-                    {
-                      id: 'dmg',
-                      label: t('stats.mvpDamage'),
-                      award: stats.mvps.mostDamage,
-                      suffix: ' DMG',
-                      Icon: Swords,
-                      color: 'text-amber-300 border-amber-500/35',
-                    },
-                    {
-                      id: 'heal',
-                      label: t('stats.mvpHealing'),
-                      award: stats.mvps.mostHealing,
-                      suffix: ' HP',
-                      Icon: Heart,
-                      color: 'text-emerald-300 border-emerald-500/35',
-                    },
-                    {
-                      id: 'taken',
-                      label: t('stats.mvpTaken'),
-                      award: stats.mvps.mostDamageTaken,
-                      suffix: ' DMG',
-                      Icon: Shield,
-                      color: 'text-sky-300 border-sky-500/35',
-                    },
-                    {
-                      id: 'dodge',
-                      label: t('stats.mvpDodges'),
-                      award: stats.mvps.mostDodges,
-                      suffix: '',
-                      Icon: Sparkles,
-                      color: 'text-purple-300 border-purple-500/35',
-                    },
-                  ].map(({ id, label, award, suffix, Icon, color }) => {
-                    const winner = award ? unitById.get(award.unitId) : null;
-                    return (
-                      <div
-                        key={id}
-                        className={`rounded-lg border bg-[#0D1523] p-3 space-y-1 ${color}`}
-                      >
-                        <div className="flex items-center gap-1.5 text-[11px] font-semibold">
-                          <Icon className="w-3.5 h-3.5 shrink-0" />
-                          <span className="truncate">{label}</span>
+              {/* Top 3 Damage Dealers & Top 3 Healers */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div
+                  data-testid="live-top-damage"
+                  className="rounded-lg border border-slate-800 bg-[#0D1523] p-4 space-y-2.5"
+                >
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-red-300">
+                    <Swords className="w-4 h-4" />
+                    <span>{t('stats.topDamageDealers')}</span>
+                  </div>
+                  {liveProgress.topDamageDealers.length === 0 ? (
+                    <div className="text-xs text-slate-500">
+                      {t('stats.noDamageYet')}
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {liveProgress.topDamageDealers.map((u, idx) => (
+                        <div
+                          key={u.unitId}
+                          data-testid={`live-top-damage-row-${idx}`}
+                          className="flex items-center justify-between gap-2 text-xs py-1 border-b border-slate-800/60 last:border-b-0"
+                        >
+                          <span className="flex items-center gap-2 min-w-0">
+                            <span className="font-mono-nums text-slate-500 w-4">
+                              #{idx + 1}
+                            </span>
+                            <span
+                              className="w-2 h-2 rounded-full shrink-0"
+                              style={{ backgroundColor: getUnitAccentHex(u) }}
+                            />
+                            <span className="font-semibold text-slate-100 truncate">
+                              {u.name}
+                            </span>
+                          </span>
+                          <span className="font-mono-nums font-bold text-red-300 shrink-0">
+                            {u.damageDealt.toLocaleString()} DMG
+                          </span>
                         </div>
-                        {winner && award ? (
-                          <>
-                            <div className="text-sm font-bold text-slate-100 truncate flex items-center gap-1.5">
-                              <span
-                                className="w-2 h-2 rounded-full shrink-0"
-                                style={{ backgroundColor: getUnitAccentHex(winner) }}
-                              />
-                              <span className="truncate">{winner.name}</span>
-                            </div>
-                            <div className="font-mono-nums text-xs font-semibold">
-                              {award.value.toLocaleString()}
-                              {suffix}
-                            </div>
-                          </>
-                        ) : (
-                          <div className="text-xs text-slate-500">{t('stats.mvpNone')}</div>
-                        )}
-                      </div>
-                    );
-                  })}
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div
+                  data-testid="live-top-healers"
+                  className="rounded-lg border border-slate-800 bg-[#0D1523] p-4 space-y-2.5"
+                >
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-300">
+                    <Heart className="w-4 h-4" />
+                    <span>{t('stats.topHealers')}</span>
+                  </div>
+                  {liveProgress.topHealers.length === 0 ? (
+                    <div className="text-xs text-slate-500">
+                      {t('stats.noHealingYet')}
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {liveProgress.topHealers.map((u, idx) => (
+                        <div
+                          key={u.unitId}
+                          data-testid={`live-top-healer-row-${idx}`}
+                          className="flex items-center justify-between gap-2 text-xs py-1 border-b border-slate-800/60 last:border-b-0"
+                        >
+                          <span className="flex items-center gap-2 min-w-0">
+                            <span className="font-mono-nums text-slate-500 w-4">
+                              #{idx + 1}
+                            </span>
+                            <span
+                              className="w-2 h-2 rounded-full shrink-0"
+                              style={{ backgroundColor: getUnitAccentHex(u) }}
+                            />
+                            <span className="font-semibold text-slate-100 truncate">
+                              {u.name}
+                            </span>
+                          </span>
+                          <span className="font-mono-nums font-bold text-emerald-300 shrink-0">
+                            +{u.healingDone.toLocaleString()} HP
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
-            </>
+
+              {/* Mini Timeline of Kills */}
+              <div
+                data-testid="live-kill-timeline"
+                className="rounded-lg border border-slate-800 bg-[#0D1523] p-4 space-y-2.5"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-300">
+                    <Skull className="w-4 h-4" />
+                    <span>{t('stats.killTimeline')}</span>
+                  </div>
+                  {onOpenLog && (
+                    <button
+                      type="button"
+                      data-testid="live-progress-open-log"
+                      onClick={() => {
+                        onClose();
+                        onOpenLog();
+                      }}
+                      className="px-2.5 py-1 rounded border border-sky-500/40 bg-sky-500/10 hover:bg-sky-500/20 text-sky-200 text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <ScrollText className="w-3 h-3" />
+                      <span>{t('battle.combatLog')}</span>
+                    </button>
+                  )}
+                </div>
+                {liveProgress.killTimeline.length === 0 ? (
+                  <div className="text-xs text-slate-500">
+                    {t('stats.noKillsYet')}
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {liveProgress.killTimeline.map((k) => (
+                      <div
+                        key={k.id}
+                        data-testid="live-kill-item"
+                        className="flex items-center gap-2 text-xs py-1 border-b border-slate-800/50 last:border-b-0"
+                      >
+                        <span className="font-mono-nums text-slate-500 shrink-0">
+                          R{k.round}
+                        </span>
+                        <span
+                          className={`font-semibold ${
+                            k.killerSide === 'ally'
+                              ? 'text-sky-300'
+                              : k.killerSide === 'enemy'
+                              ? 'text-red-300'
+                              : 'text-slate-300'
+                          }`}
+                        >
+                          {k.killerName}
+                        </span>
+                        <Skull className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                        <span
+                          className={`font-semibold line-through ${
+                            k.victimSide === 'ally'
+                              ? 'text-sky-400/80'
+                              : k.victimSide === 'enemy'
+                              ? 'text-red-400/80'
+                              : 'text-slate-400'
+                          }`}
+                        >
+                          {k.victimName}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           )}
 
           {activeTab === 'units' && (

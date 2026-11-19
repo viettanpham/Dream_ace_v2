@@ -11,7 +11,9 @@ import {
   HeartHandshake,
   Info,
   LayoutGrid,
+  Maximize2,
   MessageSquare,
+  Minimize2,
   MoreHorizontal,
   Package,
   Radar,
@@ -22,6 +24,8 @@ import {
   ShieldAlert,
   Sparkles,
   Square,
+  Tag,
+  X,
   Zap,
   ZapOff,
 } from 'lucide-react';
@@ -80,6 +84,14 @@ import {
   writeBattleEffectsMode,
   type BattleEffectsMode,
 } from '../utils/battleVfx';
+import {
+  readCombatLogMode,
+  readShowStatusLabels,
+  writeCombatLogMode,
+  writeShowStatusLabels,
+  type CombatLogChannel,
+  type CombatLogDisplayMode,
+} from '../utils/combatLogFormat';
 import { BattleRadarView } from './BattleRadarView';
 import { BattleStatsModal } from './BattleStatsModal';
 import { BattleUnitCard } from './BattleUnitCard';
@@ -164,6 +176,13 @@ export function BattleScreen() {
     readBattleEffectsMode()
   );
   const [effectsDebugEnabled, setEffectsDebugEnabled] = useState<boolean>(false);
+  const [combatLogMode, setCombatLogMode] = useState<CombatLogDisplayMode>(() =>
+    readCombatLogMode()
+  );
+  const [logChannel, setLogChannel] = useState<CombatLogChannel>('all');
+  const [showStatusLabels, setShowStatusLabels] = useState<boolean>(() =>
+    readShowStatusLabels()
+  );
   const [cardToast, setCardToast] = useState<string | null>(null);
   const popupCleanupTimersRef = useRef<Map<string, number>>(new Map());
   const fxCleanupTimersRef = useRef<Map<string, number>>(new Map());
@@ -194,6 +213,18 @@ export function BattleScreen() {
     };
   }, [loopPopoverOpen]);
 
+  useEffect(() => {
+    if (!logSheetOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setLogSheetOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [logSheetOpen]);
+
   const closeMoreActions = () => {
     setMoreActionsOpen(false);
     setRetreatConfirmOpen(false);
@@ -210,6 +241,32 @@ export function BattleScreen() {
   const handleSetEffectsMode = (mode: BattleEffectsMode) => {
     setEffectsMode(mode);
     writeBattleEffectsMode(mode);
+  };
+
+  const handleToggleShowStatusLabels = () => {
+    setShowStatusLabels((prev) => {
+      const next = !prev;
+      writeShowStatusLabels(next);
+      return next;
+    });
+  };
+
+  const handleSetCombatLogMode = (nextMode: CombatLogDisplayMode) => {
+    setCombatLogMode(nextMode);
+    writeCombatLogMode(nextMode);
+    setLogSheetOpen(nextMode === 'popup');
+  };
+
+  const handleToggleCombatLogMode = () => {
+    const nextMode: CombatLogDisplayMode =
+      combatLogMode === 'docked' ? 'popup' : 'docked';
+    handleSetCombatLogMode(nextMode);
+  };
+
+  const handleOpenCombatLogPopup = () => {
+    setCombatLogMode('popup');
+    writeCombatLogMode('popup');
+    setLogSheetOpen(true);
   };
 
   const playerWeaponId = useMemo(() => {
@@ -804,6 +861,7 @@ export function BattleScreen() {
         exploding={battle.explodedUnitIds.includes(unit.id)}
         skipAnimations={bypassFx}
         autoActive={unit.isPlayer && autoBattleEnabled}
+        showStatusLabels={showStatusLabels}
         popups={battle.popups.filter((p) => p.unitId === unit.id)}
         onSelect={
           isEnemy
@@ -933,6 +991,7 @@ export function BattleScreen() {
           battleSpeed={battleSpeed}
           effectsMode={effectsMode}
           effectsDebugEnabled={effectsDebugEnabled}
+          showStatusLabels={showStatusLabels}
           playerWeaponId={playerWeaponId}
           layoutMode={layoutMode}
           onSelectEnemy={(id) => {
@@ -1342,27 +1401,75 @@ export function BattleScreen() {
             {renderFieldContent()}
           </div>
 
-          {/* 5) One-line log ticker (latest event only, opens full log bottom sheet) */}
+          {/* 5) Combat log: compact scrollable docked panel or 1-line popup trigger */}
           <div className="shrink-0 px-2 pb-1">
-            <button
-              type="button"
-              data-testid="battle-log-ticker"
-              onClick={() => setLogSheetOpen(true)}
-              className="w-full min-h-[44px] px-3 rounded-lg border border-slate-800 bg-[#080D16] hover:bg-slate-900 flex items-center justify-between gap-2 text-left cursor-pointer"
-            >
-              <div className="flex items-center gap-2 min-w-0 flex-1">
-                <ScrollText className="w-4 h-4 text-sky-400 shrink-0" />
-                <span className="text-[13px] text-slate-200 truncate">
-                  {latestLog
-                    ? formatCombatLogMessage(lang, latestLog)
-                    : t('battle.logSheetHint', { count: battle.log.length })}
-                </span>
+            {combatLogMode === 'docked' ? (
+              <div
+                data-testid="battle-phone-docked-log"
+                className="rounded-lg border border-slate-800 bg-[#070A10] flex flex-col overflow-hidden max-h-[144px]"
+              >
+                <div className="shrink-0 px-2.5 py-1 border-b border-slate-800/90 flex items-center justify-between gap-2 text-[11px] text-slate-400">
+                  <span className="font-semibold text-slate-200 inline-flex items-center gap-1.5 truncate">
+                    <ScrollText className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                    <span className="truncate">{t('battle.combatLog')}</span>
+                    <span className="font-mono-nums text-slate-400">
+                      ({battle.log.length})
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    data-testid="combat-log-mode-toggle"
+                    data-log-mode={combatLogMode}
+                    onClick={handleToggleCombatLogMode}
+                    className="min-h-[28px] px-2 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer shrink-0"
+                  >
+                    <Maximize2 className="w-3 h-3 text-sky-400" />
+                    <span>{t('log.modePopup')}</span>
+                  </button>
+                </div>
+                <CombatLogList
+                  entries={battle.log}
+                  active={isPhonePortrait && combatLogMode === 'docked'}
+                  density="compact"
+                  mode="docked"
+                  channel={logChannel}
+                  onChannelChange={setLogChannel}
+                />
               </div>
-              <span className="text-[12px] font-mono-nums text-slate-400 inline-flex items-center gap-1 shrink-0">
-                <span>{battle.log.length}</span>
-                <ChevronUp className="w-4 h-4" />
-              </span>
-            </button>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  data-testid="battle-log-ticker"
+                  onClick={() => setLogSheetOpen(true)}
+                  className="flex-1 min-w-0 min-h-[44px] px-3 rounded-lg border border-slate-800 bg-[#080D16] hover:bg-slate-900 flex items-center justify-between gap-2 text-left cursor-pointer"
+                >
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <ScrollText className="w-4 h-4 text-sky-400 shrink-0" />
+                    <span className="text-[13px] text-slate-200 truncate">
+                      {latestLog
+                        ? formatCombatLogMessage(lang, latestLog)
+                        : t('battle.logSheetHint', { count: battle.log.length })}
+                    </span>
+                  </div>
+                  <span className="text-[12px] font-mono-nums text-slate-400 inline-flex items-center gap-1 shrink-0">
+                    <span>{battle.log.length}</span>
+                    <ChevronUp className="w-4 h-4" />
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="combat-log-mode-toggle"
+                  data-log-mode={combatLogMode}
+                  onClick={handleToggleCombatLogMode}
+                  className="min-h-[44px] px-2.5 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-[12px] font-semibold inline-flex items-center gap-1 cursor-pointer shrink-0"
+                  title={t('log.modeDocked')}
+                >
+                  <Minimize2 className="w-3.5 h-3.5 text-sky-400" />
+                  <span>{t('log.modeDocked')}</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {/* 6) Single-row bottom action dock — collapses to slim <=40px bar in Auto mode */}
@@ -1842,20 +1949,79 @@ export function BattleScreen() {
 
             {renderSidebarSelectedUnit()}
 
-            <div className="flex-1 min-h-0 rounded-lg border border-slate-800 bg-[#070A10] flex flex-col overflow-hidden">
-              <div className="shrink-0 px-3 py-2 border-b border-slate-800/90 flex items-center justify-between text-[12px] text-slate-400">
-                <span className="font-semibold text-slate-200">
-                  {t('battle.combatLog')}
-                </span>
-                <span className="font-mono-nums">
-                  {t('battle.eventsCount', { count: battle.log.length })}
-                </span>
+            <div
+              data-testid="battle-desktop-docked-log"
+              className="flex-1 min-h-0 rounded-lg border border-slate-800 bg-[#070A10] flex flex-col overflow-hidden"
+            >
+              <div className="shrink-0 px-3 py-1.5 border-b border-slate-800/90 flex items-center justify-between gap-2 text-[12px] text-slate-400">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-semibold text-slate-200 truncate">
+                    {t('battle.combatLog')}
+                  </span>
+                  <span className="font-mono-nums text-[11px] text-slate-400 shrink-0">
+                    {t('battle.eventsCount', { count: battle.log.length })}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {combatLogMode === 'popup' && !logSheetOpen && (
+                    <button
+                      type="button"
+                      data-testid="combat-log-reopen-popup"
+                      onClick={() => setLogSheetOpen(true)}
+                      className="min-h-[28px] px-2 rounded border border-sky-500/50 bg-sky-500/15 hover:bg-sky-500/25 text-sky-200 text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <Maximize2 className="w-3 h-3" />
+                      <span>{t('log.modePopup')}</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    data-testid="combat-log-mode-toggle"
+                    data-log-mode={combatLogMode}
+                    onClick={handleToggleCombatLogMode}
+                    className="min-h-[28px] px-2 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    {combatLogMode === 'docked' ? (
+                      <>
+                        <Maximize2 className="w-3 h-3 text-sky-400" />
+                        <span>{t('log.modePopup')}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Minimize2 className="w-3 h-3 text-sky-400" />
+                        <span>{t('log.modeDocked')}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
-              <CombatLogList
-                entries={battle.log}
-                active={!isPhonePortrait}
-                density="compact"
-              />
+              {combatLogMode === 'docked' ? (
+                <CombatLogList
+                  entries={battle.log}
+                  active={!isPhonePortrait}
+                  density="compact"
+                  mode="docked"
+                  channel={logChannel}
+                  onChannelChange={setLogChannel}
+                />
+              ) : (
+                <div className="flex-1 min-h-0 flex flex-col items-center justify-center p-4 text-center gap-2 text-[12px] text-slate-400">
+                  <ScrollText className="w-5 h-5 text-sky-400/80" />
+                  <div className="text-slate-300">
+                    {latestLog
+                      ? formatCombatLogMessage(lang, latestLog)
+                      : t('battle.logSheetHint', { count: battle.log.length })}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setLogSheetOpen(true)}
+                    className="min-h-[34px] px-3 rounded-lg border border-sky-500/50 bg-sky-500/15 hover:bg-sky-500/25 text-sky-200 text-[12px] font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Maximize2 className="w-3.5 h-3.5" />
+                    <span>{t('stats.openCombatLog')}</span>
+                  </button>
+                </div>
+              )}
             </div>
           </aside>
         </div>
@@ -1921,6 +2087,25 @@ export function BattleScreen() {
                 </button>
               ))}
             </div>
+            <button
+              type="button"
+              data-testid="battle-toggle-status-labels"
+              onClick={handleToggleShowStatusLabels}
+              aria-pressed={showStatusLabels}
+              className={`w-full min-h-[44px] px-3.5 rounded-lg border text-[13px] font-semibold flex items-center justify-between cursor-pointer ${
+                showStatusLabels
+                  ? 'border-sky-400 bg-sky-500/20 text-sky-200'
+                  : 'border-slate-700 bg-slate-900 text-slate-300'
+              }`}
+            >
+              <span className="inline-flex items-center gap-2.5">
+                <Tag className="w-4 h-4 text-sky-400" />
+                <span>{t('battle.showStatusLabels')}</span>
+              </span>
+              <span className="font-mono-nums text-[12px]">
+                {showStatusLabels ? 'ON' : 'OFF'}
+              </span>
+            </button>
           </div>
 
           <div className="grid grid-cols-1 gap-2">
@@ -2007,7 +2192,9 @@ export function BattleScreen() {
               className="min-h-[44px] px-3.5 rounded-lg border border-sky-500/45 bg-sky-500/12 text-sky-200 text-[13px] font-semibold flex items-center gap-2.5 cursor-pointer"
             >
               <BarChart3 className="w-4 h-4 text-sky-400" />
-              <span>{t('stats.title')}</span>
+              <span>
+                {battle.summary ? t('stats.reportBtn') : t('stats.progressBtn')}
+              </span>
             </button>
 
             {!battle.summary &&
@@ -2275,7 +2462,7 @@ export function BattleScreen() {
                   className="w-full min-h-[44px] px-4 rounded-lg border border-sky-500/50 bg-sky-500/12 hover:bg-sky-500/22 text-sky-200 font-semibold text-[13px] inline-flex items-center justify-center gap-2 transition-colors cursor-pointer"
                 >
                   <BarChart3 className="w-4 h-4 text-sky-400" />
-                  <span>{t('stats.title')}</span>
+                  <span>{t('stats.reportBtn')}</span>
                 </button>
                 <div className="flex items-center gap-2">
                   <button
@@ -2510,14 +2697,26 @@ export function BattleScreen() {
                 </div>
 
                 <div className="space-y-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setStatsModalOpen(true)}
-                    className="w-full min-h-[44px] px-4 rounded-lg border border-sky-500/50 bg-sky-500/12 hover:bg-sky-500/22 text-sky-200 font-semibold text-[13px] inline-flex items-center justify-center gap-2 transition-colors cursor-pointer"
-                  >
-                    <BarChart3 className="w-4 h-4 text-sky-400" />
-                    <span>{t('stats.title')}</span>
-                  </button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      data-testid="battle-open-report-btn"
+                      onClick={() => setStatsModalOpen(true)}
+                      className="min-h-[44px] px-3 rounded-lg border border-sky-500/50 bg-sky-500/12 hover:bg-sky-500/22 text-sky-200 font-semibold text-[13px] inline-flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                    >
+                      <BarChart3 className="w-4 h-4 text-sky-400 shrink-0" />
+                      <span>{t('stats.reportBtn')}</span>
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="battle-outcome-log-btn"
+                      onClick={handleOpenCombatLogPopup}
+                      className="min-h-[44px] px-3 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 font-semibold text-[13px] inline-flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                    >
+                      <ScrollText className="w-4 h-4 text-sky-400 shrink-0" />
+                      <span className="truncate">{t('stats.openCombatLog')}</span>
+                    </button>
+                  </div>
 
                   <div className="flex items-center gap-2">
                     <button
@@ -2572,7 +2771,7 @@ export function BattleScreen() {
         />
       </ErrorBoundary>
 
-      {/* ==================== MOBILE COMBAT LOG BOTTOM SHEET ==================== */}
+      {/* ==================== COMBAT LOG POPUP SHEET (NON-PAUSING) ==================== */}
       <ErrorBoundary
         variant="panel"
         title={t('battle.combatLog')}
@@ -2580,20 +2779,69 @@ export function BattleScreen() {
         onClose={() => setLogSheetOpen(false)}
         onReloadBattle={() => startBattle(battle.sectorId)}
       >
-        <BottomSheet
-          open={logSheetOpen}
-          onClose={() => setLogSheetOpen(false)}
-          title={t('battle.combatLog')}
-          subtitle={t('battle.eventsCount', { count: battle.log.length })}
-          maxHeightClass="h-[78dvh] max-h-[86dvh]"
-          bodyScrollable={false}
-        >
-          <CombatLogList
-            entries={battle.log}
-            active={logSheetOpen}
-            density="comfortable"
-          />
-        </BottomSheet>
+        {logSheetOpen && (
+          <div
+            data-testid="combat-log-popup"
+            className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-slate-950/70 p-0 md:p-4"
+            role="dialog"
+            aria-modal="false"
+            aria-label={t('battle.combatLog')}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setLogSheetOpen(false);
+            }}
+          >
+            <div className="w-full md:max-w-2xl h-[82dvh] max-h-[88dvh] flex flex-col rounded-t-2xl md:rounded-xl border-t md:border border-slate-700/90 bg-[#0B111C] text-slate-100 shadow-2xl overflow-hidden pb-safe">
+              <div className="md:hidden pt-2.5 pb-1 flex justify-center shrink-0">
+                <span className="w-10 h-1 rounded-full bg-slate-700" />
+              </div>
+
+              <div className="px-4 py-2.5 border-b border-slate-800/90 flex items-center justify-between gap-2 shrink-0">
+                <div className="min-w-0 flex items-center gap-2">
+                  <ScrollText className="w-4 h-4 text-sky-400 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-[15px] font-bold text-slate-100 truncate">
+                      {t('battle.combatLog')}
+                    </div>
+                    <div className="text-[11px] font-mono-nums text-slate-400">
+                      {t('battle.eventsCount', { count: battle.log.length })}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    data-testid="combat-log-popup-dock-btn"
+                    onClick={() => handleSetCombatLogMode('docked')}
+                    className="min-h-[36px] px-2.5 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-[12px] font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Minimize2 className="w-3.5 h-3.5 text-sky-400" />
+                    <span>{t('log.modeDocked')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="combat-log-popup-close"
+                    onClick={() => setLogSheetOpen(false)}
+                    aria-label={t('common.close')}
+                    className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-slate-100 transition-colors cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                <CombatLogList
+                  entries={battle.log}
+                  active={logSheetOpen}
+                  density="comfortable"
+                  mode="popup"
+                  channel={logChannel}
+                  onChannelChange={setLogChannel}
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </ErrorBoundary>
 
       {/* ==================== FIELD SUPPLIES & TACTICS BOTTOM SHEET ==================== */}
@@ -2629,10 +2877,10 @@ export function BattleScreen() {
         </BottomSheet>
       </ErrorBoundary>
 
-      {/* ==================== BATTLE STATISTICS MODAL ==================== */}
+      {/* ==================== LIVE PROGRESS / END-OF-BATTLE REPORT MODAL ==================== */}
       <ErrorBoundary
         variant="panel"
-        title={t('stats.title')}
+        title={battle.summary ? t('stats.reportTitle') : t('stats.progressTitle')}
         resetKey={statsModalOpen}
         onClose={() => setStatsModalOpen(false)}
         onReloadBattle={() => startBattle(battle.sectorId)}
@@ -2642,6 +2890,7 @@ export function BattleScreen() {
           onClose={() => setStatsModalOpen(false)}
           battle={battle}
           enrageBonusPct={enrageBonusPct}
+          onOpenLog={handleOpenCombatLogPopup}
         />
       </ErrorBoundary>
     </div>
