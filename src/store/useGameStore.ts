@@ -35,6 +35,7 @@ import type {
   EquippedItems,
   EquipValidationResult,
   ItemInstance,
+  Language,
   MechClassId,
   PlayerCharacter,
   ScreenState,
@@ -42,7 +43,7 @@ import type {
 } from '../types/game';
 import { soundFx } from '../utils/sound';
 
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
 
 const createDefaultPlayer = (): PlayerCharacter => ({
   name: 'Vance',
@@ -109,11 +110,15 @@ interface GameStoreState {
   hasSaveData: boolean;
   muted: boolean;
   battleSpeed: 1 | 2;
+  language: Language;
 
   // Session UI / Battle state (transient)
   screen: ScreenState;
   battle: BattleState | null;
-  hangarNotice: string | null;
+  unequippedNoticeItems: Array<{ itemId: string; enchantLevel: number }>;
+
+  // Language
+  setLanguage: (lang: Language) => void;
 
   // Navigation & Save actions
   setScreen: (screen: ScreenState) => void;
@@ -123,7 +128,7 @@ interface GameStoreState {
 
   // Hangar actions
   setPilotName: (name: string) => void;
-  switchClass: (classId: MechClassId) => string[];
+  switchClass: (classId: MechClassId) => void;
   commitStatAllocations: (pending: StatBlock) => void;
   resetStatAllocations: () => void;
   selectSector: (sectorId: string) => void;
@@ -131,7 +136,7 @@ interface GameStoreState {
   // Equipment, Shop & Enchant actions
   equipItem: (instanceId: string) => EquipValidationResult;
   unequipSlot: (slot: EquipmentSlot) => void;
-  buyItem: (itemId: string) => { ok: boolean; reason: string | null };
+  buyItem: (itemId: string) => { ok: boolean };
   sellItem: (instanceId: string) => { ok: boolean; creditsEarned: number };
   enchantEquippedSlot: (slot: EquipmentSlot) => EnchantAttemptResult | null;
 
@@ -141,6 +146,8 @@ interface GameStoreState {
   performPlayerAction: (action: ActionType) => void;
   performAiTurn: () => void;
   clearExpiredPopups: (ids: string[]) => void;
+  clearExpiredFx: (ids: string[]) => void;
+  clearExplodedUnits: (ids: string[]) => void;
   returnToHangar: () => void;
 
   // Audio & speed toggles
@@ -201,13 +208,19 @@ export const useGameStore = create<GameStoreState>()(
       hasSaveData: false,
       muted: false,
       battleSpeed: 1,
+      language: 'vi',
       screen: 'TITLE',
       battle: null,
-      hangarNotice: null,
+      unequippedNoticeItems: [],
+
+      setLanguage: (language) => {
+        soundFx.playClick();
+        set({ language });
+      },
 
       setScreen: (screen) => {
         soundFx.playClick();
-        set({ screen, hangarNotice: null });
+        set({ screen, unequippedNoticeItems: [] });
       },
 
       startCampaign: () => {
@@ -222,12 +235,12 @@ export const useGameStore = create<GameStoreState>()(
           selectedSectorId: SECTORS_CATALOG[0].id,
           hasSaveData: true,
           battle: null,
-          hangarNotice: null,
+          unequippedNoticeItems: [],
           screen: 'HANGAR',
         });
       },
 
-      clearHangarNotice: () => set({ hangarNotice: null }),
+      clearHangarNotice: () => set({ unequippedNoticeItems: [] }),
 
       setPilotName: (name) => {
         const clean = name.slice(0, 18);
@@ -239,9 +252,9 @@ export const useGameStore = create<GameStoreState>()(
 
       switchClass: (classId) => {
         const state = get();
-        if (state.player.classId === classId) return [];
+        if (state.player.classId === classId) return;
 
-        const { equipped, inventory, unequippedNames } =
+        const { equipped, inventory, unequippedItems } =
           unequipIncompatibleForClass(
             state.player.equipped,
             state.player.inventory,
@@ -249,11 +262,6 @@ export const useGameStore = create<GameStoreState>()(
           );
 
         soundFx.playClick();
-        const notice =
-          unequippedNames.length > 0
-            ? `Unequipped class-locked gear returned to inventory: ${unequippedNames.join(', ')}.`
-            : null;
-
         set({
           player: {
             ...state.player,
@@ -261,10 +269,9 @@ export const useGameStore = create<GameStoreState>()(
             equipped,
             inventory,
           },
-          hangarNotice: notice,
+          unequippedNoticeItems: unequippedItems,
           hasSaveData: true,
         });
-        return unequippedNames;
       },
 
       commitStatAllocations: (pending) => {
@@ -322,13 +329,13 @@ export const useGameStore = create<GameStoreState>()(
           (i) => i.instanceId === instanceId
         );
         if (invIdx === -1) {
-          return { canEquip: false, reason: 'Item not found in inventory' };
+          return { canEquip: false, missingLevel: null, requiredClass: null };
         }
 
         const itemInstance = state.player.inventory[invIdx];
         const def = getItemDefinition(itemInstance.itemId);
         if (!def) {
-          return { canEquip: false, reason: 'Unknown item definition' };
+          return { canEquip: false, missingLevel: null, requiredClass: null };
         }
 
         const validation = validateEquipRequirement(
@@ -360,11 +367,11 @@ export const useGameStore = create<GameStoreState>()(
             equipped: nextEquipped,
             inventory: nextInventory,
           },
-          hangarNotice: null,
+          unequippedNoticeItems: [],
           hasSaveData: true,
         });
 
-        return { canEquip: true, reason: null };
+        return { canEquip: true, missingLevel: null, requiredClass: null };
       },
 
       unequipSlot: (slot) => {
@@ -389,11 +396,8 @@ export const useGameStore = create<GameStoreState>()(
       buyItem: (itemId) => {
         const state = get();
         const def = getItemDefinition(itemId);
-        if (!def) {
-          return { ok: false, reason: 'Item not found in shop catalog' };
-        }
-        if (state.player.credits < def.price) {
-          return { ok: false, reason: 'Insufficient Credits' };
+        if (!def || state.player.credits < def.price) {
+          return { ok: false };
         }
 
         const newInstance = createItemInstance(def.id, 0);
@@ -406,7 +410,7 @@ export const useGameStore = create<GameStoreState>()(
           },
           hasSaveData: true,
         });
-        return { ok: true, reason: null };
+        return { ok: true };
       },
 
       sellItem: (instanceId) => {
@@ -480,7 +484,7 @@ export const useGameStore = create<GameStoreState>()(
         set({
           selectedSectorId: targetSectorId,
           battle: battleState,
-          hangarNotice: null,
+          unequippedNoticeItems: [],
           screen: 'BATTLE',
           hasSaveData: true,
         });
@@ -527,8 +531,14 @@ export const useGameStore = create<GameStoreState>()(
 
         const nextLog = [...battle.log, ...resolution.logEntries].slice(-60);
         const nextPopups = [...battle.popups, ...resolution.popups];
+        const nextFx = resolution.fxEvent
+          ? [...battle.fxEvents, resolution.fxEvent]
+          : battle.fxEvents;
+        const nextExploded =
+          resolution.destroyedUnitIds.length > 0
+            ? [...battle.explodedUnitIds, ...resolution.destroyedUnitIds]
+            : battle.explodedUnitIds;
 
-        // Check Battle End
         if (aliveEnemies.length === 0 || aliveAllies.length === 0) {
           const won = aliveEnemies.length === 0;
           const rewards = calculateBattleRewards(
@@ -564,10 +574,12 @@ export const useGameStore = create<GameStoreState>()(
               units: resolution.updatedUnits,
               log: nextLog,
               popups: nextPopups,
+              fxEvents: nextFx,
+              explodedUnitIds: nextExploded,
               isResolving: false,
               summary: {
                 outcome: won ? 'victory' : 'defeat',
-                sectorName: battle.sectorName,
+                sectorId: battle.sectorId,
                 rounds: battle.round,
                 expGained: rewards.expGained,
                 creditsGained: rewards.creditsGained,
@@ -586,12 +598,13 @@ export const useGameStore = create<GameStoreState>()(
           return;
         }
 
-        // Advance Turn
         const updatedBattleBase: BattleState = {
           ...battle,
           units: resolution.updatedUnits,
           log: nextLog,
           popups: nextPopups,
+          fxEvents: nextFx,
+          explodedUnitIds: nextExploded,
         };
         const { nextIndex, wrappedRound } = findNextAliveTurnIndex(
           updatedBattleBase,
@@ -659,6 +672,13 @@ export const useGameStore = create<GameStoreState>()(
 
         const nextLog = [...battle.log, ...resolution.logEntries].slice(-60);
         const nextPopups = [...battle.popups, ...resolution.popups];
+        const nextFx = resolution.fxEvent
+          ? [...battle.fxEvents, resolution.fxEvent]
+          : battle.fxEvents;
+        const nextExploded =
+          resolution.destroyedUnitIds.length > 0
+            ? [...battle.explodedUnitIds, ...resolution.destroyedUnitIds]
+            : battle.explodedUnitIds;
 
         if (aliveEnemies.length === 0 || aliveAllies.length === 0) {
           const won = aliveEnemies.length === 0;
@@ -695,9 +715,11 @@ export const useGameStore = create<GameStoreState>()(
               units: resolution.updatedUnits,
               log: nextLog,
               popups: nextPopups,
+              fxEvents: nextFx,
+              explodedUnitIds: nextExploded,
               summary: {
                 outcome: won ? 'victory' : 'defeat',
-                sectorName: battle.sectorName,
+                sectorId: battle.sectorId,
                 rounds: battle.round,
                 expGained: rewards.expGained,
                 creditsGained: rewards.creditsGained,
@@ -721,6 +743,8 @@ export const useGameStore = create<GameStoreState>()(
           units: resolution.updatedUnits,
           log: nextLog,
           popups: nextPopups,
+          fxEvents: nextFx,
+          explodedUnitIds: nextExploded,
         };
         const { nextIndex, wrappedRound } = findNextAliveTurnIndex(
           updatedBattleBase,
@@ -755,6 +779,32 @@ export const useGameStore = create<GameStoreState>()(
         });
       },
 
+      clearExpiredFx: (ids) => {
+        const { battle } = get();
+        if (!battle || ids.length === 0) return;
+        const idSet = new Set(ids);
+        set({
+          battle: {
+            ...battle,
+            fxEvents: battle.fxEvents.filter((f) => !idSet.has(f.id)),
+          },
+        });
+      },
+
+      clearExplodedUnits: (ids) => {
+        const { battle } = get();
+        if (!battle || ids.length === 0) return;
+        const idSet = new Set(ids);
+        set({
+          battle: {
+            ...battle,
+            explodedUnitIds: battle.explodedUnitIds.filter(
+              (uid) => !idSet.has(uid)
+            ),
+          },
+        });
+      },
+
       returnToHangar: () => {
         soundFx.playClick();
         set({ battle: null, screen: 'HANGAR' });
@@ -782,6 +832,7 @@ export const useGameStore = create<GameStoreState>()(
         hasSaveData: state.hasSaveData,
         muted: state.muted,
         battleSpeed: state.battleSpeed,
+        language: state.language,
       }),
       migrate: (persistedState: unknown, version: number) => {
         const fallback = {
@@ -790,6 +841,7 @@ export const useGameStore = create<GameStoreState>()(
           hasSaveData: false,
           muted: false,
           battleSpeed: 1 as 1 | 2,
+          language: 'vi' as Language,
         };
 
         if (!persistedState || typeof persistedState !== 'object') {
@@ -799,7 +851,6 @@ export const useGameStore = create<GameStoreState>()(
         const raw = persistedState as Record<string, unknown>;
         const rawPlayer = (raw.player ?? {}) as Partial<PlayerCharacter>;
 
-        // Migrate from v0/v1 (Phase 1 saves without equipped/inventory) to v2
         const migratedPlayer: PlayerCharacter = {
           ...createDefaultPlayer(),
           ...rawPlayer,
@@ -812,14 +863,16 @@ export const useGameStore = create<GameStoreState>()(
               ? { ...EMPTY_EQUIPPED_ITEMS }
               : sanitizeEquipped(rawPlayer.equipped),
           inventory:
-            version < 2
-              ? []
-              : sanitizeInventory(rawPlayer.inventory),
+            version < 2 ? [] : sanitizeInventory(rawPlayer.inventory),
         };
+
+        const migratedLanguage: Language =
+          raw.language === 'en' || raw.language === 'vi' ? raw.language : 'vi';
 
         return {
           ...fallback,
           ...raw,
+          language: migratedLanguage,
           player: migratedPlayer,
         };
       },

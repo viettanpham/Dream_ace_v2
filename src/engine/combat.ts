@@ -6,6 +6,8 @@ import { getSkillById } from '../data/skills';
 import type {
   ActionType,
   BattleState,
+  CombatFxEvent,
+  CombatFxKind,
   CombatLogEntry,
   CombatSide,
   CombatUnit,
@@ -37,6 +39,14 @@ function randomVariance(): number {
   return (
     damageVarianceMin + Math.random() * (damageVarianceMax - damageVarianceMin)
   );
+}
+
+function getSlotIndex(units: CombatUnit[], unitId: string): number {
+  const target = units.find((u) => u.id === unitId);
+  if (!target) return 0;
+  const sameSide = units.filter((u) => u.side === target.side);
+  const idx = sameSide.findIndex((u) => u.id === unitId);
+  return Math.max(0, idx);
 }
 
 function buildCombatUnit(params: {
@@ -98,11 +108,11 @@ export function createInitialBattleState(
   const sector = getSectorById(sectorId);
   const classIds = MECH_CLASS_LIST.map((c) => c.id);
 
-  // 1. Player Unit (includes equipped item flat bonuses + enchant scaling)
+  // 1. Player Fighter Gear (includes equipped ship part bonuses + enchant scaling)
   const playerEquipBonuses = sumEquippedStatBonuses(player.equipped);
   const playerUnit = buildCombatUnit({
     id: 'ally_player',
-    name: player.name.trim() || 'Commander',
+    name: player.name.trim() || 'Vance',
     callsign: 'Lead-1',
     side: 'ally',
     isPlayer: true,
@@ -112,7 +122,7 @@ export function createInitialBattleState(
     equipmentBonuses: playerEquipBonuses,
   });
 
-  // 2. Three random AI Ally NPCs (varied classes, pilot names, levels near player)
+  // 2. Three random AI Ally Pilots
   const usedNames = new Set<string>([playerUnit.name]);
   const usedCallsigns = new Set<string>([playerUnit.callsign]);
   const allyUnits: CombatUnit[] = [playerUnit];
@@ -131,7 +141,7 @@ export function createInitialBattleState(
     usedCallsigns.add(callsign);
 
     const allyClass: MechClassId = randomItem(classIds);
-    const levelJitter = Math.floor(Math.random() * 3) - 1; // -1, 0, +1
+    const levelJitter = Math.floor(Math.random() * 3) - 1;
     const allyLevel = Math.max(1, player.level + levelJitter);
 
     allyUnits.push(
@@ -148,7 +158,7 @@ export function createInitialBattleState(
     );
   }
 
-  // 3. Four Enemy Mechs scaled to player level + sector offset
+  // 3. Four Hostile Starfighters & Alien Drones
   const enemyUnits: CombatUnit[] = [];
   const shuffledEnemyClasses = [...classIds].sort(() => Math.random() - 0.5);
 
@@ -158,7 +168,11 @@ export function createInitialBattleState(
     const suffix = randomItem(ENEMY_ARCHETYPES.suffixByClass[enemyClass]);
     const enemyLevel = Math.max(
       1,
-      player.level + sector.levelOffset + (i === 0 ? 0 : Math.floor(Math.random() * 2) - (sector.levelOffset === 0 ? 1 : 0))
+      player.level +
+        sector.levelOffset +
+        (i === 0
+          ? 0
+          : Math.floor(Math.random() * 2) - (sector.levelOffset === 0 ? 1 : 0))
     );
 
     enemyUnits.push(
@@ -170,7 +184,10 @@ export function createInitialBattleState(
         isPlayer: false,
         classId: enemyClass,
         level: Math.max(1, enemyLevel),
-        allocatedPoints: generateNpcAllocations(enemyClass, Math.max(1, enemyLevel)),
+        allocatedPoints: generateNpcAllocations(
+          enemyClass,
+          Math.max(1, enemyLevel)
+        ),
       })
     );
   }
@@ -184,12 +201,15 @@ export function createInitialBattleState(
     round: 1,
     actorName: sector.name,
     tag: 'SYSTEM',
-    message: `Engagement started in ${sector.name} (${sector.difficulty}). Turn order locked by Speed.`,
+    templateKey: 'log.battleStart',
+    params: {
+      sectorId: sector.id,
+      difficulty: sector.difficulty,
+    },
   };
 
   return {
     sectorId: sector.id,
-    sectorName: sector.name,
     units,
     turnOrder,
     activeTurnIndex: 0,
@@ -197,6 +217,8 @@ export function createInitialBattleState(
     selectedTargetId: firstEnemyId,
     log: [openingLog],
     popups: [],
+    fxEvents: [],
+    explodedUnitIds: [],
     isResolving: false,
     summary: null,
   };
@@ -206,6 +228,8 @@ export interface ActionResolution {
   updatedUnits: CombatUnit[];
   logEntries: CombatLogEntry[];
   popups: FloatingPopup[];
+  fxEvent: CombatFxEvent | null;
+  destroyedUnitIds: string[];
   soundCue:
     | 'laser'
     | 'heavy'
@@ -223,7 +247,7 @@ function applyDamageToUnit(
   defensePierce: number,
   bonusCrit: number,
   round: number,
-  actionLabel: string,
+  actionMeta: { skillId: string; hitIndex: number; totalHits: number },
   tag: 'ATTACK' | 'SKILL'
 ): {
   targetAfter: CombatUnit;
@@ -252,7 +276,14 @@ function applyDamageToUnit(
       actorName: target.name,
       actorSide: target.side,
       tag: 'EVADE',
-      message: `${target.name} evaded ${attacker.name}'s ${actionLabel}!`,
+      templateKey: 'log.evade',
+      params: {
+        target: target.name,
+        actor: attacker.name,
+        skillId: actionMeta.skillId,
+        hitIndex: actionMeta.hitIndex,
+        totalHits: actionMeta.totalHits,
+      },
     });
     return {
       targetAfter: { ...target, animState: 'evaded' },
@@ -310,29 +341,14 @@ function applyDamageToUnit(
       text: isCrit ? `CRIT SHD -${shieldAbsorbed}` : `SHD -${shieldAbsorbed}`,
       tone: 'shield',
     });
-  } else if (shieldAbsorbed > 0 && hullDamage > 0) {
+  } else {
     popups.push({
       id: nextId('pop'),
       unitId: target.id,
       text: isCrit ? `CRIT -${finalDamage}` : `-${finalDamage}`,
       tone: isCrit ? 'crit' : 'damage',
     });
-  } else {
-    popups.push({
-      id: nextId('pop'),
-      unitId: target.id,
-      text: isCrit ? `CRIT -${hullDamage}` : `-${hullDamage}`,
-      tone: isCrit ? 'crit' : 'damage',
-    });
   }
-
-  const defendNote = target.isDefending ? ' (Defended)' : '';
-  const breakdown =
-    shieldAbsorbed > 0 && hullDamage > 0
-      ? `${shieldAbsorbed} Shield, ${hullDamage} HP`
-      : shieldAbsorbed > 0
-      ? `${shieldAbsorbed} Shield`
-      : `${hullDamage} HP`;
 
   logs.push({
     id: nextId('log'),
@@ -340,7 +356,18 @@ function applyDamageToUnit(
     actorName: attacker.name,
     actorSide: attacker.side,
     tag: isCrit ? 'CRIT' : hitShieldOnly ? 'SHIELD' : tag,
-    message: `${attacker.name} used ${actionLabel} on ${target.name} for ${breakdown}${isCrit ? ' [CRITICAL]' : ''}${defendNote}.`,
+    templateKey: 'log.damage',
+    params: {
+      actor: attacker.name,
+      target: target.name,
+      skillId: actionMeta.skillId,
+      hitIndex: actionMeta.hitIndex,
+      totalHits: actionMeta.totalHits,
+      shieldAbsorbed,
+      hullDamage,
+      isCrit: isCrit ? 1 : 0,
+      isDefending: target.isDefending ? 1 : 0,
+    },
   });
 
   if (destroyed) {
@@ -350,7 +377,11 @@ function applyDamageToUnit(
       actorName: target.name,
       actorSide: target.side,
       tag: 'KO',
-      message: `${target.name} (${MECH_CLASSES[target.classId].name}) was destroyed!`,
+      templateKey: 'log.destroyed',
+      params: {
+        target: target.name,
+        classId: target.classId,
+      },
     });
   }
 
@@ -387,11 +418,19 @@ export function resolveUnitAction(
 ): ActionResolution {
   const actor = units.find((u) => u.id === actorId);
   if (!actor || !actor.alive) {
-    return { updatedUnits: units, logEntries: [], popups: [], soundCue: 'laser' };
+    return {
+      updatedUnits: units,
+      logEntries: [],
+      popups: [],
+      fxEvent: null,
+      destroyedUnitIds: [],
+      soundCue: 'laser',
+    };
   }
 
   const cls = MECH_CLASSES[actor.classId];
   const skill = getSkillById(cls.signatureSkillId);
+  const fromSlotIndex = getSlotIndex(units, actor.id);
 
   // Clone units and reset transient animations (preserving destroyed)
   const nextUnits: CombatUnit[] = units.map((u) => ({
@@ -403,8 +442,9 @@ export function resolveUnitAction(
   const actorIdx = nextUnits.findIndex((u) => u.id === actorId);
   const logs: CombatLogEntry[] = [];
   const popups: FloatingPopup[] = [];
+  const destroyedUnitIds: string[] = [];
 
-  // 1. DEFEND ACTION
+  // 1. DEFEND ACTION (Energy Shield Bubble)
   if (action === 'defend') {
     const spRecovered = Math.min(
       actor.derived.maxSp - actor.sp,
@@ -428,8 +468,8 @@ export function resolveUnitAction(
       unitId: actor.id,
       text:
         shieldRecovered > 0
-          ? `DEFEND +${shieldRecovered} SHD`
-          : `DEFEND +${spRecovered} SP`,
+          ? `SHIELD +${shieldRecovered}`
+          : `SHIELD +${spRecovered} SP`,
       tone: 'buff',
     });
 
@@ -439,15 +479,20 @@ export function resolveUnitAction(
       actorName: actor.name,
       actorSide: actor.side,
       tag: 'DEFEND',
-      message: `${actor.name} raised defensive barriers (-50% dmg${
-        shieldRecovered > 0 ? `, +${shieldRecovered} Shield` : ''
-      }${spRecovered > 0 ? `, +${spRecovered} SP` : ''}).`,
+      templateKey: 'log.defend',
+      params: {
+        actor: actor.name,
+        shieldRecovered,
+        spRecovered,
+      },
     });
 
     return {
       updatedUnits: nextUnits,
       logEntries: logs,
       popups,
+      fxEvent: null,
+      destroyedUnitIds,
       soundCue: 'defend',
     };
   }
@@ -460,14 +505,17 @@ export function resolveUnitAction(
       animState: skill.targetType === 'all_allies' ? 'casting' : 'attacking',
     };
 
-    // Support / Squad Restore Skill
+    // Support / Repair Beam Skill
     if (skill.targetType === 'all_allies') {
       const spiritBonus = 1 + actor.stats.spirit * 0.008;
       let totalRestored = 0;
+      const healedSlotIndices: number[] = [];
 
       for (let i = 0; i < nextUnits.length; i++) {
         const ally = nextUnits[i];
         if (ally.side !== actor.side || !ally.alive) continue;
+
+        healedSlotIndices.push(getSlotIndex(units, ally.id));
 
         const shdGain = Math.min(
           ally.derived.maxShield - ally.shield,
@@ -504,27 +552,44 @@ export function resolveUnitAction(
         actorName: actor.name,
         actorSide: actor.side,
         tag: 'HEAL',
-        message: `${actor.name} activated ${skill.name} (-${skill.spCost} SP), restoring ${totalRestored} combined Shield/HP across the squad.`,
+        templateKey: 'log.healSquad',
+        params: {
+          actor: actor.name,
+          skillId: skill.id,
+          spCost: skill.spCost,
+          total: totalRestored,
+        },
       });
 
       return {
         updatedUnits: nextUnits,
         logEntries: logs,
         popups,
+        fxEvent: {
+          id: nextId('fx'),
+          kind: 'heal',
+          fromSide: actor.side,
+          fromSlotIndex,
+          toSide: actor.side,
+          toSlotIndices: healedSlotIndices,
+          accentHex: '#10B981',
+        },
+        destroyedUnitIds,
         soundCue: 'heal',
       };
     }
 
-    // AoE Enemy Skill
+    // AoE Railgun Skill (Siege)
     if (skill.targetType === 'all_enemies') {
-      let anyDestroyed = false;
       const rawPower =
         (actor.derived.attackPower * 1.45 + actor.derived.skillPower * 0.85) *
         skill.powerMultiplier;
+      const targetSlotIndices: number[] = [];
 
       for (let i = 0; i < nextUnits.length; i++) {
         const enemy = nextUnits[i];
         if (enemy.side === actor.side || !enemy.alive) continue;
+        targetSlotIndices.push(getSlotIndex(units, enemy.id));
 
         const res = applyDamageToUnit(
           nextUnits[actorIdx],
@@ -533,31 +598,41 @@ export function resolveUnitAction(
           skill.defensePierce,
           skill.bonusCrit,
           round,
-          skill.name,
+          { skillId: skill.id, hitIndex: 1, totalHits: 1 },
           'SKILL'
         );
         nextUnits[i] = res.targetAfter;
         logs.push(...res.logs);
         popups.push(...res.popups);
-        if (res.destroyed) anyDestroyed = true;
+        if (res.destroyed) destroyedUnitIds.push(enemy.id);
       }
 
       return {
         updatedUnits: nextUnits,
         logEntries: logs,
         popups,
-        soundCue: anyDestroyed ? 'destroy' : 'heavy',
+        fxEvent: {
+          id: nextId('fx'),
+          kind: 'railgun',
+          fromSide: actor.side,
+          fromSlotIndex,
+          toSide: actor.side === 'ally' ? 'enemy' : 'ally',
+          toSlotIndices: targetSlotIndices,
+          accentHex: actor.side === 'ally' ? '#F59E0B' : '#EF4444',
+        },
+        destroyedUnitIds,
+        soundCue: destroyedUnitIds.length > 0 ? 'destroy' : 'heavy',
       };
     }
 
-    // Single-target Skill (supports multi-hit)
+    // Single-target Skill (Striker bomb/missile salvo, Interceptor twin laser strafe)
     const opponents = nextUnits.filter((u) => u.side !== actor.side && u.alive);
     const chosenTarget =
       opponents.find((u) => u.id === targetId) ?? opponents[0];
 
     if (chosenTarget) {
       const targetIdx = nextUnits.findIndex((u) => u.id === chosenTarget.id);
-      let anyDestroyed = false;
+      const targetSlotIdx = getSlotIndex(units, chosenTarget.id);
       let allEvaded = true;
       let lastHitShieldOnly = false;
 
@@ -568,8 +643,6 @@ export function resolveUnitAction(
       for (let h = 0; h < skill.hits; h++) {
         const currentTarget = nextUnits[targetIdx];
         if (!currentTarget.alive) break;
-        const hitLabel =
-          skill.hits > 1 ? `${skill.name} (${h + 1}/${skill.hits})` : skill.name;
 
         const res = applyDamageToUnit(
           nextUnits[actorIdx],
@@ -578,33 +651,47 @@ export function resolveUnitAction(
           skill.defensePierce,
           skill.bonusCrit,
           round,
-          hitLabel,
+          { skillId: skill.id, hitIndex: h + 1, totalHits: skill.hits },
           'SKILL'
         );
         nextUnits[targetIdx] = res.targetAfter;
         logs.push(...res.logs);
         popups.push(...res.popups);
-        if (res.destroyed) anyDestroyed = true;
+        if (res.destroyed) destroyedUnitIds.push(chosenTarget.id);
         if (!res.evaded) allEvaded = false;
         lastHitShieldOnly = res.hitShieldOnly;
       }
+
+      const fxKind: CombatFxKind =
+        actor.classId === 'striker' ? 'missile' : 'laser';
 
       return {
         updatedUnits: nextUnits,
         logEntries: logs,
         popups,
-        soundCue: anyDestroyed
-          ? 'destroy'
-          : allEvaded
-          ? 'evade'
-          : lastHitShieldOnly
-          ? 'shield'
-          : 'heavy',
+        fxEvent: {
+          id: nextId('fx'),
+          kind: fxKind,
+          fromSide: actor.side,
+          fromSlotIndex,
+          toSide: chosenTarget.side,
+          toSlotIndices: [targetSlotIdx],
+          accentHex: actor.side === 'ally' ? cls.accentHex : '#EF4444',
+        },
+        destroyedUnitIds,
+        soundCue:
+          destroyedUnitIds.length > 0
+            ? 'destroy'
+            : allEvaded
+            ? 'evade'
+            : lastHitShieldOnly
+            ? 'shield'
+            : 'heavy',
       };
     }
   }
 
-  // 3. BASIC ATTACK ACTION (also fallback if SP insufficient)
+  // 3. BASIC ATTACK ACTION (Laser bolts / missile volley)
   const spGain = Math.min(
     actor.derived.maxSp - actor.sp,
     COMBAT_FORMULAS.attackSpGain
@@ -619,10 +706,18 @@ export function resolveUnitAction(
   const chosenTarget = opponents.find((u) => u.id === targetId) ?? opponents[0];
 
   if (!chosenTarget) {
-    return { updatedUnits: nextUnits, logEntries: logs, popups, soundCue: 'laser' };
+    return {
+      updatedUnits: nextUnits,
+      logEntries: logs,
+      popups,
+      fxEvent: null,
+      destroyedUnitIds,
+      soundCue: 'laser',
+    };
   }
 
   const targetIdx = nextUnits.findIndex((u) => u.id === chosenTarget.id);
+  const targetSlotIdx = getSlotIndex(units, chosenTarget.id);
   const rawAttackPower = actor.derived.attackPower * 2.15;
 
   const res = applyDamageToUnit(
@@ -632,17 +727,28 @@ export function resolveUnitAction(
     0,
     0,
     round,
-    'Primary Weapons',
+    { skillId: '', hitIndex: 1, totalHits: 1 },
     'ATTACK'
   );
   nextUnits[targetIdx] = res.targetAfter;
   logs.push(...res.logs);
   popups.push(...res.popups);
+  if (res.destroyed) destroyedUnitIds.push(chosenTarget.id);
 
   return {
     updatedUnits: nextUnits,
     logEntries: logs,
     popups,
+    fxEvent: {
+      id: nextId('fx'),
+      kind: actor.classId === 'striker' ? 'missile' : 'laser',
+      fromSide: actor.side,
+      fromSlotIndex,
+      toSide: chosenTarget.side,
+      toSlotIndices: [targetSlotIdx],
+      accentHex: actor.side === 'ally' ? '#38BDF8' : '#F97316',
+    },
+    destroyedUnitIds,
     soundCue: res.destroyed
       ? 'destroy'
       : res.evaded
@@ -666,7 +772,6 @@ export function chooseAiDecision(
     return { action: 'defend', targetId: null };
   }
 
-  // Support AI prioritizes healing/shielding injured allies
   if (skill.targetType === 'all_allies' && actor.sp >= skill.spCost) {
     const injuredCount = allies.filter(
       (a) => a.hp < a.derived.maxHp * 0.78 || a.shield < a.derived.maxShield * 0.45
@@ -676,23 +781,25 @@ export function chooseAiDecision(
     }
   }
 
-  // Pick smart target: 60% focus lowest remaining total EHP, 40% random living target
   const sortedEnemies = [...enemies].sort(
     (a, b) => a.hp + a.shield - (b.hp + b.shield)
   );
   const target =
     Math.random() < 0.6 ? sortedEnemies[0] : randomItem(enemies);
 
-  // Offensive Skill check
   if (skill.targetType !== 'all_allies' && actor.sp >= skill.spCost) {
-    const skillChance = skill.targetType === 'all_enemies' && enemies.length >= 2 ? 0.72 : 0.55;
+    const skillChance =
+      skill.targetType === 'all_enemies' && enemies.length >= 2 ? 0.72 : 0.55;
     if (Math.random() < skillChance) {
       return { action: 'skill', targetId: target.id };
     }
   }
 
-  // Tactical Defend if low HP and low SP
-  if (actor.hp < actor.derived.maxHp * 0.28 && actor.sp < skill.spCost && Math.random() < 0.35) {
+  if (
+    actor.hp < actor.derived.maxHp * 0.28 &&
+    actor.sp < skill.spCost &&
+    Math.random() < 0.35
+  ) {
     return { action: 'defend', targetId: null };
   }
 

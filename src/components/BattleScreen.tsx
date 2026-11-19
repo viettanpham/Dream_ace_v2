@@ -1,14 +1,24 @@
 import { useEffect, useRef } from 'react';
-import { Crosshair, FastForward, Package, Shield, Sparkles, Swords } from 'lucide-react';
-import { MECH_CLASSES, STAT_KEYS, STAT_META } from '../data/classes';
-import {
-  EQUIPMENT_SLOT_META,
-  getItemDefinition,
-  RARITY_META,
-} from '../data/items';
+import { Crosshair, FastForward, Package, Shield, Sparkles } from 'lucide-react';
+import { MECH_CLASSES, STAT_KEYS } from '../data/classes';
+import { getItemDefinition, RARITY_META } from '../data/items';
 import { getSkillById } from '../data/skills';
+import {
+  formatCombatLogMessage,
+  getClassName,
+  getItemName,
+  getLogTagLabel,
+  getRarityLabel,
+  getSectorName,
+  getSkillDesc,
+  getSkillName,
+  getSkillTargetLabel,
+  getSlotLabel,
+  getStatShort,
+  useI18n,
+} from '../i18n';
 import { useGameStore } from '../store/useGameStore';
-import type { CombatLogEntry } from '../types/game';
+import type { CombatFxEvent, CombatLogEntry } from '../types/game';
 import { BattleUnitCard } from './BattleUnitCard';
 
 function getLogTagStyle(tag: CombatLogEntry['tag']): string {
@@ -34,13 +44,181 @@ function getLogTagStyle(tag: CombatLogEntry['tag']): string {
   }
 }
 
+/**
+ * Pure CSS/SVG space projectile overlay: laser bolts, missile trails, railgun beams, and repair beams
+ * travelling across the 4v4 battlefield from attacker slot to target slot(s).
+ */
+function BattleFxOverlay({ fxEvents }: { fxEvents: CombatFxEvent[] }) {
+  if (fxEvents.length === 0) return null;
+
+  const slotY = (idx: number) => 15 + idx * 23.5; // % heights aligned with the 4 unit rows
+
+  return (
+    <svg
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+      className="pointer-events-none hidden md:block absolute inset-0 z-30 h-full w-full"
+      aria-hidden="true"
+    >
+      {fxEvents.map((fx) => {
+        const x1 = fx.fromSide === 'ally' ? 18 : 82;
+        const y1 = slotY(fx.fromSlotIndex);
+
+        if (fx.kind === 'heal') {
+          const xAnchor = fx.fromSide === 'ally' ? 14 : 86;
+          return (
+            <g key={fx.id}>
+              {fx.toSlotIndices.map((tIdx) => {
+                const y2 = slotY(tIdx);
+                return (
+                  <g key={tIdx}>
+                    <line
+                      x1={xAnchor}
+                      y1={y1}
+                      x2={xAnchor}
+                      y2={y2}
+                      stroke="#10B981"
+                      strokeWidth="1.2"
+                      className="anim-beam"
+                    />
+                    <circle
+                      cx={xAnchor}
+                      cy={y2}
+                      r="3.2"
+                      fill="#10B981"
+                      fillOpacity="0.45"
+                      className="anim-impact-flash"
+                    />
+                  </g>
+                );
+              })}
+            </g>
+          );
+        }
+
+        const x2 = fx.toSide === 'enemy' ? 84 : 16;
+
+        if (fx.kind === 'railgun') {
+          return (
+            <g key={fx.id}>
+              {fx.toSlotIndices.map((tIdx) => {
+                const y2 = slotY(tIdx);
+                return (
+                  <g key={tIdx}>
+                    <line
+                      x1={x1}
+                      y1={y1}
+                      x2={x2}
+                      y2={y2}
+                      stroke={fx.accentHex}
+                      strokeWidth="2.4"
+                      opacity="0.4"
+                      className="anim-beam"
+                    />
+                    <line
+                      x1={x1}
+                      y1={y1}
+                      x2={x2}
+                      y2={y2}
+                      stroke="#FEF9C3"
+                      strokeWidth="0.85"
+                      className="anim-beam"
+                    />
+                  </g>
+                );
+              })}
+            </g>
+          );
+        }
+
+        if (fx.kind === 'missile') {
+          return (
+            <g key={fx.id}>
+              {fx.toSlotIndices.map((tIdx) => {
+                const y2 = slotY(tIdx);
+                const midX = (x1 + x2) / 2;
+                const ctrlY1 = Math.max(4, Math.min(96, (y1 + y2) / 2 - 9));
+                const ctrlY2 = Math.max(4, Math.min(96, (y1 + y2) / 2 + 9));
+                return (
+                  <g key={tIdx}>
+                    <path
+                      d={`M ${x1} ${y1} Q ${midX} ${ctrlY1} ${x2} ${y2}`}
+                      fill="none"
+                      stroke="#94A3B8"
+                      strokeWidth="0.6"
+                      opacity="0.45"
+                      className="anim-missile"
+                    />
+                    <path
+                      d={`M ${x1} ${y1} Q ${midX} ${ctrlY1} ${x2} ${y2}`}
+                      fill="none"
+                      stroke={fx.accentHex}
+                      strokeWidth="1.2"
+                      strokeLinecap="round"
+                      className="anim-missile"
+                    />
+                    <path
+                      d={`M ${x1} ${y1} Q ${midX} ${ctrlY2} ${x2} ${y2}`}
+                      fill="none"
+                      stroke="#FDE047"
+                      strokeWidth="1"
+                      strokeLinecap="round"
+                      className="anim-missile"
+                    />
+                  </g>
+                );
+              })}
+            </g>
+          );
+        }
+
+        // Default: Twin Laser Bolts
+        return (
+          <g key={fx.id}>
+            {fx.toSlotIndices.map((tIdx) => {
+              const y2 = slotY(tIdx);
+              return (
+                <g key={tIdx}>
+                  <line
+                    x1={x1}
+                    y1={y1 - 1.2}
+                    x2={x2}
+                    y2={y2 - 0.8}
+                    stroke={fx.accentHex}
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                    className="anim-bolt"
+                  />
+                  <line
+                    x1={x1}
+                    y1={y1 + 1.2}
+                    x2={x2}
+                    y2={y2 + 0.8}
+                    stroke="#FFFFFF"
+                    strokeWidth="0.7"
+                    strokeLinecap="round"
+                    className="anim-bolt"
+                  />
+                </g>
+              );
+            })}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 export function BattleScreen() {
+  const { lang, t } = useI18n();
   const battle = useGameStore((s) => s.battle);
   const battleSpeed = useGameStore((s) => s.battleSpeed);
   const selectTarget = useGameStore((s) => s.selectTarget);
   const performPlayerAction = useGameStore((s) => s.performPlayerAction);
   const performAiTurn = useGameStore((s) => s.performAiTurn);
   const clearExpiredPopups = useGameStore((s) => s.clearExpiredPopups);
+  const clearExpiredFx = useGameStore((s) => s.clearExpiredFx);
+  const clearExplodedUnits = useGameStore((s) => s.clearExplodedUnits);
   const returnToHangar = useGameStore((s) => s.returnToHangar);
   const startBattle = useGameStore((s) => s.startBattle);
   const toggleBattleSpeed = useGameStore((s) => s.toggleBattleSpeed);
@@ -60,7 +238,7 @@ export function BattleScreen() {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [battle?.log.length]);
 
-  // Clean up floating popups after animation completes
+  // Clean up floating popups
   useEffect(() => {
     if (!battle || battle.popups.length === 0) return;
     const ids = battle.popups.map((p) => p.id);
@@ -69,6 +247,26 @@ export function BattleScreen() {
     }, 980);
     return () => window.clearTimeout(timer);
   }, [battle?.popups, clearExpiredPopups]);
+
+  // Clean up laser/missile FX trails
+  useEffect(() => {
+    if (!battle || battle.fxEvents.length === 0) return;
+    const ids = battle.fxEvents.map((f) => f.id);
+    const timer = window.setTimeout(() => {
+      clearExpiredFx(ids);
+    }, 520);
+    return () => window.clearTimeout(timer);
+  }, [battle?.fxEvents, clearExpiredFx]);
+
+  // Clean up ship explosion particle bursts
+  useEffect(() => {
+    if (!battle || battle.explodedUnitIds.length === 0) return;
+    const ids = [...battle.explodedUnitIds];
+    const timer = window.setTimeout(() => {
+      clearExplodedUnits(ids);
+    }, 680);
+    return () => window.clearTimeout(timer);
+  }, [battle?.explodedUnitIds, clearExplodedUnits]);
 
   // Automatic AI turn scheduler
   useEffect(() => {
@@ -99,7 +297,9 @@ export function BattleScreen() {
 
       const playerUnit = battle.units.find((u) => u.isPlayer);
       if (!playerUnit) return;
-      const skill = getSkillById(MECH_CLASSES[playerUnit.classId].signatureSkillId);
+      const skill = getSkillById(
+        MECH_CLASSES[playerUnit.classId].signatureSkillId
+      );
 
       if (e.key === '1') {
         e.preventDefault();
@@ -141,8 +341,8 @@ export function BattleScreen() {
   );
 
   const selectedTarget = enemies.find((e) => e.id === battle.selectedTargetId);
+  const sectorLabel = getSectorName(lang, battle.sectorId);
 
-  // Build ordered queue starting from activeTurnIndex for clarity
   const orderedLivingIds: string[] = [];
   for (let i = 0; i < battle.turnOrder.length; i++) {
     const idx = (battle.activeTurnIndex + i) % battle.turnOrder.length;
@@ -156,14 +356,16 @@ export function BattleScreen() {
   return (
     <div className="relative flex-1 min-h-0 flex flex-col bg-tactical-grid overflow-hidden">
       {/* TOP TURN ORDER RIBBON */}
-      <div className="shrink-0 border-b border-slate-800/80 bg-[#0B1018]/90 px-4 sm:px-6 py-2 flex items-center justify-between gap-4">
+      <div className="shrink-0 border-b border-slate-800/80 bg-[#0A0F18]/90 px-4 sm:px-6 py-2 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 overflow-x-auto min-w-0 py-0.5">
           <div className="shrink-0 flex items-center gap-2 text-xs">
             <span className="font-display text-sm font-bold tracking-wide text-amber-400 whitespace-nowrap">
-              Round {battle.round}
+              {t('battle.round', { round: battle.round })}
             </span>
             <span className="text-slate-600" aria-hidden="true">·</span>
-            <span className="text-slate-400 whitespace-nowrap">Turn Order (Speed)</span>
+            <span className="text-slate-400 whitespace-nowrap">
+              {t('battle.turnOrder')}
+            </span>
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -182,7 +384,11 @@ export function BattleScreen() {
                       : 'border-slate-800 bg-slate-900/90 text-red-300'
                   }`}
                 >
-                  <span>{unit.isPlayer ? `${unit.name} (You)` : unit.name}</span>
+                  <span>
+                    {unit.isPlayer
+                      ? t('battle.youSuffix', { name: unit.name })
+                      : unit.name}
+                  </span>
                   <span className="font-mono-nums text-[10px] opacity-75">
                     {unit.derived.speed}
                   </span>
@@ -196,24 +402,30 @@ export function BattleScreen() {
           type="button"
           onClick={toggleBattleSpeed}
           className="h-8 px-2.5 shrink-0 inline-flex items-center gap-1.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-xs font-mono-nums text-slate-200 cursor-pointer"
-          title="Toggle AI turn pacing"
+          title={t('battle.toggleSpeed')}
         >
           <FastForward className="w-3.5 h-3.5 text-amber-400" />
           <span>{battleSpeed}x</span>
         </button>
       </div>
 
-      {/* MAIN 4v4 BATTLEFIELD ARENA */}
+      {/* MAIN 4v4 SPACE BATTLEFIELD ARENA */}
       <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 py-4">
-        <div className="mx-auto max-w-[1400px] h-full grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
-          {/* Ally Squad (Left) */}
-          <div className="space-y-2.5">
+        <div className="relative mx-auto max-w-[1400px] h-full grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
+          {/* Laser / Missile / Railgun / Repair Beam Overlay */}
+          <BattleFxOverlay fxEvents={battle.fxEvents} />
+
+          {/* Allied Fighter Wing (Left) */}
+          <div className="space-y-2.5 relative z-10">
             <div className="flex items-center justify-between text-xs px-1">
               <span className="font-display text-sm font-semibold tracking-wider text-sky-400 uppercase">
-                Allied Squadron
+                {t('battle.alliedWing')}
               </span>
               <span className="font-mono-nums text-slate-400">
-                {allies.filter((u) => u.alive).length} / {allies.length} Operational
+                {t('battle.operational', {
+                  alive: allies.filter((u) => u.alive).length,
+                  total: allies.length,
+                })}
               </span>
             </div>
             <div className="space-y-2.5">
@@ -224,20 +436,24 @@ export function BattleScreen() {
                   isActiveTurn={activeUnitId === unit.id && !battle.summary}
                   isTargeted={false}
                   canTarget={false}
+                  exploding={battle.explodedUnitIds.includes(unit.id)}
                   popups={battle.popups.filter((p) => p.unitId === unit.id)}
                 />
               ))}
             </div>
           </div>
 
-          {/* Enemy Squad (Right) */}
-          <div className="space-y-2.5">
+          {/* Hostile Ships & Alien Drones (Right) */}
+          <div className="space-y-2.5 relative z-10">
             <div className="flex items-center justify-between text-xs px-1">
               <span className="font-display text-sm font-semibold tracking-wider text-red-400 uppercase">
-                Hostile Forces · {battle.sectorName}
+                {t('battle.hostileWing', { sector: sectorLabel })}
               </span>
               <span className="font-mono-nums text-slate-400">
-                {enemies.filter((u) => u.alive).length} / {enemies.length} Active
+                {t('battle.activeCount', {
+                  alive: enemies.filter((u) => u.alive).length,
+                  total: enemies.length,
+                })}
               </span>
             </div>
             <div className="space-y-2.5">
@@ -248,6 +464,7 @@ export function BattleScreen() {
                   isActiveTurn={activeUnitId === unit.id && !battle.summary}
                   isTargeted={battle.selectedTargetId === unit.id && unit.alive}
                   canTarget={isPlayerTurn && unit.alive}
+                  exploding={battle.explodedUnitIds.includes(unit.id)}
                   popups={battle.popups.filter((p) => p.unitId === unit.id)}
                   onSelect={() => selectTarget(unit.id)}
                 />
@@ -258,26 +475,26 @@ export function BattleScreen() {
       </div>
 
       {/* BOTTOM COMMAND DOCK & COMBAT LOG */}
-      <div className="shrink-0 border-t border-slate-800/90 bg-[#0B1018]/98 px-4 sm:px-6 py-3">
+      <div className="shrink-0 border-t border-slate-800/90 bg-[#0A0F18]/98 px-4 sm:px-6 py-3">
         <div className="mx-auto max-w-[1400px] grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
-          {/* Player Action Deck (7 cols) */}
+          {/* Player Command Deck (7 cols) */}
           <div className="lg:col-span-7 flex flex-col justify-between gap-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
               {isPlayerTurn ? (
                 <span className="font-semibold text-amber-400">
-                  Your Turn — Select a target enemy and choose an action
+                  {t('battle.yourTurn')}
                 </span>
               ) : battle.summary ? (
                 <span className="font-semibold text-slate-300">
-                  Battle Concluded
+                  {t('battle.concluded')}
                 </span>
               ) : (
                 <span className="text-slate-300">
-                  AI Executing:{' '}
+                  {t('battle.aiTurn')}{' '}
                   <strong className="text-slate-100">
-                    {activeUnit?.name ?? 'Unit'}
+                    {activeUnit?.name ?? ''}
                   </strong>{' '}
-                  ({activeUnit ? MECH_CLASSES[activeUnit.classId].name : ''})
+                  ({activeUnit ? getClassName(lang, activeUnit.classId) : ''})
                 </span>
               )}
 
@@ -285,14 +502,17 @@ export function BattleScreen() {
                 <span className="inline-flex items-center gap-1.5 text-slate-400">
                   <Crosshair className="w-3.5 h-3.5 text-red-400" />
                   <span>
-                    Target: <strong className="text-slate-200">{selectedTarget.name}</strong>
+                    {t('battle.targetLock')}{' '}
+                    <strong className="text-slate-200">
+                      {selectedTarget.name}
+                    </strong>
                   </span>
                 </span>
               )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              {/* Attack */}
+              {/* Attack / Fire Weapons */}
               <button
                 type="button"
                 disabled={!isPlayerTurn}
@@ -301,11 +521,11 @@ export function BattleScreen() {
               >
                 <div className="min-w-0">
                   <div className="font-semibold text-sm flex items-center gap-1.5">
-                    <Swords className="w-4 h-4 shrink-0" />
-                    <span>Attack</span>
+                    <Crosshair className="w-4 h-4 shrink-0" />
+                    <span>{t('battle.actionAttack')}</span>
                   </div>
                   <div className="text-[11px] opacity-80 truncate">
-                    Primary strike · +5 SP
+                    {t('battle.actionAttackSub')}
                   </div>
                 </div>
                 <kbd className="font-mono-nums text-[11px] px-1.5 py-0.5 rounded bg-black/15">
@@ -313,26 +533,32 @@ export function BattleScreen() {
                 </kbd>
               </button>
 
-              {/* Skill */}
+              {/* Signature Ship Skill */}
               <button
                 type="button"
                 disabled={!canUseSkill}
                 onClick={() => performPlayerAction('skill')}
-                title={playerSkill?.description}
+                title={playerSkill ? getSkillDesc(lang, playerSkill.id) : ''}
                 className="h-14 px-3.5 rounded border border-sky-500/60 bg-sky-500/15 hover:bg-sky-500/25 disabled:bg-slate-900 disabled:border-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-sky-100 transition-colors cursor-pointer text-left flex items-center justify-between gap-2"
               >
                 <div className="min-w-0">
                   <div className="font-semibold text-sm flex items-center gap-1.5 truncate">
                     <Sparkles className="w-4 h-4 shrink-0 text-sky-400" />
-                    <span className="truncate">{playerSkill?.name ?? 'Skill'}</span>
+                    <span className="truncate">
+                      {playerSkill ? getSkillName(lang, playerSkill.id) : ''}
+                    </span>
                   </div>
                   <div className="text-[11px] text-sky-300/80 font-mono-nums truncate">
-                    Cost {playerSkill?.spCost ?? 0} SP ·{' '}
-                    {playerSkill?.targetType === 'all_enemies'
-                      ? 'All Enemies'
-                      : playerSkill?.targetType === 'all_allies'
-                      ? 'All Allies'
-                      : 'Target'}
+                    {playerSkill
+                      ? t('battle.actionSkillSub', {
+                          cost: playerSkill.spCost,
+                          target: getSkillTargetLabel(
+                            lang,
+                            playerSkill.targetType,
+                            playerSkill.hits
+                          ),
+                        })
+                      : ''}
                   </div>
                 </div>
                 <kbd className="font-mono-nums text-[11px] px-1.5 py-0.5 rounded bg-slate-900/80 text-slate-300">
@@ -340,7 +566,7 @@ export function BattleScreen() {
                 </kbd>
               </button>
 
-              {/* Defend */}
+              {/* Defend / Energy Shield Bubble */}
               <button
                 type="button"
                 disabled={!isPlayerTurn}
@@ -350,10 +576,10 @@ export function BattleScreen() {
                 <div className="min-w-0">
                   <div className="font-semibold text-sm flex items-center gap-1.5">
                     <Shield className="w-4 h-4 shrink-0 text-sky-400" />
-                    <span>Defend</span>
+                    <span>{t('battle.actionDefend')}</span>
                   </div>
                   <div className="text-[11px] text-slate-400 truncate">
-                    -50% dmg · +12 SP · +SHD
+                    {t('battle.actionDefendSub')}
                   </div>
                 </div>
                 <kbd className="font-mono-nums text-[11px] px-1.5 py-0.5 rounded bg-slate-950/60 text-slate-300">
@@ -363,11 +589,15 @@ export function BattleScreen() {
             </div>
           </div>
 
-          {/* Combat Log (5 cols) */}
-          <div className="lg:col-span-5 rounded border border-slate-800 bg-[#080C12] flex flex-col h-28 sm:h-32">
+          {/* Live-Translated Combat Log (5 cols) */}
+          <div className="lg:col-span-5 rounded border border-slate-800 bg-[#070A10] flex flex-col h-28 sm:h-32">
             <div className="px-3 py-1.5 border-b border-slate-800/90 flex items-center justify-between text-[11px] text-slate-400">
-              <span className="font-semibold text-slate-300">Combat Log</span>
-              <span className="font-mono-nums">{battle.log.length} events</span>
+              <span className="font-semibold text-slate-300">
+                {t('battle.combatLog')}
+              </span>
+              <span className="font-mono-nums">
+                {t('battle.eventsCount', { count: battle.log.length })}
+              </span>
             </div>
             <div className="flex-1 overflow-y-auto px-3 py-1.5 space-y-1 text-xs tactical-scroll">
               {battle.log.map((entry) => (
@@ -376,13 +606,15 @@ export function BattleScreen() {
                     R{entry.round}
                   </span>
                   <span
-                    className={`font-mono-nums text-[10px] font-semibold shrink-0 w-12 ${getLogTagStyle(
+                    className={`font-mono-nums text-[10px] font-semibold shrink-0 w-14 ${getLogTagStyle(
                       entry.tag
                     )}`}
                   >
-                    {entry.tag}
+                    {getLogTagLabel(lang, entry.tag)}
                   </span>
-                  <span className="text-slate-300">{entry.message}</span>
+                  <span className="text-slate-300">
+                    {formatCombatLogMessage(lang, entry)}
+                  </span>
                 </div>
               ))}
               <div ref={logEndRef} />
@@ -408,33 +640,37 @@ export function BattleScreen() {
                     : 'text-red-400'
                 }`}
               >
-                {battle.summary.sectorName} · {battle.summary.rounds} Rounds
+                {t('summary.rounds', {
+                  sector: getSectorName(lang, battle.summary.sectorId),
+                  rounds: battle.summary.rounds,
+                })}
               </div>
               <h2
                 id="battle-outcome-title"
                 className="font-display text-4xl font-bold tracking-wide text-slate-50"
               >
                 {battle.summary.outcome === 'victory'
-                  ? 'Sortie Victory'
-                  : 'Squadron Defeated'}
+                  ? t('summary.victory')
+                  : t('summary.defeat')}
               </h2>
               <p className="text-sm text-slate-400">
                 {battle.summary.outcome === 'victory'
-                  ? 'All hostile mechs neutralized. Salvage bounty and combat data recorded.'
-                  : 'Allied units forced to withdraw. Partial telemetry salvaged.'}
+                  ? t('summary.victoryDesc')
+                  : t('summary.defeatDesc')}
               </p>
             </div>
 
-            {/* Level-Up Callout */}
             {battle.summary.leveledUp && (
               <div className="rounded border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 flex items-center justify-between gap-3">
                 <div>
                   <div className="font-display text-lg font-bold text-emerald-300">
-                    Level Up: Lv.{battle.summary.previousLevel} → Lv.
-                    {battle.summary.newLevel}
+                    {t('summary.levelUp', {
+                      prev: battle.summary.previousLevel,
+                      next: battle.summary.newLevel,
+                    })}
                   </div>
                   <div className="text-xs text-emerald-200/80">
-                    Visit the Hangar to spend your new stat points.
+                    {t('summary.levelUpDesc')}
                   </div>
                 </div>
                 <div className="font-mono-nums text-lg font-bold text-emerald-300 whitespace-nowrap">
@@ -443,50 +679,58 @@ export function BattleScreen() {
               </div>
             )}
 
-            {/* Rewards Breakdown */}
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded border border-slate-800 bg-[#090D14] p-3">
-                <div className="text-xs text-slate-400">EXP Earned</div>
+                <div className="text-xs text-slate-400">
+                  {t('summary.expEarned')}
+                </div>
                 <div className="mt-0.5 font-mono-nums text-xl font-bold text-amber-400">
                   +{battle.summary.expGained} EXP
                 </div>
               </div>
               <div className="rounded border border-slate-800 bg-[#090D14] p-3">
-                <div className="text-xs text-slate-400">Credits Awarded</div>
+                <div className="text-xs text-slate-400">
+                  {t('summary.creditsAwarded')}
+                </div>
                 <div className="mt-0.5 font-mono-nums text-xl font-bold text-slate-100">
                   +{battle.summary.creditsGained.toLocaleString()} CR
                 </div>
               </div>
               <div className="rounded border border-slate-800 bg-[#090D14] p-3">
-                <div className="text-xs text-slate-400">Hostiles Destroyed</div>
+                <div className="text-xs text-slate-400">
+                  {t('summary.hostilesDestroyed')}
+                </div>
                 <div className="mt-0.5 font-mono-nums text-lg font-semibold text-slate-200">
                   {battle.summary.enemiesDestroyed} / 4
                 </div>
               </div>
               <div className="rounded border border-slate-800 bg-[#090D14] p-3">
-                <div className="text-xs text-slate-400">Allies Surviving</div>
+                <div className="text-xs text-slate-400">
+                  {t('summary.alliesSurviving')}
+                </div>
                 <div className="mt-0.5 font-mono-nums text-lg font-semibold text-slate-200">
                   {battle.summary.alliesSurviving} / 4
                 </div>
               </div>
             </div>
 
-            {/* Salvaged Item Drops */}
+            {/* Salvaged Ship Part Drops */}
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs text-slate-400">
                 <span className="inline-flex items-center gap-1.5 font-semibold text-slate-200">
                   <Package className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Salvaged Equipment Drops</span>
+                  <span>{t('summary.dropsTitle')}</span>
                 </span>
                 <span className="font-mono-nums">
-                  {battle.summary.droppedItems.length} item
-                  {battle.summary.droppedItems.length === 1 ? '' : 's'}
+                  {t('common.itemCount', {
+                    count: battle.summary.droppedItems.length,
+                  })}
                 </span>
               </div>
 
               {battle.summary.droppedItems.length === 0 ? (
                 <div className="rounded border border-slate-800/80 bg-[#090D14] px-3 py-2.5 text-xs text-slate-500">
-                  No intact chassis modules recovered from wreckage.
+                  {t('summary.noDrops')}
                 </div>
               ) : (
                 <div className="space-y-1.5 max-h-36 overflow-y-auto tactical-scroll">
@@ -506,19 +750,24 @@ export function BattleScreen() {
                               RARITY_META[def.rarity].textClass
                             }`}
                           >
-                            {def.name}
+                            {getItemName(lang, def.id)}
                           </div>
                           <div className="text-[11px] text-slate-400">
-                            {EQUIPMENT_SLOT_META[def.slot].label} ·{' '}
-                            {RARITY_META[def.rarity].label} · Lv.{def.requiredLevel}
+                            {getSlotLabel(lang, def.slot)} ·{' '}
+                            {getRarityLabel(lang, def.rarity)} ·{' '}
+                            {t('common.levelShort')}
+                            {def.requiredLevel}
                             {def.classRestriction
-                              ? ` · ${MECH_CLASSES[def.classRestriction].name}`
+                              ? ` · ${getClassName(lang, def.classRestriction)}`
                               : ''}
                           </div>
                         </div>
                         <div className="text-right font-mono-nums text-[11px] text-emerald-400 shrink-0">
                           {STAT_KEYS.filter((k) => (def.statBonuses[k] ?? 0) > 0)
-                            .map((k) => `+${def.statBonuses[k]} ${STAT_META[k].shortLabel}`)
+                            .map(
+                              (k) =>
+                                `+${def.statBonuses[k]} ${getStatShort(lang, k)}`
+                            )
                             .join(' ')}
                         </div>
                       </div>
@@ -534,14 +783,14 @@ export function BattleScreen() {
                 onClick={returnToHangar}
                 className="flex-1 h-11 px-4 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-sm transition-colors cursor-pointer whitespace-nowrap"
               >
-                Return to Hangar
+                {t('nav.returnHangar')}
               </button>
               <button
                 type="button"
                 onClick={() => startBattle()}
                 className="flex-1 h-11 px-4 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-100 font-medium text-sm transition-colors cursor-pointer whitespace-nowrap"
               >
-                Next Sortie
+                {t('summary.nextSortie')}
               </button>
             </div>
           </div>

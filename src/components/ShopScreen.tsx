@@ -1,9 +1,8 @@
 import { useMemo, useState } from 'react';
 import { AlertTriangle, Coins, ShoppingBag } from 'lucide-react';
-import { MECH_CLASSES, MECH_CLASS_LIST, STAT_KEYS, STAT_META } from '../data/classes';
+import { MECH_CLASS_LIST, STAT_KEYS } from '../data/classes';
 import {
   EQUIPMENT_SLOTS,
-  EQUIPMENT_SLOT_META,
   getItemDefinition,
   ITEMS_CATALOG,
   RARITY_META,
@@ -14,13 +13,31 @@ import {
   getSellPrice,
   validateEquipRequirement,
 } from '../engine/equipment';
+import {
+  formatEquipValidationReason,
+  getClassName,
+  getItemDesc,
+  getItemName,
+  getRarityLabel,
+  getSlotLabel,
+  getStatShort,
+  useI18n,
+} from '../i18n';
 import { useGameStore } from '../store/useGameStore';
 import type { EquipmentSlot, MechClassId } from '../types/game';
 
 type ShopTab = 'buy' | 'sell';
 type ClassFilter = 'all' | 'usable' | 'universal' | MechClassId;
 
+interface ShopTransactionNotice {
+  type: 'bought' | 'sold';
+  itemId: string;
+  enchantLevel: number;
+  price: number;
+}
+
 export function ShopScreen() {
+  const { lang, t } = useI18n();
   const player = useGameStore((s) => s.player);
   const buyItem = useGameStore((s) => s.buyItem);
   const sellItem = useGameStore((s) => s.sellItem);
@@ -29,7 +46,7 @@ export function ShopScreen() {
   const [tab, setTab] = useState<ShopTab>('buy');
   const [slotFilter, setSlotFilter] = useState<EquipmentSlot | 'all'>('all');
   const [classFilter, setClassFilter] = useState<ClassFilter>('all');
-  const [feedback, setFeedback] = useState<string | null>(null);
+  const [notice, setNotice] = useState<ShopTransactionNotice | null>(null);
 
   const ownedCountByItemId = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -76,21 +93,45 @@ export function ShopScreen() {
     });
   }, [player.inventory, slotFilter]);
 
-  const handleBuy = (itemId: string, itemName: string, price: number) => {
+  const handleBuy = (itemId: string, price: number) => {
     const res = buyItem(itemId);
     if (res.ok) {
-      setFeedback(`Purchased ${itemName} for ${price.toLocaleString()} CR. Added to Hangar inventory.`);
-    } else if (res.reason) {
-      setFeedback(res.reason);
+      setNotice({ type: 'bought', itemId, enchantLevel: 0, price });
     }
   };
 
-  const handleSell = (instanceId: string, itemName: string) => {
+  const handleSell = (
+    instanceId: string,
+    itemId: string,
+    enchantLevel: number
+  ) => {
     const res = sellItem(instanceId);
     if (res.ok) {
-      setFeedback(`Sold ${itemName} for +${res.creditsEarned.toLocaleString()} CR.`);
+      setNotice({
+        type: 'sold',
+        itemId,
+        enchantLevel,
+        price: res.creditsEarned,
+      });
     }
   };
+
+  const noticeText = notice
+    ? (() => {
+        const base = getItemName(lang, notice.itemId);
+        const itemLabel =
+          notice.enchantLevel > 0 ? `${base} +${notice.enchantLevel}` : base;
+        return notice.type === 'bought'
+          ? t('shop.boughtMsg', {
+              item: itemLabel,
+              price: notice.price.toLocaleString(),
+            })
+          : t('shop.soldMsg', {
+              item: itemLabel,
+              price: notice.price.toLocaleString(),
+            });
+      })()
+    : null;
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto bg-tactical-grid">
@@ -99,17 +140,20 @@ export function ShopScreen() {
         <div className="rounded-lg border border-slate-800/90 bg-[#0D131D]/95 p-4 flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="font-display text-2xl font-bold tracking-wide text-slate-100">
-              Armory Supply Shop
+              {t('shop.title')}
             </h1>
             <p className="text-xs text-slate-400">
-              Acquire chassis modules across 6 slots or liquidate surplus gear for{' '}
-              {Math.round(SHOP_CONFIG.sellPriceRatio * 100)}% of retail value.
+              {t('shop.subtitle', {
+                ratio: Math.round(SHOP_CONFIG.sellPriceRatio * 100),
+              })}
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
             <div className="text-right pr-2">
-              <div className="text-[11px] text-slate-400">Available Credits</div>
+              <div className="text-[11px] text-slate-400">
+                {t('shop.availableCredits')}
+              </div>
               <div className="font-mono-nums text-xl font-bold text-amber-400 leading-tight">
                 {player.credits.toLocaleString()} CR
               </div>
@@ -120,7 +164,7 @@ export function ShopScreen() {
                 type="button"
                 onClick={() => {
                   setTab('buy');
-                  setFeedback(null);
+                  setNotice(null);
                 }}
                 className={`h-9 px-4 inline-flex items-center gap-1.5 rounded text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                   tab === 'buy'
@@ -129,13 +173,13 @@ export function ShopScreen() {
                 }`}
               >
                 <ShoppingBag className="w-3.5 h-3.5" />
-                <span>Buy ({ITEMS_CATALOG.length})</span>
+                <span>{t('shop.tabBuy', { count: ITEMS_CATALOG.length })}</span>
               </button>
               <button
                 type="button"
                 onClick={() => {
                   setTab('sell');
-                  setFeedback(null);
+                  setNotice(null);
                 }}
                 className={`h-9 px-4 inline-flex items-center gap-1.5 rounded text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                   tab === 'sell'
@@ -144,22 +188,22 @@ export function ShopScreen() {
                 }`}
               >
                 <Coins className="w-3.5 h-3.5" />
-                <span>Sell Inventory ({player.inventory.length})</span>
+                <span>{t('shop.tabSell', { count: player.inventory.length })}</span>
               </button>
             </div>
           </div>
         </div>
 
         {/* Inline Transaction Feedback */}
-        {feedback && (
+        {noticeText && (
           <div className="rounded border border-emerald-500/40 bg-emerald-500/10 px-4 py-2.5 flex items-center justify-between gap-3 text-xs text-emerald-200">
-            <span>{feedback}</span>
+            <span>{noticeText}</span>
             <button
               type="button"
               onClick={() => setScreen('HANGAR')}
               className="font-semibold text-amber-300 hover:text-amber-200 cursor-pointer whitespace-nowrap"
             >
-              Equip in Hangar →
+              {t('shop.equipInHangar')}
             </button>
           </div>
         )}
@@ -167,7 +211,9 @@ export function ShopScreen() {
         {/* Filter Controls */}
         <div className="rounded-lg border border-slate-800/90 bg-[#0D131D]/95 p-4 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-slate-400 w-16 shrink-0">Slot</span>
+            <span className="text-xs text-slate-400 w-16 shrink-0">
+              {t('shop.filterSlot')}
+            </span>
             <button
               type="button"
               onClick={() => setSlotFilter('all')}
@@ -177,7 +223,7 @@ export function ShopScreen() {
                   : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
               }`}
             >
-              All Slots
+              {t('shop.allSlots')}
             </button>
             {EQUIPMENT_SLOTS.map((slot) => (
               <button
@@ -190,25 +236,32 @@ export function ShopScreen() {
                     : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
                 }`}
               >
-                {EQUIPMENT_SLOT_META[slot].label}
+                {getSlotLabel(lang, slot)}
               </button>
             ))}
           </div>
 
           {tab === 'buy' && (
             <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800/80">
-              <span className="text-xs text-slate-400 w-16 shrink-0">Class</span>
+              <span className="text-xs text-slate-400 w-16 shrink-0">
+                {t('shop.filterClass')}
+              </span>
               {(
                 [
-                  { id: 'all', label: 'All Classes' },
+                  { id: 'all', label: t('common.allClasses') },
                   {
                     id: 'usable',
-                    label: `Usable Now (${MECH_CLASSES[player.classId].name} Lv.${player.level})`,
+                    label: t('shop.usableNow', {
+                      className: getClassName(lang, player.classId),
+                      level: player.level,
+                    }),
                   },
-                  { id: 'universal', label: 'Universal' },
+                  { id: 'universal', label: t('shop.universal') },
                   ...MECH_CLASS_LIST.map((c) => ({
                     id: c.id as ClassFilter,
-                    label: `${c.name} Locked`,
+                    label: t('shop.classLockedFilter', {
+                      className: getClassName(lang, c.id),
+                    }),
                   })),
                 ] as Array<{ id: ClassFilter; label: string }>
               ).map((opt) => (
@@ -234,7 +287,7 @@ export function ShopScreen() {
           <>
             {filteredCatalog.length === 0 ? (
               <div className="rounded-lg border border-slate-800 bg-[#0D131D]/90 p-10 text-center text-sm text-slate-400">
-                No items match the current slot and class filters.
+                {t('shop.noMatch')}
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
@@ -244,6 +297,7 @@ export function ShopScreen() {
                     player.level,
                     player.classId
                   );
+                  const reasonText = formatEquipValidationReason(lang, validation);
                   const canAfford = player.credits >= item.price;
                   const owned = ownedCountByItemId[item.id] || 0;
                   const bonusList = STAT_KEYS.filter(
@@ -265,45 +319,52 @@ export function ShopScreen() {
                                 RARITY_META[item.rarity].textClass
                               }`}
                             >
-                              {item.name}
+                              {getItemName(lang, item.id)}
                             </h2>
                             <div className="mt-0.5 text-xs text-slate-400">
-                              {EQUIPMENT_SLOT_META[item.slot].label} ·{' '}
-                              {RARITY_META[item.rarity].label} · Lv.
+                              {getSlotLabel(lang, item.slot)} ·{' '}
+                              {getRarityLabel(lang, item.rarity)} ·{' '}
+                              {t('common.levelShort')}
                               <span className="font-mono-nums">
                                 {item.requiredLevel}
                               </span>
+                              {' · '}
                               {item.classRestriction
-                                ? ` · ${MECH_CLASSES[item.classRestriction].name} Only`
-                                : ' · All Classes'}
+                                ? t('common.classOnly', {
+                                    className: getClassName(
+                                      lang,
+                                      item.classRestriction
+                                    ),
+                                  })
+                                : t('common.allClasses')}
                             </div>
                           </div>
 
                           {owned > 0 && (
                             <span className="font-mono-nums text-xs text-slate-400 shrink-0">
-                              Owned: {owned}
+                              {t('common.owned', { count: owned })}
                             </span>
                           )}
                         </div>
 
                         <p className="text-xs text-slate-400 leading-relaxed">
-                          {item.description}
+                          {getItemDesc(lang, item.id)}
                         </p>
 
-                        {/* Stat Bonuses */}
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-xs font-mono-nums text-emerald-400 font-semibold">
                           {bonusList.map((key) => (
                             <span key={key}>
-                              +{item.statBonuses[key]} {STAT_META[key].shortLabel}
+                              +{item.statBonuses[key]} {getStatShort(lang, key)}
                             </span>
                           ))}
                         </div>
 
-                        {/* Cannot Equip Warning */}
-                        {!validation.canEquip && validation.reason && (
+                        {!validation.canEquip && reasonText && (
                           <div className="flex items-center gap-1.5 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded px-2.5 py-1.5">
                             <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                            <span>Cannot equip now: {validation.reason}</span>
+                            <span>
+                              {t('shop.cannotEquipNow', { reason: reasonText })}
+                            </span>
                           </div>
                         )}
                       </div>
@@ -319,12 +380,10 @@ export function ShopScreen() {
                         <button
                           type="button"
                           disabled={!canAfford}
-                          onClick={() =>
-                            handleBuy(item.id, item.name, item.price)
-                          }
+                          onClick={() => handleBuy(item.id, item.price)}
                           className="h-10 px-4 rounded bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-slate-950 font-semibold text-xs transition-colors cursor-pointer whitespace-nowrap"
                         >
-                          {canAfford ? 'Buy Item' : 'Insufficient CR'}
+                          {canAfford ? t('shop.buyBtn') : t('shop.insufficientCr')}
                         </button>
                       </div>
                     </div>
@@ -341,8 +400,8 @@ export function ShopScreen() {
             {filteredSellInventory.length === 0 ? (
               <div className="py-10 text-center text-sm text-slate-400">
                 {player.inventory.length === 0
-                  ? 'No unequipped items in inventory to sell. Unequip gear in the Hangar first if you wish to sell it.'
-                  : 'No inventory items in the selected slot filter.'}
+                  ? t('shop.sellEmpty')
+                  : t('shop.sellEmptyFilter')}
               </div>
             ) : (
               <div className="divide-y divide-slate-800/80">
@@ -354,10 +413,11 @@ export function ShopScreen() {
                     inst.itemId,
                     inst.enchantLevel
                   );
+                  const baseName = getItemName(lang, def.id);
                   const displayName =
                     inst.enchantLevel > 0
-                      ? `${def.name} +${inst.enchantLevel}`
-                      : def.name;
+                      ? `${baseName} +${inst.enchantLevel}`
+                      : baseName;
 
                   return (
                     <div
@@ -374,18 +434,24 @@ export function ShopScreen() {
                             {displayName}
                           </span>
                           <span className="text-xs text-slate-400">
-                            {EQUIPMENT_SLOT_META[def.slot].label} ·{' '}
-                            {RARITY_META[def.rarity].label} · Lv.
+                            {getSlotLabel(lang, def.slot)} ·{' '}
+                            {getRarityLabel(lang, def.rarity)} ·{' '}
+                            {t('common.levelShort')}
                             {def.requiredLevel}
                             {def.classRestriction
-                              ? ` · ${MECH_CLASSES[def.classRestriction].name} Only`
+                              ? ` · ${t('common.classOnly', {
+                                  className: getClassName(
+                                    lang,
+                                    def.classRestriction
+                                  ),
+                                })}`
                               : ''}
                           </span>
                         </div>
                         <div className="flex flex-wrap items-center gap-x-3 text-xs font-mono-nums text-slate-300">
                           {STAT_KEYS.filter((k) => effStats[k] > 0).map((k) => (
                             <span key={k}>
-                              +{effStats[k]} {STAT_META[k].shortLabel}
+                              +{effStats[k]} {getStatShort(lang, k)}
                             </span>
                           ))}
                         </div>
@@ -397,16 +463,24 @@ export function ShopScreen() {
                             +{sellPrice.toLocaleString()} CR
                           </div>
                           <div className="text-[11px] text-slate-500">
-                            40% of {def.price.toLocaleString()} CR
+                            {t('shop.sellRatioNote', {
+                              price: def.price.toLocaleString(),
+                            })}
                           </div>
                         </div>
 
                         <button
                           type="button"
-                          onClick={() => handleSell(inst.instanceId, displayName)}
+                          onClick={() =>
+                            handleSell(
+                              inst.instanceId,
+                              inst.itemId,
+                              inst.enchantLevel
+                            )
+                          }
                           className="h-10 px-4 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold text-xs transition-colors cursor-pointer whitespace-nowrap"
                         >
-                          Sell
+                          {t('shop.sellBtn')}
                         </button>
                       </div>
                     </div>

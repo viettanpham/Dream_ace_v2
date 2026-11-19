@@ -4,8 +4,8 @@ import {
   Minus,
   Package,
   Plus,
+  Rocket,
   RotateCcw,
-  Swords,
   Wrench,
   X,
 } from 'lucide-react';
@@ -14,7 +14,6 @@ import {
   MECH_CLASSES,
   MECH_CLASS_LIST,
   STAT_KEYS,
-  STAT_META,
 } from '../data/classes';
 import { EQUIPMENT_SLOTS } from '../data/items';
 import { SECTORS_CATALOG } from '../data/maps';
@@ -30,6 +29,23 @@ import {
   getExpForNextLevel,
   getTotalSpentPoints,
 } from '../engine/stats';
+import {
+  getClassCode,
+  getClassDesc,
+  getClassName,
+  getClassRole,
+  getDifficultyLabel,
+  getItemName,
+  getSectorDesc,
+  getSectorName,
+  getSectorRegion,
+  getSkillDesc,
+  getSkillName,
+  getSkillTargetLabel,
+  getStatDesc,
+  getStatLabel,
+  useI18n,
+} from '../i18n';
 import { useGameStore } from '../store/useGameStore';
 import type { MechClassId, StatBlock, StatKey } from '../types/game';
 import { soundFx } from '../utils/sound';
@@ -37,14 +53,15 @@ import {
   EquipmentPanel,
   type EquipmentPreviewChange,
 } from './EquipmentPanel';
-import { MechSvg } from './MechSvg';
+import { FighterSvg } from './FighterSvg';
 
 type HangarLeftTab = 'chassis' | 'equipment';
 
 export function HangarScreen() {
+  const { lang, t } = useI18n();
   const player = useGameStore((s) => s.player);
   const selectedSectorId = useGameStore((s) => s.selectedSectorId);
-  const hangarNotice = useGameStore((s) => s.hangarNotice);
+  const unequippedNoticeItems = useGameStore((s) => s.unequippedNoticeItems);
   const clearHangarNotice = useGameStore((s) => s.clearHangarNotice);
   const setPilotName = useGameStore((s) => s.setPilotName);
   const switchClass = useGameStore((s) => s.switchClass);
@@ -53,7 +70,7 @@ export function HangarScreen() {
   const selectSector = useGameStore((s) => s.selectSector);
   const startBattle = useGameStore((s) => s.startBattle);
 
-  const [leftTab, setLeftTab] = useState<HangarLeftTab>('equipment');
+  const [leftTab, setLeftTab] = useState<HangarLeftTab>('chassis');
   const [pending, setPending] = useState<StatBlock>({ ...EMPTY_STAT_BLOCK });
   const [equipPreview, setEquipPreview] =
     useState<EquipmentPreviewChange>(null);
@@ -76,13 +93,11 @@ export function HangarScreen() {
     [player.equipped]
   );
 
-  // Current equipped flat bonuses
   const currentEquipBonuses = useMemo(
     () => sumEquippedStatBonuses(player.equipped),
     [player.equipped]
   );
 
-  // Simulated equipped flat bonuses when previewing equip/unequip
   const previewEquipBonuses = useMemo(() => {
     if (!equipPreview) return currentEquipBonuses;
     const simulated = simulateEquippedChange(player.equipped, equipPreview);
@@ -179,38 +194,38 @@ export function HangarScreen() {
     accent?: string;
   }> = [
     {
-      label: 'Max HP',
+      label: t('derived.maxHp'),
       current: currentDerived.maxHp,
       preview: previewDerived.maxHp,
       accent: 'text-emerald-400',
     },
     {
-      label: 'Max Shield',
+      label: t('derived.maxShield'),
       current: currentDerived.maxShield,
       preview: previewDerived.maxShield,
       accent: 'text-sky-400',
     },
     {
-      label: 'Max SP',
+      label: t('derived.maxSp'),
       current: currentDerived.maxSp,
       preview: previewDerived.maxSp,
       accent: 'text-amber-400',
     },
     {
-      label: 'Turn Speed',
+      label: t('derived.speed'),
       current: currentDerived.speed,
       preview: previewDerived.speed,
       accent: 'text-slate-100',
     },
     {
-      label: 'Dodge',
+      label: t('derived.dodge'),
       current: currentDerived.dodgeChance,
       preview: previewDerived.dodgeChance,
       suffix: '%',
       accent: 'text-slate-100',
     },
     {
-      label: 'Critical',
+      label: t('derived.crit'),
       current: currentDerived.critChance,
       preview: previewDerived.critChance,
       suffix: '%',
@@ -218,25 +233,34 @@ export function HangarScreen() {
     },
   ];
 
+  const unequippedNoticeText =
+    unequippedNoticeItems.length > 0
+      ? t('hangar.noticeUnequipped', {
+          items: unequippedNoticeItems
+            .map((it) => {
+              const nm = getItemName(lang, it.itemId);
+              return it.enchantLevel > 0 ? `${nm} +${it.enchantLevel}` : nm;
+            })
+            .join(', '),
+        })
+      : null;
+
   return (
     <div className="flex-1 min-h-0 overflow-y-auto bg-tactical-grid">
       <div className="mx-auto max-w-[1400px] px-4 sm:px-6 py-5 grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* LEFT COLUMN (7 cols): Class Switcher + Equipment/Enchant OR Chassis/Sectors */}
+        {/* LEFT COLUMN (7 cols): Class Switcher + Fighter Bay / Equipment & Enchant */}
         <section className="lg:col-span-7 flex flex-col gap-4">
-          {/* Class Switcher & Workspace Tabs */}
           <div className="rounded-lg border border-slate-800/90 bg-[#0D131D]/95 p-4 space-y-3.5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h1 className="font-display text-2xl font-bold tracking-wide text-slate-100">
-                  Mech Hangar
+                  {t('hangar.title')}
                 </h1>
-                <p className="text-xs text-slate-400">
-                  Switch class anytime to test builds; class-locked Armor & Engine unequip automatically.
-                </p>
+                <p className="text-xs text-slate-400">{t('hangar.subtitle')}</p>
               </div>
               <div className="flex items-center gap-2">
                 <label htmlFor="pilot-name-input" className="text-xs text-slate-400">
-                  Callsign
+                  {t('hangar.callsign')}
                 </label>
                 <input
                   id="pilot-name-input"
@@ -244,17 +268,17 @@ export function HangarScreen() {
                   value={player.name}
                   onChange={(e) => setPilotName(e.target.value)}
                   maxLength={18}
-                  placeholder="Pilot Name"
+                  placeholder={t('hangar.callsignPlaceholder')}
                   className="h-9 w-36 rounded border border-slate-700 bg-slate-950/90 px-2.5 text-xs font-medium text-slate-100 focus:border-amber-400 focus:outline-none"
                 />
               </div>
             </div>
 
-            {/* 4 Class Segmented Buttons */}
+            {/* 4 Fighter Gear Class Tabs */}
             <div
               className="grid grid-cols-2 sm:grid-cols-4 gap-2"
               role="tablist"
-              aria-label="Mech Classes"
+              aria-label="Gear Classes"
             >
               {MECH_CLASS_LIST.map((cls) => {
                 const isSelected = cls.id === player.classId;
@@ -272,10 +296,10 @@ export function HangarScreen() {
                     }`}
                   >
                     <span className="font-display text-base font-semibold leading-none tracking-wide">
-                      {cls.name}
+                      {getClassName(lang, cls.id)}
                     </span>
                     <span className="text-[11px] text-slate-400 truncate mt-0.5">
-                      {cls.role}
+                      {getClassRole(lang, cls.id)}
                     </span>
                   </button>
                 );
@@ -283,11 +307,11 @@ export function HangarScreen() {
             </div>
 
             {/* Inline Class-Switch Notice */}
-            {hangarNotice && (
+            {unequippedNoticeText && (
               <div className="rounded border border-sky-500/40 bg-sky-500/10 px-3 py-2 flex items-center justify-between gap-2 text-xs text-sky-200">
                 <div className="flex items-center gap-2">
                   <Info className="w-4 h-4 shrink-0 text-sky-400" />
-                  <span>{hangarNotice}</span>
+                  <span>{unequippedNoticeText}</span>
                 </div>
                 <button
                   type="button"
@@ -300,8 +324,24 @@ export function HangarScreen() {
               </div>
             )}
 
-            {/* Sub-View Switcher: Equipment & Enchant vs Chassis & Sectors */}
-            <div className="flex items-center gap-2 pt-2 border-t border-slate-800/70">
+            {/* Sub-View Switcher */}
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800/70">
+              <button
+                type="button"
+                onClick={() => {
+                  soundFx.playClick();
+                  setLeftTab('chassis');
+                }}
+                className={`h-9 px-3.5 inline-flex items-center gap-1.5 rounded text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                  leftTab === 'chassis'
+                    ? 'bg-slate-800 border border-amber-400/70 text-slate-50'
+                    : 'bg-slate-900/70 border border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Wrench className="w-3.5 h-3.5 text-sky-400" />
+                <span>{t('hangar.tab.chassis')}</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => {
@@ -316,29 +356,16 @@ export function HangarScreen() {
               >
                 <Package className="w-3.5 h-3.5 text-amber-400" />
                 <span>
-                  Equipment & Enchant ({equippedCount}/6 · {player.inventory.length} Bag)
+                  {t('hangar.tab.equipment', {
+                    equipped: equippedCount,
+                    bag: player.inventory.length,
+                  })}
                 </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  soundFx.playClick();
-                  setLeftTab('chassis');
-                }}
-                className={`h-9 px-3.5 inline-flex items-center gap-1.5 rounded text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                  leftTab === 'chassis'
-                    ? 'bg-slate-800 border border-amber-400/70 text-slate-50'
-                    : 'bg-slate-900/70 border border-slate-800 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Wrench className="w-3.5 h-3.5 text-sky-400" />
-                <span>Chassis & Combat Sectors</span>
               </button>
             </div>
           </div>
 
-          {/* LEFT TAB CONTENT: EQUIPMENT & ENCHANT */}
+          {/* LEFT TAB: EQUIPMENT & ENCHANT */}
           {leftTab === 'equipment' && (
             <div className="rounded-lg border border-slate-800/90 bg-[#0D131D]/95 p-4">
               <EquipmentPanel
@@ -349,21 +376,23 @@ export function HangarScreen() {
             </div>
           )}
 
-          {/* LEFT TAB CONTENT: CHASSIS VIEWER & SECTORS */}
+          {/* LEFT TAB: FIGHTER BAY & SECTORS */}
           {leftTab === 'chassis' && (
             <>
               <div className="rounded-lg border border-slate-800/90 bg-[#0D131D]/95 p-4">
                 <div className="grid grid-cols-1 sm:grid-cols-12 gap-5 items-center">
-                  <div className="sm:col-span-5 flex flex-col items-center justify-center py-3 rounded bg-[#080C12]/80 border border-slate-800/70">
-                    <MechSvg
+                  <div className="sm:col-span-5 relative flex flex-col items-center justify-center py-4 rounded bg-[#070B12]/90 border border-slate-800/70 overflow-hidden">
+                    <div className="pointer-events-none absolute inset-6 rounded-full bg-sky-500/10 blur-2xl" />
+                    <FighterSvg
                       classId={player.classId}
                       side="ally"
                       facing="right"
                       size="lg"
+                      heroHover
                       className="w-44 h-44 sm:w-48 sm:h-48"
                     />
                     <div className="mt-1 font-mono-nums text-xs text-slate-400">
-                      {activeClass.chassisCode}
+                      {getClassCode(lang, player.classId)}
                     </div>
                   </div>
 
@@ -371,24 +400,35 @@ export function HangarScreen() {
                     <div>
                       <div className="flex items-baseline justify-between gap-2">
                         <h2 className="font-display text-2xl font-bold text-slate-50">
-                          {activeClass.name} Frame
+                          {t('hangar.frameTitle', {
+                            className: getClassName(lang, player.classId),
+                          })}
                         </h2>
                         <span className="text-xs text-slate-400">
-                          {activeClass.role}
+                          {getClassRole(lang, player.classId)}
                         </span>
                       </div>
                       <p className="mt-1.5 text-sm text-slate-300 leading-relaxed">
-                        {activeClass.description}
+                        {getClassDesc(lang, player.classId)}
                       </p>
                     </div>
 
                     <div className="space-y-1.5 pt-2 border-t border-slate-800/80">
                       <div className="flex items-center justify-between text-xs">
                         <span className="text-slate-400">
-                          Level <strong className="font-mono-nums text-amber-400">{player.level}</strong>
+                          {t('common.level')}{' '}
+                          <strong className="font-mono-nums text-amber-400">
+                            {player.level}
+                          </strong>
                           {' · '}
-                          Wins <strong className="font-mono-nums text-slate-200">{player.battlesWon}</strong>/
-                          <span className="font-mono-nums">{player.battlesFought}</span>
+                          {t('common.wins')}{' '}
+                          <strong className="font-mono-nums text-slate-200">
+                            {player.battlesWon}
+                          </strong>
+                          /
+                          <span className="font-mono-nums">
+                            {player.battlesFought}
+                          </span>
                         </span>
                         <span className="font-mono-nums text-slate-400">
                           {player.exp} / {expNeeded} EXP
@@ -405,21 +445,21 @@ export function HangarScreen() {
                     <div className="pt-2 border-t border-slate-800/80 space-y-1">
                       <div className="flex items-center justify-between gap-2 text-xs">
                         <span className="font-semibold text-slate-100">
-                          Signature Skill: {signatureSkill.name}
+                          {t('hangar.signatureSkill', {
+                            skillName: getSkillName(lang, signatureSkill.id),
+                          })}
                         </span>
                         <span className="font-mono-nums text-amber-400">
                           {signatureSkill.spCost} SP ·{' '}
-                          {signatureSkill.targetType === 'all_enemies'
-                            ? 'All Enemies'
-                            : signatureSkill.targetType === 'all_allies'
-                            ? 'All Allies'
-                            : signatureSkill.hits > 1
-                            ? `Single (${signatureSkill.hits}x)`
-                            : 'Single Target'}
+                          {getSkillTargetLabel(
+                            lang,
+                            signatureSkill.targetType,
+                            signatureSkill.hits
+                          )}
                         </span>
                       </div>
                       <p className="text-xs text-slate-400 leading-relaxed">
-                        {signatureSkill.description}
+                        {getSkillDesc(lang, signatureSkill.id)}
                       </p>
                     </div>
                   </div>
@@ -430,10 +470,10 @@ export function HangarScreen() {
               <div className="rounded-lg border border-slate-800/90 bg-[#0D131D]/95 p-4 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h2 className="font-display text-xl font-bold tracking-wide text-slate-100">
-                    Combat Sortie Sector
+                    {t('hangar.sectorTitle')}
                   </h2>
                   <span className="text-xs text-slate-400">
-                    Higher difficulty improves loot drop & rarity odds
+                    {t('hangar.sectorSubtitle')}
                   </span>
                 </div>
 
@@ -454,7 +494,7 @@ export function HangarScreen() {
                       >
                         <div>
                           <div className="flex items-center justify-between gap-2 text-xs text-slate-400">
-                            <span>{sector.regionCode}</span>
+                            <span>{getSectorRegion(lang, sector.id)}</span>
                             <span
                               className={
                                 sector.difficulty === 'Elite'
@@ -464,18 +504,20 @@ export function HangarScreen() {
                                   : 'text-emerald-400 font-medium'
                               }
                             >
-                              {sector.difficulty}
+                              {getDifficultyLabel(lang, sector.difficulty)}
                             </span>
                           </div>
                           <div className="mt-1 font-display text-lg font-semibold text-slate-100 leading-tight">
-                            {sector.name}
+                            {getSectorName(lang, sector.id)}
                           </div>
                           <p className="mt-1 text-xs text-slate-400 leading-snug">
-                            {sector.description}
+                            {getSectorDesc(lang, sector.id)}
                           </p>
                         </div>
                         <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] font-mono-nums text-slate-300">
-                          <span>Hostiles ~Lv.{enemyLvl}</span>
+                          <span>
+                            {t('hangar.hostilesLevel', { level: enemyLvl })}
+                          </span>
                           <span className="text-amber-400">
                             {sector.expMultiplier}x EXP · {sector.creditsMultiplier}x CR
                           </span>
@@ -495,14 +537,18 @@ export function HangarScreen() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="font-display text-2xl font-bold tracking-wide text-slate-100">
-                  Stat Allocation & Readout
+                  {t('hangar.statTitle')}
                 </h2>
                 <p className="text-xs text-slate-400">
-                  +{PROGRESSION_CONFIG.statPointsPerLevel} pts/level · Includes equipped flat bonuses
+                  {t('hangar.statSubtitle', {
+                    perLevel: PROGRESSION_CONFIG.statPointsPerLevel,
+                  })}
                 </p>
               </div>
               <div className="text-right">
-                <div className="text-xs text-slate-400">Available Points</div>
+                <div className="text-xs text-slate-400">
+                  {t('hangar.availablePts')}
+                </div>
                 <div className="font-mono-nums text-2xl font-bold leading-none mt-0.5 text-emerald-400">
                   {remainingPoints}
                   {pendingSpent > 0 && (
@@ -517,7 +563,6 @@ export function HangarScreen() {
             {/* 6 Core Stats Table */}
             <div className="divide-y divide-slate-800/80 border-y border-slate-800/80">
               {STAT_KEYS.map((key) => {
-                const meta = STAT_META[key];
                 const gainPerPt = activeClass.perPointGain[key];
                 const committedPts = player.allocatedPoints[key] || 0;
                 const pendingPts = pending[key] || 0;
@@ -534,29 +579,28 @@ export function HangarScreen() {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-baseline gap-1.5">
                         <span className="font-semibold text-sm text-slate-100">
-                          {meta.label}
+                          {getStatLabel(lang, key)}
                         </span>
                         <span className="font-mono-nums text-xs text-amber-400/90">
-                          +{gainPerPt}/pt
+                          {t('hangar.perPt', { gain: gainPerPt })}
                         </span>
                         {gearBonus > 0 && (
                           <span className="font-mono-nums text-[11px] text-sky-400">
-                            (+{gearBonus} gear)
+                            {t('hangar.gearBonus', { bonus: gearBonus })}
                           </span>
                         )}
                         {committedPts > 0 && (
                           <span className="font-mono-nums text-[11px] text-slate-500">
-                            · {committedPts}pt
+                            {t('hangar.spentPt', { pts: committedPts })}
                           </span>
                         )}
                       </div>
                       <div className="text-[11px] text-slate-400 truncate">
-                        {meta.effectSummary}
+                        {getStatDesc(lang, key)}
                       </div>
                     </div>
 
                     <div className="flex items-center gap-3 shrink-0">
-                      {/* Stat Value & Live Preview Green/Red Delta */}
                       <div className="text-right min-w-[78px]">
                         <span
                           className={`font-mono-nums text-base font-bold ${
@@ -580,13 +624,12 @@ export function HangarScreen() {
                         )}
                       </div>
 
-                      {/* Stepper Controls (>= 40px touch target) */}
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
                           onClick={() => adjustPending(key, -1)}
                           disabled={pendingPts <= 0}
-                          aria-label={`Remove pending point from ${meta.label}`}
+                          aria-label={`-1 ${getStatLabel(lang, key)}`}
                           className="h-10 w-10 flex items-center justify-center rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed text-slate-200 transition-colors cursor-pointer"
                         >
                           <Minus className="w-4 h-4" />
@@ -598,7 +641,7 @@ export function HangarScreen() {
                           type="button"
                           onClick={() => adjustPending(key, 1)}
                           disabled={remainingPoints <= 0}
-                          aria-label={`Add point to ${meta.label}`}
+                          aria-label={`+1 ${getStatLabel(lang, key)}`}
                           className="h-10 w-10 flex items-center justify-center rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 hover:border-amber-400/70 disabled:opacity-30 disabled:cursor-not-allowed text-slate-100 transition-colors cursor-pointer"
                         >
                           <Plus className="w-4 h-4" />
@@ -610,13 +653,13 @@ export function HangarScreen() {
               })}
             </div>
 
-            {/* Derived Combat Metrics Live Preview Grid (green/red deltas) */}
+            {/* Derived Flight Telemetry Live Preview Grid */}
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>Derived Combat Readout</span>
+                <span>{t('hangar.derivedTitle')}</span>
                 {hasAnyPreview && (
                   <span className="text-amber-300 font-medium">
-                    Live Preview Active
+                    {t('hangar.livePreview')}
                   </span>
                 )}
               </div>
@@ -662,7 +705,7 @@ export function HangarScreen() {
             </div>
           </div>
 
-          {/* Allocation Action Buttons + Primary Battle Launch */}
+          {/* Allocation Action Buttons + Launch */}
           <div className="space-y-2.5 pt-2 border-t border-slate-800/80">
             <div className="flex items-center gap-2">
               <button
@@ -671,7 +714,9 @@ export function HangarScreen() {
                 disabled={pendingSpent <= 0}
                 className="flex-1 h-10 px-4 rounded bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-semibold text-xs transition-colors cursor-pointer whitespace-nowrap"
               >
-                Confirm Allocation {pendingSpent > 0 ? `(${pendingSpent})` : ''}
+                {pendingSpent > 0
+                  ? t('hangar.confirmAllocCount', { count: pendingSpent })
+                  : t('hangar.confirmAlloc')}
               </button>
               <button
                 type="button"
@@ -679,17 +724,17 @@ export function HangarScreen() {
                 disabled={pendingSpent <= 0}
                 className="h-10 px-3 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-35 disabled:cursor-not-allowed text-slate-300 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap"
               >
-                Clear
+                {t('common.clear')}
               </button>
               <button
                 type="button"
                 onClick={handleResetAll}
                 disabled={totalCommittedSpent === 0}
-                title="Refund all spent stat points"
+                title={t('hangar.respecTitle')}
                 className="h-10 px-3 inline-flex items-center gap-1.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-35 disabled:cursor-not-allowed text-slate-300 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                <span>Respec</span>
+                <span>{t('hangar.respec')}</span>
               </button>
             </div>
 
@@ -698,8 +743,8 @@ export function HangarScreen() {
               onClick={() => startBattle()}
               className="w-full h-12 px-5 inline-flex items-center justify-center gap-2 rounded bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-semibold text-sm tracking-wide transition-colors cursor-pointer whitespace-nowrap"
             >
-              <Swords className="w-4 h-4" />
-              <span>Deploy Squadron to Battle</span>
+              <Rocket className="w-4 h-4" />
+              <span>{t('hangar.deploySquad')}</span>
             </button>
           </div>
         </section>

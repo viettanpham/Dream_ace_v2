@@ -3,9 +3,9 @@ import type { SkillDefinition } from '../types/game';
 export const SKILLS_CATALOG: Record<string, SkillDefinition> = {
   overdrive_barrage: {
     id: 'overdrive_barrage',
-    name: 'Overdrive Barrage',
+    name: 'Carpet Bomb Salvo',
     description:
-      'Focused twin-cannon burst dealing heavy damage and piercing 35% of target Defense.',
+      'Releases heavy armor-piercing wing bombs dealing massive damage and bypassing 35% of target Defense.',
     spCost: 14,
     targetType: 'single_enemy',
     powerMultiplier: 1.75,
@@ -17,9 +17,9 @@ export const SKILLS_CATALOG: Record<string, SkillDefinition> = {
   },
   phantom_volley: {
     id: 'phantom_volley',
-    name: 'Phantom Volley',
+    name: 'Twin Laser Strafe',
     description:
-      'High-velocity twin strike with +25% critical chance, punishing exposed light and medium hulls.',
+      'High-velocity twin strafing run with +25% critical chance, shredding exposed fighters and drones.',
     spCost: 14,
     targetType: 'single_enemy',
     powerMultiplier: 0.92,
@@ -31,9 +31,9 @@ export const SKILLS_CATALOG: Record<string, SkillDefinition> = {
   },
   orbital_railcannon: {
     id: 'orbital_railcannon',
-    name: 'Railcannon Salvo',
+    name: 'Spinal Railcannon',
     description:
-      'Sweeping electromagnetic barrage that strikes every hostile mech on the field.',
+      'Fires a sweeping spinal railgun beam that strikes every hostile craft in the sector.',
     spCost: 18,
     targetType: 'all_enemies',
     powerMultiplier: 1.05,
@@ -45,9 +45,9 @@ export const SKILLS_CATALOG: Record<string, SkillDefinition> = {
   },
   aegis_pulse: {
     id: 'aegis_pulse',
-    name: 'Aegis Pulse',
+    name: 'Aegis Repair Beam',
     description:
-      'Projects a squad-wide energy surge restoring Shield integrity and repairing hull HP for all living allies.',
+      'Projects a wide repair & shield pulse from side pods, restoring Shield and Hull HP for all allied fighters.',
     spCost: 16,
     targetType: 'all_allies',
     powerMultiplier: 0,

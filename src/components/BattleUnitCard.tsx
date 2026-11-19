@@ -1,13 +1,14 @@
 import { Shield } from 'lucide-react';
-import { MECH_CLASSES } from '../data/classes';
+import { getClassName, useI18n } from '../i18n';
 import type { CombatUnit, FloatingPopup } from '../types/game';
-import { MechSvg } from './MechSvg';
+import { FighterSvg } from './FighterSvg';
 
 interface BattleUnitCardProps {
   unit: CombatUnit;
   isActiveTurn: boolean;
   isTargeted: boolean;
   canTarget: boolean;
+  exploding: boolean;
   popups: FloatingPopup[];
   onSelect?: () => void;
 }
@@ -51,10 +52,11 @@ export function BattleUnitCard({
   isActiveTurn,
   isTargeted,
   canTarget,
+  exploding,
   popups,
   onSelect,
 }: BattleUnitCardProps) {
-  const cls = MECH_CLASSES[unit.classId];
+  const { lang, t } = useI18n();
   const hpRatio = Math.max(0, Math.min(1, unit.hp / unit.derived.maxHp));
   const shieldRatio =
     unit.derived.maxShield > 0
@@ -74,19 +76,19 @@ export function BattleUnitCard({
       : 'bg-emerald-500';
 
   const statusLabel = !unit.alive
-    ? 'DESTROYED'
+    ? t('battle.status.destroyed')
     : isActiveTurn
-    ? 'ACTIVE TURN'
+    ? t('battle.status.active')
     : unit.isDefending
-    ? 'DEFENDING'
+    ? t('battle.status.defending')
     : isTargeted
-    ? 'TARGETED'
+    ? t('battle.status.targeted')
     : unit.isPlayer
-    ? 'PLAYER'
-    : 'STANDBY';
+    ? t('battle.status.player')
+    : t('battle.status.standby');
 
   const cardBorder = !unit.alive
-    ? 'border-slate-800/60 bg-[#0A0E15]/60 opacity-50'
+    ? 'border-slate-800/60 bg-[#080C12]/60 opacity-55'
     : isActiveTurn
     ? 'border-amber-400 bg-[#141D2C] shadow-[0_0_0_1px_rgba(251,191,36,0.35)]'
     : isTargeted
@@ -133,21 +135,22 @@ export function BattleUnitCard({
           isEnemy ? 'flex-row-reverse text-right' : 'flex-row text-left'
         }`}
       >
-        {/* Mech Sprite */}
+        {/* Space Fighter / Drone Sprite */}
         <div className="relative shrink-0">
-          <MechSvg
+          <FighterSvg
             classId={unit.classId}
             side={unit.side}
             facing={isEnemy ? 'left' : 'right'}
             size="md"
             destroyed={!unit.alive}
             defending={unit.isDefending}
+            impactFlash={unit.animState === 'hit'}
+            exploding={exploding}
           />
         </div>
 
         {/* Unit Info & Animated Bars */}
         <div className="flex-1 min-w-0 space-y-2">
-          {/* Header Row */}
           <div
             className={`flex items-baseline justify-between gap-2 ${
               isEnemy ? 'flex-row-reverse' : 'flex-row'
@@ -158,7 +161,8 @@ export function BattleUnitCard({
                 {unit.name}
               </div>
               <div className="mt-0.5 text-[11px] text-slate-400 truncate">
-                {cls.name} · Lv.<span className="font-mono-nums">{unit.level}</span> · SPD{' '}
+                {getClassName(lang, unit.classId)} · {t('common.levelShort')}
+                <span className="font-mono-nums">{unit.level}</span> · SPD{' '}
                 <span className="font-mono-nums text-slate-300">
                   {unit.derived.speed}
                 </span>
@@ -185,7 +189,7 @@ export function BattleUnitCard({
             </div>
           </div>
 
-          {/* HP Bar with CSS animated trail */}
+          {/* HP Bar */}
           <div className="space-y-1">
             <div className="flex items-center justify-between text-[11px] font-mono-nums">
               <span className="text-slate-400">HP</span>

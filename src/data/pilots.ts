@@ -34,7 +34,7 @@ export const ALLY_PILOT_POOL: PilotNamePool = {
     'Zenith-3',
     'Aegis-2',
     'Falcon-4',
-    'Bastion-5',
+    'Starwing-5',
   ],
 };
 
@@ -43,12 +43,15 @@ export interface EnemyArchetypeConfig {
   suffixByClass: Record<MechClassId, string[]>;
 }
 
+/**
+ * Enemy starfighter raiders and alien drones (no humanoid robots).
+ */
 export const ENEMY_ARCHETYPES: EnemyArchetypeConfig = {
-  prefix: ['Iron', 'Crimson', 'Obsidian', 'Dread', 'Vanguard', 'Phantom', 'Void', 'Apex'],
+  prefix: ['Void', 'Crimson', 'Obsidian', 'Dread', 'Nebula', 'Phantom', 'Solar', 'Xeno'],
   suffixByClass: {
-    striker: ['Raider', 'Lancer', 'Trooper'],
-    interceptor: ['Wasp', 'Stalker', 'Raptor'],
-    siege: ['Goliath', 'Howitzer', 'Behemoth'],
-    support: ['Warden', 'Conduit', 'Relayer'],
+    striker: ['Bomber', 'Corsair', 'Raider-Wing'],
+    interceptor: ['Dart-Drone', 'Wasp-Fighter', 'Stalker-Craft'],
+    siege: ['Gunship', 'Corvette', 'Dread-Cruiser'],
+    support: ['Relay-Drone', 'Swarm-Probe', 'Aegis-Pod'],
   },
 };

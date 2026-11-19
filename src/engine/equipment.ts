@@ -1,4 +1,4 @@
-import { EMPTY_STAT_BLOCK, MECH_CLASSES, STAT_KEYS } from '../data/classes';
+import { EMPTY_STAT_BLOCK, STAT_KEYS } from '../data/classes';
 import {
   DROP_CONFIG,
   EMPTY_EQUIPPED_ITEMS,
@@ -86,31 +86,30 @@ export function sumEquippedStatBonuses(
 }
 
 /**
- * Validates whether a player of given level and class can equip an item.
+ * Validates whether a pilot of given level and Gear class can equip a ship part.
  */
 export function validateEquipRequirement(
   def: ItemDefinition,
   playerLevel: number,
   playerClassId: MechClassId
 ): EquipValidationResult {
-  const reasons: string[] = [];
+  const missingLevel =
+    playerLevel < def.requiredLevel ? def.requiredLevel : null;
+  const requiredClass =
+    def.classRestriction && def.classRestriction !== playerClassId
+      ? def.classRestriction
+      : null;
 
-  if (playerLevel < def.requiredLevel) {
-    reasons.push(`Requires Lv.${def.requiredLevel}`);
-  }
-  if (def.classRestriction && def.classRestriction !== playerClassId) {
-    reasons.push(`${MECH_CLASSES[def.classRestriction].name} class only`);
-  }
-
-  if (reasons.length > 0) {
-    return { canEquip: false, reason: reasons.join(' · ') };
-  }
-  return { canEquip: true, reason: null };
+  return {
+    canEquip: missingLevel === null && requiredClass === null,
+    missingLevel,
+    requiredClass,
+  };
 }
 
 /**
- * Unequips any class-locked items that do not match the newly selected class
- * and returns them safely to the inventory.
+ * Unequips any class-locked parts (Hull Plating / Thrusters) incompatible
+ * with the newly selected Gear class and returns them safely to inventory.
  */
 export function unequipIncompatibleForClass(
   equipped: EquippedItems,
@@ -119,11 +118,11 @@ export function unequipIncompatibleForClass(
 ): {
   equipped: EquippedItems;
   inventory: ItemInstance[];
-  unequippedNames: string[];
+  unequippedItems: Array<{ itemId: string; enchantLevel: number }>;
 } {
   const nextEquipped: EquippedItems = { ...EMPTY_EQUIPPED_ITEMS, ...equipped };
   const nextInventory = [...inventory];
-  const unequippedNames: string[] = [];
+  const unequippedItems: Array<{ itemId: string; enchantLevel: number }> = [];
 
   for (const slot of EQUIPMENT_SLOTS) {
     const inst = nextEquipped[slot];
@@ -134,16 +133,17 @@ export function unequipIncompatibleForClass(
     if (def.classRestriction && def.classRestriction !== nextClassId) {
       nextEquipped[slot] = null;
       nextInventory.push(inst);
-      unequippedNames.push(
-        inst.enchantLevel > 0 ? `${def.name} +${inst.enchantLevel}` : def.name
-      );
+      unequippedItems.push({
+        itemId: inst.itemId,
+        enchantLevel: inst.enchantLevel,
+      });
     }
   }
 
   return {
     equipped: nextEquipped,
     inventory: nextInventory,
-    unequippedNames,
+    unequippedItems,
   };
 }
 
@@ -155,7 +155,7 @@ export function getSellPrice(def: ItemDefinition): number {
 }
 
 /**
- * Calculates enchant cost & success rate for an equipped item instance.
+ * Calculates enchant cost & success rate for an equipped ship part.
  */
 export function getEnchantMetadata(instance: ItemInstance): {
   currentLevel: number;
@@ -199,7 +199,7 @@ export function getEnchantMetadata(instance: ItemInstance): {
 }
 
 /**
- * Executes an enchant roll (+0 to +10). On failure, item remains unchanged and Credits are lost.
+ * Executes an enchant roll (+0 to +10). On failure, part remains unchanged and Credits are lost.
  */
 export function resolveEnchantAttempt(
   instance: ItemInstance,
@@ -210,18 +210,18 @@ export function resolveEnchantAttempt(
   remainingCredits: number;
 } {
   const meta = getEnchantMetadata(instance);
-  const def = getItemDefinition(instance.itemId);
-  const itemName = def?.name ?? 'Equipment';
 
   if (meta.isMax) {
     return {
       result: {
         attempted: false,
         success: false,
+        code: 'max_level',
+        itemId: instance.itemId,
         previousLevel: meta.currentLevel,
         newLevel: meta.currentLevel,
         creditsSpent: 0,
-        message: `${itemName} is already at maximum enchant (+${ENCHANT_CONFIG.maxLevel}).`,
+        successRate: 0,
       },
       updatedInstance: instance,
       remainingCredits: playerCredits,
@@ -233,10 +233,12 @@ export function resolveEnchantAttempt(
       result: {
         attempted: false,
         success: false,
+        code: 'insufficient_credits',
+        itemId: instance.itemId,
         previousLevel: meta.currentLevel,
         newLevel: meta.currentLevel,
-        creditsSpent: 0,
-        message: `Insufficient Credits (need ${meta.cost.toLocaleString()} CR).`,
+        creditsSpent: meta.cost,
+        successRate: meta.successRate,
       },
       updatedInstance: instance,
       remainingCredits: playerCredits,
@@ -256,12 +258,12 @@ export function resolveEnchantAttempt(
       result: {
         attempted: true,
         success: true,
+        code: 'success',
+        itemId: instance.itemId,
         previousLevel: meta.currentLevel,
         newLevel: meta.nextLevel,
         creditsSpent: meta.cost,
-        message: `Enchant succeeded! ${itemName} upgraded to +${meta.nextLevel} (+${Math.round(
-          meta.nextLevel * ENCHANT_CONFIG.bonusPerLevel * 100
-        )}% bonus).`,
+        successRate: meta.successRate,
       },
       updatedInstance: upgraded,
       remainingCredits: nextCredits,
@@ -272,10 +274,12 @@ export function resolveEnchantAttempt(
     result: {
       attempted: true,
       success: false,
+      code: 'failed',
+      itemId: instance.itemId,
       previousLevel: meta.currentLevel,
       newLevel: meta.currentLevel,
       creditsSpent: meta.cost,
-      message: `Enchant failed (${meta.successRate}% chance). ${itemName} remains +${meta.currentLevel}; ${meta.cost.toLocaleString()} CR spent.`,
+      successRate: meta.successRate,
     },
     updatedInstance: instance,
     remainingCredits: nextCredits,
@@ -292,7 +296,7 @@ function pickWeightedRarity(weights: Record<ItemRarity, number>): ItemRarity {
 }
 
 /**
- * Rolls enemy item drops weighted by rarity and sector difficulty.
+ * Rolls enemy ship part drops weighted by rarity and sector difficulty.
  */
 export function rollBattleItemDrops(
   enemies: CombatUnit[],
@@ -330,7 +334,6 @@ export function rollBattleItemDrops(
     drops.push(createItemInstance(picked.id, 0));
   }
 
-  // On Victory, guarantee at least 1 drop in Hard/Elite or 50% boost if nothing dropped yet
   if (won && drops.length === 0) {
     const pityChance =
       sector.difficulty === 'Elite'

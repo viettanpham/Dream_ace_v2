@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ArrowUpCircle, Check, Lock, ShieldAlert, X } from 'lucide-react';
-import { MECH_CLASSES, STAT_KEYS, STAT_META } from '../data/classes';
+import { STAT_KEYS } from '../data/classes';
 import {
   ENCHANT_CONFIG,
   EQUIPMENT_SLOTS,
@@ -13,11 +13,22 @@ import {
   getEnchantMetadata,
   validateEquipRequirement,
 } from '../engine/equipment';
+import {
+  formatEquipValidationReason,
+  getClassName,
+  getItemName,
+  getRarityLabel,
+  getSlotLabel,
+  getSlotShort,
+  getStatShort,
+  useI18n,
+} from '../i18n';
 import { useGameStore } from '../store/useGameStore';
 import type {
   EnchantAttemptResult,
   EquipmentSlot,
   ItemInstance,
+  Language,
   StatBlock,
 } from '../types/game';
 import { soundFx } from '../utils/sound';
@@ -33,9 +44,12 @@ interface EquipmentPanelProps {
   previewStatDeltas: StatBlock;
 }
 
-function formatStatBadges(stats: StatBlock): Array<{ label: string; value: number }> {
+function formatStatBadges(
+  lang: Language,
+  stats: StatBlock
+): Array<{ label: string; value: number }> {
   return STAT_KEYS.filter((k) => stats[k] > 0).map((k) => ({
-    label: STAT_META[k].shortLabel,
+    label: getStatShort(lang, k),
     value: stats[k],
   }));
 }
@@ -45,6 +59,7 @@ export function EquipmentPanel({
   onPreviewChange,
   previewStatDeltas,
 }: EquipmentPanelProps) {
+  const { lang, t } = useI18n();
   const player = useGameStore((s) => s.player);
   const equipItem = useGameStore((s) => s.equipItem);
   const unequipSlot = useGameStore((s) => s.unequipSlot);
@@ -107,39 +122,66 @@ export function EquipmentPanel({
     ? getEnchantMetadata(enchantInstance)
     : null;
 
-  // Describe pending preview action
+  // Preview title & replaced item
   let previewSummaryTitle = '';
   let previewReplacingName: string | null = null;
   if (previewChange?.type === 'equip') {
     const def = getItemDefinition(previewChange.instance.itemId);
     if (def) {
+      const name = getItemName(lang, def.id);
       const enh =
         previewChange.instance.enchantLevel > 0
           ? ` +${previewChange.instance.enchantLevel}`
           : '';
-      previewSummaryTitle = `Equip ${def.name}${enh} (${EQUIPMENT_SLOT_META[def.slot].label})`;
+      previewSummaryTitle = t('equip.previewEquip', {
+        item: `${name}${enh}`,
+        slot: getSlotLabel(lang, def.slot),
+      });
       const currentInSlot = player.equipped[def.slot];
       if (currentInSlot) {
-        const curDef = getItemDefinition(currentInSlot.itemId);
-        if (curDef) {
-          previewReplacingName =
-            currentInSlot.enchantLevel > 0
-              ? `${curDef.name} +${currentInSlot.enchantLevel}`
-              : curDef.name;
-        }
+        const curName = getItemName(lang, currentInSlot.itemId);
+        previewReplacingName =
+          currentInSlot.enchantLevel > 0
+            ? `${curName} +${currentInSlot.enchantLevel}`
+            : curName;
       }
     }
   } else if (previewChange?.type === 'unequip') {
     const inst = player.equipped[previewChange.slot];
-    const def = inst ? getItemDefinition(inst.itemId) : null;
-    if (def && inst) {
-      previewSummaryTitle = `Unequip ${def.name}${
-        inst.enchantLevel > 0 ? ` +${inst.enchantLevel}` : ''
-      }`;
+    if (inst) {
+      const name = getItemName(lang, inst.itemId);
+      previewSummaryTitle = t('equip.previewUnequip', {
+        item: inst.enchantLevel > 0 ? `${name} +${inst.enchantLevel}` : name,
+      });
     }
   }
 
   const nonZeroDeltas = STAT_KEYS.filter((k) => previewStatDeltas[k] !== 0);
+
+  const renderEnchantMessage = (fb: EnchantAttemptResult): string => {
+    const itemName = getItemName(lang, fb.itemId);
+    if (fb.code === 'max_level') {
+      return t('enchant.msg.max_level', { item: itemName });
+    }
+    if (fb.code === 'insufficient_credits') {
+      return t('enchant.msg.insufficient_credits', {
+        cost: fb.creditsSpent.toLocaleString(),
+      });
+    }
+    if (fb.code === 'success') {
+      return t('enchant.msg.success', {
+        item: itemName,
+        level: fb.newLevel,
+        pct: Math.round(fb.newLevel * ENCHANT_CONFIG.bonusPerLevel * 100),
+      });
+    }
+    return t('enchant.msg.failed', {
+      item: itemName,
+      rate: fb.successRate,
+      level: fb.previousLevel,
+      cost: fb.creditsSpent.toLocaleString(),
+    });
+  };
 
   return (
     <div className="space-y-4">
@@ -149,14 +191,14 @@ export function EquipmentPanel({
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <div className="text-xs font-semibold text-amber-300">
-                Live Loadout Preview
+                {t('equip.previewTitle')}
               </div>
               <div className="text-sm font-semibold text-slate-100 mt-0.5">
                 {previewSummaryTitle}
               </div>
               {previewReplacingName && (
                 <div className="text-xs text-slate-400">
-                  Replaces {previewReplacingName} (returned to inventory)
+                  {t('equip.replaces', { item: previewReplacingName })}
                 </div>
               )}
             </div>
@@ -168,7 +210,7 @@ export function EquipmentPanel({
                 className="h-9 px-3.5 inline-flex items-center gap-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
               >
                 <Check className="w-3.5 h-3.5" />
-                <span>Confirm</span>
+                <span>{t('common.confirm')}</span>
               </button>
               <button
                 type="button"
@@ -176,7 +218,7 @@ export function EquipmentPanel({
                 className="h-9 px-3 inline-flex items-center gap-1 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap"
               >
                 <X className="w-3.5 h-3.5" />
-                <span>Cancel</span>
+                <span>{t('common.cancel')}</span>
               </button>
             </div>
           </div>
@@ -194,25 +236,25 @@ export function EquipmentPanel({
                         : 'text-red-400 font-semibold'
                     }
                   >
-                    {STAT_META[key].shortLabel} {delta > 0 ? `+${delta}` : delta}
+                    {getStatShort(lang, key)} {delta > 0 ? `+${delta}` : delta}
                   </span>
                 );
               })
             ) : (
-              <span className="text-slate-400">No net change to base stats</span>
+              <span className="text-slate-400">{t('equip.noNetChange')}</span>
             )}
           </div>
         </div>
       )}
 
-      {/* 6 Equipped Slots Grid */}
+      {/* 6 Equipped Ship Part Slots Grid */}
       <div className="space-y-2.5">
         <div className="flex items-center justify-between gap-2">
           <h3 className="font-display text-lg font-bold tracking-wide text-slate-100">
-            Equipped Loadout (6 Slots)
+            {t('equip.loadoutHeading')}
           </h3>
           <span className="text-xs text-slate-400">
-            Armor & Engine are class-locked
+            {t('equip.classLockHint')}
           </span>
         </div>
 
@@ -252,12 +294,12 @@ export function EquipmentPanel({
                 <div className="space-y-1">
                   <div className="flex items-center justify-between gap-2 text-[11px]">
                     <span className="font-semibold text-slate-400 uppercase tracking-wider">
-                      {slotMeta.label}
+                      {getSlotLabel(lang, slot)}
                     </span>
                     {slotMeta.classLocked && (
                       <span className="text-slate-500 inline-flex items-center gap-1">
                         <Lock className="w-3 h-3" />
-                        <span>Class-Locked</span>
+                        <span>{t('common.classLocked')}</span>
                       </span>
                     )}
                   </div>
@@ -270,7 +312,7 @@ export function EquipmentPanel({
                             RARITY_META[def.rarity].textClass
                           }`}
                         >
-                          {def.name}
+                          {getItemName(lang, def.id)}
                           {equippedInst.enchantLevel > 0 && (
                             <span className="ml-1 font-mono-nums text-amber-300">
                               +{equippedInst.enchantLevel}
@@ -278,12 +320,12 @@ export function EquipmentPanel({
                           )}
                         </span>
                         <span className="text-[11px] text-slate-500 shrink-0">
-                          {RARITY_META[def.rarity].label}
+                          {getRarityLabel(lang, def.rarity)}
                         </span>
                       </div>
 
                       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11px] font-mono-nums text-slate-300">
-                        {formatStatBadges(effectiveStats).map((s) => (
+                        {formatStatBadges(lang, effectiveStats).map((s) => (
                           <span key={s.label}>
                             +{s.value} {s.label}
                           </span>
@@ -292,7 +334,7 @@ export function EquipmentPanel({
                     </>
                   ) : (
                     <div className="text-xs text-slate-500 py-1.5">
-                      Empty slot — equip an item from inventory below
+                      {t('equip.emptySlot')}
                     </div>
                   )}
                 </div>
@@ -311,8 +353,10 @@ export function EquipmentPanel({
                       <ArrowUpCircle className="w-3.5 h-3.5" />
                       <span>
                         {equippedInst.enchantLevel >= ENCHANT_CONFIG.maxLevel
-                          ? 'Max +10'
-                          : `Enchant (+${equippedInst.enchantLevel})`}
+                          ? t('equip.enchantMax')
+                          : t('equip.enchantBtn', {
+                              level: equippedInst.enchantLevel,
+                            })}
                       </span>
                     </button>
                     <button
@@ -325,7 +369,7 @@ export function EquipmentPanel({
                       }}
                       className="h-8 px-2.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap"
                     >
-                      {isPreviewedUnequip ? 'Cancel' : 'Unequip'}
+                      {isPreviewedUnequip ? t('common.cancel') : t('equip.unequip')}
                     </button>
                   </div>
                 )}
@@ -335,16 +379,18 @@ export function EquipmentPanel({
         </div>
       </div>
 
-      {/* ENCHANT BENCH (for selected equipped slot) */}
+      {/* ENCHANT BENCH */}
       {selectedEnchantSlot && enchantInstance && enchantDef && enchantMeta && (
         <div className="rounded-lg border border-sky-500/40 bg-[#0B1422] p-4 space-y-3">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <div className="text-xs font-medium text-sky-400">
-                Equipment Enchanting · {EQUIPMENT_SLOT_META[selectedEnchantSlot].label}
+                {t('equip.enchantTitle', {
+                  slot: getSlotLabel(lang, selectedEnchantSlot),
+                })}
               </div>
               <div className="font-display text-xl font-bold text-slate-100">
-                {enchantDef.name}{' '}
+                {getItemName(lang, enchantDef.id)}{' '}
                 <span className="font-mono-nums text-amber-400">
                   +{enchantMeta.currentLevel}
                 </span>
@@ -356,17 +402,16 @@ export function EquipmentPanel({
                 )}
               </div>
               <div className="text-xs text-slate-400">
-                Each +1 adds +8% to stat bonuses (current: +
-                {Math.round(
-                  enchantMeta.currentLevel * ENCHANT_CONFIG.bonusPerLevel * 100
-                )}
-                %
-                {!enchantMeta.isMax
-                  ? ` → +${Math.round(
-                      enchantMeta.nextLevel * ENCHANT_CONFIG.bonusPerLevel * 100
-                    )}%`
-                  : ''}
-                ). Failure spends Credits with no item loss.
+                {t('equip.enchantDesc', {
+                  curPct: Math.round(
+                    enchantMeta.currentLevel * ENCHANT_CONFIG.bonusPerLevel * 100
+                  ),
+                  nextPart: enchantMeta.isMax
+                    ? ''
+                    : ` → +${Math.round(
+                        enchantMeta.nextLevel * ENCHANT_CONFIG.bonusPerLevel * 100
+                      )}%`,
+                })}
               </div>
             </div>
 
@@ -380,7 +425,6 @@ export function EquipmentPanel({
             </button>
           </div>
 
-          {/* Current vs Next Enchant Stats */}
           <div className="flex flex-wrap items-center gap-4 text-xs font-mono-nums py-2 border-y border-slate-800">
             {STAT_KEYS.filter((k) => (enchantDef.statBonuses[k] ?? 0) > 0).map(
               (key) => {
@@ -389,12 +433,16 @@ export function EquipmentPanel({
                 const diff = nxt - cur;
                 return (
                   <div key={key} className="flex items-baseline gap-1.5">
-                    <span className="text-slate-400">{STAT_META[key].shortLabel}</span>
+                    <span className="text-slate-400">
+                      {getStatShort(lang, key)}
+                    </span>
                     <span className="text-slate-100 font-semibold">+{cur}</span>
                     {!enchantMeta.isMax && (
                       <span
                         className={
-                          diff > 0 ? 'text-emerald-400 font-semibold' : 'text-slate-500'
+                          diff > 0
+                            ? 'text-emerald-400 font-semibold'
+                            : 'text-slate-500'
                         }
                       >
                         → +{nxt}
@@ -406,16 +454,15 @@ export function EquipmentPanel({
             )}
           </div>
 
-          {/* Enchant Controls */}
           <div className="flex flex-wrap items-center justify-between gap-3">
             {enchantMeta.isMax ? (
               <span className="text-xs font-semibold text-amber-400">
-                Maximum Enchant Level Reached (+10 / +80% Bonus)
+                {t('equip.enchantMaxReached')}
               </span>
             ) : (
               <div className="flex flex-wrap items-center gap-4 text-xs font-mono-nums">
                 <div>
-                  <span className="text-slate-400">Success Rate: </span>
+                  <span className="text-slate-400">{t('equip.successRate')} </span>
                   <span
                     className={
                       enchantMeta.successRate >= 70
@@ -429,7 +476,7 @@ export function EquipmentPanel({
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-400">Cost: </span>
+                  <span className="text-slate-400">{t('equip.cost')} </span>
                   <span
                     className={
                       player.credits >= enchantMeta.cost
@@ -451,8 +498,13 @@ export function EquipmentPanel({
                 className="h-10 px-4 rounded bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-slate-950 font-semibold text-xs transition-colors cursor-pointer whitespace-nowrap"
               >
                 {player.credits < enchantMeta.cost
-                  ? `Need ${enchantMeta.cost.toLocaleString()} CR`
-                  : `Enchant to +${enchantMeta.nextLevel} (${enchantMeta.cost.toLocaleString()} CR)`}
+                  ? t('equip.needCredits', {
+                      cost: enchantMeta.cost.toLocaleString(),
+                    })
+                  : t('equip.enchantAction', {
+                      level: enchantMeta.nextLevel,
+                      cost: enchantMeta.cost.toLocaleString(),
+                    })}
               </button>
             )}
           </div>
@@ -465,21 +517,21 @@ export function EquipmentPanel({
                   : 'border-red-500/40 bg-red-500/10 text-red-300'
               }`}
             >
-              {enchantFeedback.message}
+              {renderEnchantMessage(enchantFeedback)}
             </div>
           )}
         </div>
       )}
 
-      {/* INVENTORY LIST */}
+      {/* CARGO INVENTORY LIST */}
       <div className="space-y-2.5 pt-2 border-t border-slate-800/80">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-baseline gap-2">
             <h3 className="font-display text-lg font-bold tracking-wide text-slate-100">
-              Inventory
+              {t('equip.inventoryTitle')}
             </h3>
             <span className="font-mono-nums text-xs text-slate-400">
-              {player.inventory.length} item{player.inventory.length === 1 ? '' : 's'}
+              {t('common.itemCount', { count: player.inventory.length })}
             </span>
           </div>
 
@@ -488,7 +540,7 @@ export function EquipmentPanel({
             onClick={() => setScreen('SHOP')}
             className="text-xs font-medium text-amber-400 hover:text-amber-300 transition-colors cursor-pointer whitespace-nowrap"
           >
-            Open Equipment Shop →
+            {t('equip.openShop')}
           </button>
         </div>
 
@@ -503,7 +555,7 @@ export function EquipmentPanel({
                 : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200'
             }`}
           >
-            All
+            {t('common.all')}
           </button>
           {EQUIPMENT_SLOTS.map((slot) => (
             <button
@@ -516,7 +568,7 @@ export function EquipmentPanel({
                   : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200'
               }`}
             >
-              {EQUIPMENT_SLOT_META[slot].shortLabel}
+              {getSlotShort(lang, slot)}
             </button>
           ))}
         </div>
@@ -524,8 +576,8 @@ export function EquipmentPanel({
         {filteredInventory.length === 0 ? (
           <div className="rounded border border-slate-800/80 bg-[#0A0F18] px-4 py-6 text-center text-xs text-slate-400">
             {player.inventory.length === 0
-              ? 'Your inventory is empty. Buy gear in the Shop or defeat enemies in battle for drops.'
-              : 'No items in this slot category.'}
+              ? t('equip.inventoryEmpty')
+              : t('equip.inventoryEmptyFilter')}
           </div>
         ) : (
           <div className="space-y-2 max-h-72 overflow-y-auto pr-1 tactical-scroll">
@@ -538,6 +590,7 @@ export function EquipmentPanel({
                 player.level,
                 player.classId
               );
+              const reasonText = formatEquipValidationReason(lang, validation);
               const effStats = getEffectiveItemStats(
                 inst.itemId,
                 inst.enchantLevel
@@ -562,7 +615,7 @@ export function EquipmentPanel({
                           RARITY_META[def.rarity].textClass
                         }`}
                       >
-                        {def.name}
+                        {getItemName(lang, def.id)}
                         {inst.enchantLevel > 0 && (
                           <span className="ml-1 font-mono-nums text-amber-300">
                             +{inst.enchantLevel}
@@ -570,26 +623,31 @@ export function EquipmentPanel({
                         )}
                       </span>
                       <span className="text-[11px] text-slate-400">
-                        {EQUIPMENT_SLOT_META[def.slot].label} ·{' '}
-                        {RARITY_META[def.rarity].label} · Lv.{def.requiredLevel}
+                        {getSlotLabel(lang, def.slot)} ·{' '}
+                        {getRarityLabel(lang, def.rarity)} ·{' '}
+                        {t('common.levelShort')}
+                        {def.requiredLevel}
+                        {' · '}
                         {def.classRestriction
-                          ? ` · ${MECH_CLASSES[def.classRestriction].name} Only`
-                          : ' · All Classes'}
+                          ? t('common.classOnly', {
+                              className: getClassName(lang, def.classRestriction),
+                            })
+                          : t('common.allClasses')}
                       </span>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] font-mono-nums text-slate-300">
-                      {formatStatBadges(effStats).map((s) => (
+                      {formatStatBadges(lang, effStats).map((s) => (
                         <span key={s.label}>
                           +{s.value} {s.label}
                         </span>
                       ))}
                     </div>
 
-                    {!validation.canEquip && validation.reason && (
+                    {!validation.canEquip && reasonText && (
                       <div className="inline-flex items-center gap-1.5 text-[11px] text-red-400 font-medium">
                         <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
-                        <span>Cannot equip: {validation.reason}</span>
+                        <span>{t('equip.cannotEquip', { reason: reasonText })}</span>
                       </div>
                     )}
                   </div>
@@ -612,7 +670,9 @@ export function EquipmentPanel({
                           : 'bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100'
                       }`}
                     >
-                      {isSelectedPreview ? 'Cancel Preview' : 'Preview Equip'}
+                      {isSelectedPreview
+                        ? t('equip.cancelPreviewBtn')
+                        : t('equip.previewEquipBtn')}
                     </button>
                   </div>
                 </div>

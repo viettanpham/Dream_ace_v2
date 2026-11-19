@@ -1,3 +1,5 @@
+export type Language = 'vi' | 'en';
+
 export type StatKey =
   | 'attack'
   | 'defense'
@@ -107,16 +109,25 @@ export type EquippedItems = Record<EquipmentSlot, ItemInstance | null>;
 
 export interface EquipValidationResult {
   canEquip: boolean;
-  reason: string | null;
+  missingLevel: number | null;
+  requiredClass: MechClassId | null;
 }
+
+export type EnchantResultCode =
+  | 'max_level'
+  | 'insufficient_credits'
+  | 'success'
+  | 'failed';
 
 export interface EnchantAttemptResult {
   attempted: boolean;
   success: boolean;
+  code: EnchantResultCode;
+  itemId: string;
   previousLevel: number;
   newLevel: number;
   creditsSpent: number;
-  message: string;
+  successRate: number;
 }
 
 export interface PlayerCharacter {
@@ -184,18 +195,39 @@ export type CombatLogTag =
   | 'KO'
   | 'SYSTEM';
 
+export type CombatLogTemplateKey =
+  | 'log.battleStart'
+  | 'log.defend'
+  | 'log.healSquad'
+  | 'log.evade'
+  | 'log.damage'
+  | 'log.destroyed';
+
 export interface CombatLogEntry {
   id: string;
   round: number;
   actorName: string;
   actorSide?: CombatSide;
   tag: CombatLogTag;
-  message: string;
+  templateKey: CombatLogTemplateKey;
+  params: Record<string, string | number>;
+}
+
+export type CombatFxKind = 'laser' | 'missile' | 'railgun' | 'heal';
+
+export interface CombatFxEvent {
+  id: string;
+  kind: CombatFxKind;
+  fromSide: CombatSide;
+  fromSlotIndex: number; // 0..3
+  toSide: CombatSide;
+  toSlotIndices: number[];
+  accentHex: string;
 }
 
 export interface BattleSummary {
   outcome: 'victory' | 'defeat';
-  sectorName: string;
+  sectorId: string;
   rounds: number;
   expGained: number;
   creditsGained: number;
@@ -210,7 +242,6 @@ export interface BattleSummary {
 
 export interface BattleState {
   sectorId: string;
-  sectorName: string;
   units: CombatUnit[];
   turnOrder: string[]; // unit IDs sorted by speed
   activeTurnIndex: number;
@@ -218,6 +249,8 @@ export interface BattleState {
   selectedTargetId: string | null;
   log: CombatLogEntry[];
   popups: FloatingPopup[];
+  fxEvents: CombatFxEvent[];
+  explodedUnitIds: string[];
   isResolving: boolean;
   summary: BattleSummary | null;
 }

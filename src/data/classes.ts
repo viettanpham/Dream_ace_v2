@@ -67,10 +67,10 @@ export const MECH_CLASSES: Record<MechClassId, MechClassDefinition> = {
   striker: {
     id: 'striker',
     name: 'Striker',
-    chassisCode: 'VX-04 Vanguard',
-    role: 'Balanced Assault',
+    chassisCode: 'VX-04 Bomber Gear',
+    role: 'Heavy Bomber',
     description:
-      'Versatile front-line combat frame combining reliable weapon output, solid armor plating, and responsive thrusters.',
+      'Wide-winged heavy bomber outfitted with dual ordnance bays, balanced hull armor, and steady twin-thruster thrust.',
     accentHex: '#F59E0B',
     baseStats: {
       attack: 16,
@@ -97,10 +97,10 @@ export const MECH_CLASSES: Record<MechClassId, MechClassDefinition> = {
   interceptor: {
     id: 'interceptor',
     name: 'Interceptor',
-    chassisCode: 'RX-09 Kestrel',
-    role: 'High-Speed Skirmisher',
+    chassisCode: 'RX-09 Dart Gear',
+    role: 'Fast Dart Fighter',
     description:
-      'Ultra-light recon-strike chassis built to seize first turn, evade incoming fire, and dismantle priority targets.',
+      'Razor-slim dart starfighter built to claim first initiative, weave through incoming fire, and burst priority targets.',
     accentHex: '#38BDF8',
     baseStats: {
       attack: 15,
@@ -127,10 +127,10 @@ export const MECH_CLASSES: Record<MechClassId, MechClassDefinition> = {
   siege: {
     id: 'siege',
     name: 'Siege',
-    chassisCode: 'HX-12 Bastion',
-    role: 'Heavy Artillery',
+    chassisCode: 'HX-12 Gunship Gear',
+    role: 'Heavy Gunship',
     description:
-      'Heavily plated fire-support dreadnought capable of absorbing sustained bombardment and unleashing squad-wide railgun fire.',
+      'Bulky armored assault gunship built around a spinal railcannon capable of sweeping entire hostile formations.',
     accentHex: '#EF4444',
     baseStats: {
       attack: 18,
@@ -157,10 +157,10 @@ export const MECH_CLASSES: Record<MechClassId, MechClassDefinition> = {
   support: {
     id: 'support',
     name: 'Support',
-    chassisCode: 'AX-07 Aegis',
-    role: 'Shield & Tactical Core',
+    chassisCode: 'AX-07 Aegis Gear',
+    role: 'Repair & Shield Craft',
     description:
-      'High-reactor command frame designed to project restorative shield pulses and keep the squad operational under heavy fire.',
+      'Rounded command craft equipped with twin capacitor pods and a glowing repair beam emitter to sustain the whole wing.',
     accentHex: '#10B981',
     baseStats: {
       attack: 10,

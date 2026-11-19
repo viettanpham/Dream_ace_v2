@@ -37,26 +37,26 @@ export const EQUIPMENT_SLOT_META: Record<EquipmentSlot, EquipmentSlotMeta> = {
   },
   armor: {
     slot: 'armor',
-    label: 'Armor',
-    shortLabel: 'ARMOR',
+    label: 'Hull Plating',
+    shortLabel: 'HULL',
     classLocked: true,
   },
   engine: {
     slot: 'engine',
-    label: 'Engine',
-    shortLabel: 'ENGINE',
+    label: 'Thrusters',
+    shortLabel: 'THRUST',
     classLocked: true,
   },
   cpu: {
     slot: 'cpu',
-    label: 'CPU',
+    label: 'Targeting CPU',
     shortLabel: 'CPU',
     classLocked: false,
   },
   accessory: {
     slot: 'accessory',
-    label: 'Accessory',
-    shortLabel: 'ACC',
+    label: 'Reactor',
+    shortLabel: 'REACTOR',
     classLocked: false,
   },
 };
