@@ -1,7 +1,16 @@
 import { useMemo, useState } from 'react';
-import { AlertTriangle, Coins, RefreshCw, ShoppingBag } from 'lucide-react';
+import {
+  AlertTriangle,
+  Award,
+  Check,
+  Coins,
+  KeyRound,
+  RefreshCw,
+  ShoppingBag,
+} from 'lucide-react';
 import { MECH_CLASS_LIST, STAT_KEYS } from '../data/classes';
 import { EQUIPMENT_SLOTS, RARITY_META, SHOP_CONFIG } from '../data/items';
+import { getSkillById, OPENING_CARDS_LIST } from '../data/skills';
 import {
   getEffectiveItemStats,
   getGearEquippedInstances,
@@ -16,29 +25,36 @@ import {
   getItemInstanceDesc,
   getItemInstanceName,
   getRarityLabel,
+  getSkillCategoryLabel,
+  getSkillDesc,
+  getSkillName,
   getSlotLabel,
   getStatShort,
   useI18n,
 } from '../i18n';
 import { useGameStore } from '../store/useGameStore';
 import type { EquipmentSlot, ItemInstance, MechClassId } from '../types/game';
+import { SkillIcon } from './SkillIcon';
 
-type ShopTab = 'buy' | 'sell';
 type ClassFilter = 'all' | 'usable' | 'universal' | MechClassId;
 
 export function ShopScreen() {
   const { lang, t } = useI18n();
   const pilot = useGameStore((s) => s.pilot);
   const shopStock = useGameStore((s) => s.shopStock);
+  const shopSubTab = useGameStore((s) => s.shopSubTab);
+  const setShopSubTab = useGameStore((s) => s.setShopSubTab);
   const buyShopItem = useGameStore((s) => s.buyShopItem);
   const refreshShopStock = useGameStore((s) => s.refreshShopStock);
   const sellItem = useGameStore((s) => s.sellItem);
+  const buyOpeningCardAction = useGameStore((s) => s.buyOpeningCardAction);
   const setActiveTab = useGameStore((s) => s.setActiveTab);
 
-  const [tab, setTab] = useState<ShopTab>('buy');
   const [slotFilter, setSlotFilter] = useState<EquipmentSlot | 'all'>('all');
   const [classFilter, setClassFilter] = useState<ClassFilter>('all');
+  const [wpClassFilter, setWpClassFilter] = useState<'all' | MechClassId>('all');
   const [noticeText, setNoticeText] = useState<string | null>(null);
+  const [noticeAction, setNoticeAction] = useState<'gear' | 'skill'>('gear');
 
   const activeGear = pilot.gears[pilot.activeGearId];
   const equippedOnActive = useMemo(
@@ -82,9 +98,19 @@ export function ShopScreen() {
     });
   }, [unequippedInventory, slotFilter]);
 
+  const filteredOpeningCards = useMemo(() => {
+    return OPENING_CARDS_LIST.filter((card) => {
+      if (wpClassFilter !== 'all' && card.classId !== wpClassFilter) {
+        return false;
+      }
+      return true;
+    });
+  }, [wpClassFilter]);
+
   const handleBuy = (item: ItemInstance) => {
     const res = buyShopItem(item.instanceId);
     if (res.ok) {
+      setNoticeAction('gear');
       setNoticeText(
         t('shop.boughtMsg', {
           item: getItemInstanceName(lang, item),
@@ -97,6 +123,7 @@ export function ShopScreen() {
   const handleRefresh = () => {
     const res = refreshShopStock();
     if (res.ok) {
+      setNoticeAction('gear');
       setNoticeText(t('shop.refreshedMsg'));
     }
   };
@@ -105,6 +132,7 @@ export function ShopScreen() {
     const name = getItemInstanceName(lang, inst, true);
     const res = sellItem(inst.instanceId);
     if (res.ok) {
+      setNoticeAction('gear');
       setNoticeText(
         t('shop.soldMsg', {
           item: name,
@@ -114,7 +142,21 @@ export function ShopScreen() {
     }
   };
 
+  const handleBuyOpeningCard = (cardId: string, skillId: string) => {
+    const res = buyOpeningCardAction(cardId);
+    if (res.ok) {
+      setNoticeAction('skill');
+      setNoticeText(
+        t('shop.cardBoughtMsg', {
+          skill: getSkillName(lang, skillId),
+          cost: res.cost,
+        })
+      );
+    }
+  };
+
   const canRefresh = pilot.credits >= SHOP_CONFIG.refreshCost;
+  const ownedCardsCount = pilot.ownedOpeningCards.length;
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto">
@@ -134,27 +176,29 @@ export function ShopScreen() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              disabled={!canRefresh}
-              onClick={handleRefresh}
-              className="h-9 px-3.5 inline-flex items-center gap-1.5 rounded border border-sky-500/50 bg-sky-500/15 hover:bg-sky-500/25 disabled:bg-slate-900 disabled:border-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-sky-200 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>
-                {t('shop.refreshStock', { cost: SHOP_CONFIG.refreshCost })}
-              </span>
-            </button>
+            {shopSubTab === 'buy' && (
+              <button
+                type="button"
+                disabled={!canRefresh}
+                onClick={handleRefresh}
+                className="h-9 px-3.5 inline-flex items-center gap-1.5 rounded border border-sky-500/50 bg-sky-500/15 hover:bg-sky-500/25 disabled:bg-slate-900 disabled:border-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-sky-200 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>
+                  {t('shop.refreshStock', { cost: SHOP_CONFIG.refreshCost })}
+                </span>
+              </button>
+            )}
 
-            <div className="flex items-center gap-1 p-1 rounded bg-slate-900 border border-slate-800">
+            <div className="flex flex-wrap items-center gap-1 p-1 rounded bg-slate-900 border border-slate-800">
               <button
                 type="button"
                 onClick={() => {
-                  setTab('buy');
+                  setShopSubTab('buy');
                   setNoticeText(null);
                 }}
-                className={`h-9 px-3.5 inline-flex items-center gap-1.5 rounded text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                  tab === 'buy'
+                className={`h-9 px-3 inline-flex items-center gap-1.5 rounded text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                  shopSubTab === 'buy'
                     ? 'bg-amber-500 text-slate-950'
                     : 'text-slate-300 hover:text-slate-100'
                 }`}
@@ -162,14 +206,15 @@ export function ShopScreen() {
                 <ShoppingBag className="w-3.5 h-3.5" />
                 <span>{t('shop.tabBuy', { count: shopStock.length })}</span>
               </button>
+
               <button
                 type="button"
                 onClick={() => {
-                  setTab('sell');
+                  setShopSubTab('sell');
                   setNoticeText(null);
                 }}
-                className={`h-9 px-3.5 inline-flex items-center gap-1.5 rounded text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                  tab === 'sell'
+                className={`h-9 px-3 inline-flex items-center gap-1.5 rounded text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                  shopSubTab === 'sell'
                     ? 'bg-amber-500 text-slate-950'
                     : 'text-slate-300 hover:text-slate-100'
                 }`}
@@ -177,6 +222,27 @@ export function ShopScreen() {
                 <Coins className="w-3.5 h-3.5" />
                 <span>
                   {t('shop.tabSell', { count: unequippedInventory.length })}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShopSubTab('warpoints');
+                  setNoticeText(null);
+                }}
+                className={`h-9 px-3 inline-flex items-center gap-1.5 rounded text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                  shopSubTab === 'warpoints'
+                    ? 'bg-purple-500 text-white'
+                    : 'text-purple-300 hover:text-purple-100'
+                }`}
+              >
+                <Award className="w-3.5 h-3.5" />
+                <span>
+                  {t('shop.tabWarPoints', {
+                    owned: ownedCardsCount,
+                    total: OPENING_CARDS_LIST.length,
+                  })}
                 </span>
               </button>
             </div>
@@ -189,90 +255,267 @@ export function ShopScreen() {
             <span>{noticeText}</span>
             <button
               type="button"
-              onClick={() => setActiveTab('gear')}
+              onClick={() =>
+                setActiveTab(noticeAction === 'skill' ? 'skill' : 'gear')
+              }
               className="font-semibold text-amber-300 hover:text-amber-200 cursor-pointer whitespace-nowrap"
             >
-              {t('shop.equipInHangar')}
+              {noticeAction === 'skill'
+                ? t('shop.goToSkillTab')
+                : t('shop.equipInHangar')}
             </button>
           </div>
         )}
 
-        {/* Filters */}
-        <div className="rounded-lg border border-slate-800/90 bg-[#0D131D]/95 p-4 space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-slate-400 w-16 shrink-0">
-              {t('shop.filterSlot')}
-            </span>
-            <button
-              type="button"
-              onClick={() => setSlotFilter('all')}
-              className={`h-9 px-3 rounded border text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
-                slotFilter === 'all'
-                  ? 'bg-slate-800 border-amber-400/80 text-slate-50'
-                  : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              {t('shop.allSlots')}
-            </button>
-            {EQUIPMENT_SLOTS.map((slot) => (
+        {/* Filters for Buy / Sell */}
+        {shopSubTab !== 'warpoints' && (
+          <div className="rounded-lg border border-slate-800/90 bg-[#0D131D]/95 p-4 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-slate-400 w-16 shrink-0">
+                {t('shop.filterSlot')}
+              </span>
               <button
-                key={slot}
                 type="button"
-                onClick={() => setSlotFilter(slot)}
+                onClick={() => setSlotFilter('all')}
                 className={`h-9 px-3 rounded border text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
-                  slotFilter === slot
+                  slotFilter === 'all'
                     ? 'bg-slate-800 border-amber-400/80 text-slate-50'
                     : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
                 }`}
               >
-                {getSlotLabel(lang, slot)}
+                {t('shop.allSlots')}
               </button>
-            ))}
-          </div>
-
-          {tab === 'buy' && (
-            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800/80">
-              <span className="text-xs text-slate-400 w-16 shrink-0">
-                {t('shop.filterClass')}
-              </span>
-              {(
-                [
-                  { id: 'all', label: t('common.allClasses') },
-                  {
-                    id: 'usable',
-                    label: t('shop.usableNow', {
-                      className: getClassName(lang, activeGear.classId),
-                      level: activeGear.level,
-                    }),
-                  },
-                  { id: 'universal', label: t('shop.universal') },
-                  ...MECH_CLASS_LIST.map((c) => ({
-                    id: c.id as ClassFilter,
-                    label: t('shop.classLockedFilter', {
-                      className: getClassName(lang, c.id),
-                    }),
-                  })),
-                ] as Array<{ id: ClassFilter; label: string }>
-              ).map((opt) => (
+              {EQUIPMENT_SLOTS.map((slot) => (
                 <button
-                  key={opt.id}
+                  key={slot}
                   type="button"
-                  onClick={() => setClassFilter(opt.id)}
+                  onClick={() => setSlotFilter(slot)}
                   className={`h-9 px-3 rounded border text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
-                    classFilter === opt.id
-                      ? 'bg-slate-800 border-sky-400/80 text-slate-50'
+                    slotFilter === slot
+                      ? 'bg-slate-800 border-amber-400/80 text-slate-50'
                       : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  {opt.label}
+                  {getSlotLabel(lang, slot)}
                 </button>
               ))}
             </div>
-          )}
-        </div>
+
+            {shopSubTab === 'buy' && (
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800/80">
+                <span className="text-xs text-slate-400 w-16 shrink-0">
+                  {t('shop.filterClass')}
+                </span>
+                {(
+                  [
+                    { id: 'all', label: t('common.allClasses') },
+                    {
+                      id: 'usable',
+                      label: t('shop.usableNow', {
+                        className: getClassName(lang, activeGear.classId),
+                        level: activeGear.level,
+                      }),
+                    },
+                    { id: 'universal', label: t('shop.universal') },
+                    ...MECH_CLASS_LIST.map((c) => ({
+                      id: c.id as ClassFilter,
+                      label: t('shop.classLockedFilter', {
+                        className: getClassName(lang, c.id),
+                      }),
+                    })),
+                  ] as Array<{ id: ClassFilter; label: string }>
+                ).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setClassFilter(opt.id)}
+                    className={`h-9 px-3 rounded border text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                      classFilter === opt.id
+                        ? 'bg-slate-800 border-sky-400/80 text-slate-50'
+                        : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* WAR POINT SHOP: OPENING CARDS */}
+        {shopSubTab === 'warpoints' && (
+          <div className="space-y-4">
+            <div className="rounded-lg border border-purple-500/40 bg-[#100D1E]/95 p-4 flex flex-wrap items-center justify-between gap-4">
+              <div className="space-y-1 max-w-2xl">
+                <div className="flex items-center gap-2 text-purple-300 font-display text-lg font-bold">
+                  <KeyRound className="w-5 h-5" />
+                  <span>
+                    {t('shop.tabWarPoints', {
+                      owned: ownedCardsCount,
+                      total: OPENING_CARDS_LIST.length,
+                    })}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  {t('shop.wpIntro')}
+                </p>
+              </div>
+
+              <div className="rounded-md border border-purple-500/40 bg-[#080B14] px-4 py-2.5 text-right font-mono-nums">
+                <div className="text-[11px] text-slate-400">
+                  {t('shop.availableWp')}
+                </div>
+                <div className="text-xl font-bold text-purple-300 flex items-center gap-1.5">
+                  <Award className="w-5 h-5 text-purple-400" />
+                  <span>{(pilot.warPoints ?? 0).toLocaleString()} WP</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Class Filter for Opening Cards */}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setWpClassFilter('all')}
+                className={`h-9 px-3 rounded border text-xs font-medium transition-colors cursor-pointer ${
+                  wpClassFilter === 'all'
+                    ? 'bg-slate-800 border-purple-400/80 text-slate-50'
+                    : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {t('common.allClasses')}
+              </button>
+              {MECH_CLASS_LIST.map((cls) => (
+                <button
+                  key={cls.id}
+                  type="button"
+                  onClick={() => setWpClassFilter(cls.id)}
+                  className={`h-9 px-3 rounded border text-xs font-medium transition-colors cursor-pointer ${
+                    wpClassFilter === cls.id
+                      ? 'bg-slate-800 border-purple-400/80 text-slate-50'
+                      : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {getClassName(lang, cls.id)}
+                </button>
+              ))}
+            </div>
+
+            {/* Opening Cards Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
+              {filteredOpeningCards.map((card) => {
+                const skill = getSkillById(card.skillId);
+                if (!skill) return null;
+                const isOwned = pilot.ownedOpeningCards.includes(card.id);
+                const canAfford = (pilot.warPoints ?? 0) >= card.warPointCost;
+                const isElite = card.category === 'elite';
+
+                return (
+                  <div
+                    key={card.id}
+                    className={`rounded-lg border p-4 flex flex-col justify-between gap-3 bg-[#0D131D]/95 ${
+                      isOwned
+                        ? 'border-emerald-500/50'
+                        : isElite
+                        ? 'border-amber-400/70'
+                        : 'border-purple-400/60'
+                    }`}
+                  >
+                    <div className="space-y-2.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start gap-2.5 min-w-0">
+                          <div
+                            className={`w-10 h-10 rounded-md border flex items-center justify-center shrink-0 ${
+                              isElite
+                                ? 'border-amber-400/60 bg-amber-500/15 text-amber-300'
+                                : 'border-purple-400/60 bg-purple-500/15 text-purple-300'
+                            }`}
+                          >
+                            <SkillIcon icon={skill.icon} className="w-5 h-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                              <span
+                                className={`px-1.5 py-0.5 rounded font-bold border ${
+                                  isElite
+                                    ? 'border-amber-400/70 bg-amber-500/15 text-amber-300'
+                                    : 'border-purple-400/70 bg-purple-500/15 text-purple-300'
+                                }`}
+                              >
+                                {getSkillCategoryLabel(lang, card.category)}
+                              </span>
+                              <span className="text-slate-400">
+                                {getClassName(lang, card.classId)} ·{' '}
+                                {t('common.reqLevel', {
+                                  level: skill.unlockLevel,
+                                })}
+                              </span>
+                            </div>
+                            <h3 className="font-display text-lg font-bold text-slate-100 leading-tight mt-0.5">
+                              {t('shop.openingCardTitle', {
+                                skill: getSkillName(lang, skill.id),
+                              })}
+                            </h3>
+                          </div>
+                        </div>
+
+                        <span className="font-mono-nums text-xs font-bold text-amber-400 shrink-0">
+                          {skill.spCost} SP
+                        </span>
+                      </div>
+
+                      <p className="text-xs text-slate-300 leading-relaxed">
+                        {getSkillDesc(lang, skill.id)}
+                      </p>
+                    </div>
+
+                    <div className="pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-3">
+                      <div className="font-mono-nums text-sm font-bold text-purple-300 flex items-center gap-1">
+                        <Award className="w-4 h-4 text-purple-400" />
+                        <span>{card.warPointCost} WP</span>
+                      </div>
+
+                      {isOwned ? (
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('skill')}
+                          className="h-9 px-3.5 inline-flex items-center gap-1.5 rounded border border-emerald-500/50 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 font-semibold text-xs transition-colors cursor-pointer"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>{t('shop.cardOwnedBadge')}</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={!canAfford}
+                          onClick={() =>
+                            handleBuyOpeningCard(card.id, skill.id)
+                          }
+                          className="h-9 px-3.5 inline-flex items-center gap-1.5 rounded bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-semibold text-xs transition-colors cursor-pointer"
+                        >
+                          <KeyRound className="w-3.5 h-3.5" />
+                          <span>
+                            {canAfford
+                              ? t('shop.buyCardBtn', {
+                                  cost: card.warPointCost,
+                                })
+                              : t('shop.insufficientWp', {
+                                  cost: card.warPointCost,
+                                })}
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* BUY RANDOMIZED STOCK GRID */}
-        {tab === 'buy' && (
+        {shopSubTab === 'buy' && (
           <>
             {filteredStock.length === 0 ? (
               <div className="rounded-lg border border-slate-800 bg-[#0D131D]/90 p-10 text-center text-sm text-slate-400">
@@ -286,7 +529,10 @@ export function ShopScreen() {
                     activeGear,
                     pilot.gears
                   );
-                  const reasonText = formatEquipValidationReason(lang, validation);
+                  const reasonText = formatEquipValidationReason(
+                    lang,
+                    validation
+                  );
                   const canAfford = pilot.credits >= item.price;
                   const itemStats = getEffectiveItemStats(item);
                   const currentInSlot = equippedOnActive[item.slot];
@@ -349,11 +595,13 @@ export function ShopScreen() {
 
                         {/* Rolled Stats */}
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-mono-nums text-emerald-400 font-semibold">
-                          {STAT_KEYS.filter((k) => itemStats[k] > 0).map((key) => (
-                            <span key={key}>
-                              +{itemStats[key]} {getStatShort(lang, key)}
-                            </span>
-                          ))}
+                          {STAT_KEYS.filter((k) => itemStats[k] > 0).map(
+                            (key) => (
+                              <span key={key}>
+                                +{itemStats[key]} {getStatShort(lang, key)}
+                              </span>
+                            )
+                          )}
                         </div>
 
                         {/* Traits */}
@@ -435,7 +683,7 @@ export function ShopScreen() {
         )}
 
         {/* SELL UNEQUIPPED CARGO */}
-        {tab === 'sell' && (
+        {shopSubTab === 'sell' && (
           <div className="rounded-lg border border-slate-800/90 bg-[#0D131D]/95 p-4">
             {filteredSellInventory.length === 0 ? (
               <div className="py-10 text-center text-sm text-slate-400">

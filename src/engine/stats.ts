@@ -7,6 +7,7 @@ import {
 } from '../data/classes';
 import { EMPTY_EQUIPPED_SLOT_IDS } from '../data/items';
 import { SECTORS_CATALOG } from '../data/maps';
+import { CLASS_STARTER_SKILLS } from '../data/skills';
 import type {
   DerivedStats,
   GearUnit,
@@ -17,6 +18,7 @@ import type {
   StatBlock,
 } from '../types/game';
 import { sumGearEquipmentStats, sumGearSpecialTraits } from './equipment';
+import { type GearPassiveBonuses, getGearPassiveBonuses } from './skills';
 
 /**
  * EXP required to advance from `level` to `level + 1`.
@@ -32,7 +34,7 @@ export function getExpForNextLevel(level: number): number {
 /**
  * Computes effective 6-stat block from a Gear class definition, level,
  * committed allocated points, optional pending preview allocations,
- * and optional flat equipment bonuses + item evasion modifiers.
+ * optional flat equipment bonuses, special traits, and passive bonuses.
  */
 export function calculateEffectiveStats(
   classId: MechClassId,
@@ -40,7 +42,8 @@ export function calculateEffectiveStats(
   allocatedPoints: StatBlock,
   pendingPoints: StatBlock = EMPTY_STAT_BLOCK,
   equipmentBonuses: StatBlock = EMPTY_STAT_BLOCK,
-  specialTraits?: ItemSpecialTraits
+  specialTraits?: ItemSpecialTraits,
+  passives?: GearPassiveBonuses
 ): StatBlock {
   const cls = MECH_CLASSES[classId];
   const levelBonus = Math.max(0, level - 1);
@@ -58,20 +61,27 @@ export function calculateEffectiveStats(
     if (key === 'evasion' && specialTraits?.evasionMod) {
       total = Math.max(1, total + specialTraits.evasionMod);
     }
+    if (key === 'defense' && passives?.defPct) {
+      total = Math.round(total * (1 + passives.defPct));
+    }
+    if (key === 'evasion' && passives?.evaPct) {
+      total = Math.round(total * (1 + passives.evaPct));
+    }
     result[key] = total;
   }
   return result;
 }
 
 /**
- * Derives combat metrics (HP, Shield, SP, Turn Speed, Dodge, Crit, Skill Power, and item traits)
- * from the 6 effective stats, level, and equipped special traits.
+ * Derives combat metrics (HP, Shield, SP, Turn Speed, Dodge, Crit, Skill Power, and item/passive traits)
+ * from the 6 effective stats, level, equipped special traits, and learned passives.
  */
 export function calculateDerivedStats(
   classId: MechClassId,
   level: number,
   stats: StatBlock,
-  specialTraits?: ItemSpecialTraits
+  specialTraits?: ItemSpecialTraits,
+  passives?: GearPassiveBonuses
 ): DerivedStats {
   const cls = MECH_CLASSES[classId];
   const lvl = Math.max(1, level);
@@ -94,11 +104,11 @@ export function calculateDerivedStats(
       (lvl - 1) * COMBAT_FORMULAS.spPerLevel
   );
 
-  const speed = Math.round(
+  const rawSpeed =
     cls.baseSpeed +
-      stats.fuel * COMBAT_FORMULAS.speedFuelWeight +
-      stats.evasion * COMBAT_FORMULAS.speedEvasionWeight
-  );
+    stats.fuel * COMBAT_FORMULAS.speedFuelWeight +
+    stats.evasion * COMBAT_FORMULAS.speedEvasionWeight;
+  const speed = Math.round(rawSpeed * (1 + (passives?.speedPct ?? 0)));
 
   const dodgeChance = Math.min(
     COMBAT_FORMULAS.maxDodgeChance,
@@ -128,7 +138,9 @@ export function calculateDerivedStats(
     skillPower,
     armorPiercePct: Math.min(50, specialTraits?.armorPiercePct ?? 0),
     splashPct: Math.min(40, specialTraits?.splashPct ?? 0),
-    spRegenPerTurn: specialTraits?.spRegenPerTurn ?? 0,
+    spRegenPerTurn:
+      (specialTraits?.spRegenPerTurn ?? 0) + (passives?.spRegenPerTurn ?? 0),
+    passiveSkillDmgPct: passives?.skillDmgPct ?? 0,
   };
 }
 
@@ -141,17 +153,27 @@ export function calculateGearPowerRating(
 ): number {
   const equipBonuses = sumGearEquipmentStats(gear, inventory);
   const traits = sumGearSpecialTraits(gear, inventory);
+  const passives = getGearPassiveBonuses(gear);
   const stats = calculateEffectiveStats(
     gear.classId,
     gear.level,
     gear.allocatedPoints,
     EMPTY_STAT_BLOCK,
     equipBonuses,
-    traits
+    traits,
+    passives
   );
-  const derived = calculateDerivedStats(gear.classId, gear.level, stats, traits);
-  const skillLv =
-    gear.skillLevels[MECH_CLASSES[gear.classId].signatureSkillId] ?? 1;
+  const derived = calculateDerivedStats(
+    gear.classId,
+    gear.level,
+    stats,
+    traits,
+    passives
+  );
+  const totalSkillLevels = Object.values(gear.skillLevels).reduce(
+    (sum, lv) => sum + Math.max(0, lv),
+    0
+  );
 
   return Math.round(
     derived.maxHp * 0.35 +
@@ -162,7 +184,7 @@ export function calculateGearPowerRating(
       derived.skillPower * 2.2 +
       derived.critChance * 2.5 +
       derived.armorPiercePct * 2.0 +
-      (skillLv - 1) * 45
+      totalSkillLevels * 18
   );
 }
 
@@ -181,7 +203,12 @@ export function createDefaultGearUnit(
   classId: MechClassId,
   owned: boolean
 ): GearUnit {
-  const signatureSkillId = MECH_CLASSES[classId].signatureSkillId;
+  const starterSkills = CLASS_STARTER_SKILLS[classId];
+  const skillLevels: Record<string, number> = {};
+  for (const sid of starterSkills) {
+    skillLevels[sid] = 1;
+  }
+
   return {
     classId,
     owned,
@@ -190,7 +217,8 @@ export function createDefaultGearUnit(
     unspentPoints: BALANCE_CONFIG.initialStatPoints,
     allocatedPoints: { ...EMPTY_STAT_BLOCK },
     equipped: { ...EMPTY_EQUIPPED_SLOT_IDS },
-    skillLevels: { [signatureSkillId]: 1 },
+    skillLevels,
+    equippedSkillBar: [...starterSkills],
     battlesWon: 0,
     battlesFought: 0,
   };
@@ -209,10 +237,13 @@ export function createDefaultPilotAccount(
   return {
     name,
     credits: BALANCE_CONFIG.startingCredits,
+    warPoints: BALANCE_CONFIG.startingWarPoints,
+    ownedOpeningCards: [],
     inventory: starterItems,
     gears,
     activeGearId: starterClassId,
     unlockedSectorIds: [SECTORS_CATALOG[0].id],
+    capturedSectorIds: [],
   };
 }
 

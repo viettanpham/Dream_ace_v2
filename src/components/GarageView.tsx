@@ -11,6 +11,7 @@ import {
   sumGearEquipmentStats,
   sumGearSpecialTraits,
 } from '../engine/equipment';
+import { getGearPassiveBonuses } from '../engine/skills';
 import {
   calculateDerivedStats,
   calculateEffectiveStats,
@@ -66,6 +67,11 @@ export function GarageView() {
     [activeGear, pilot.inventory]
   );
 
+  const passiveBonuses = useMemo(
+    () => getGearPassiveBonuses(activeGear),
+    [activeGear]
+  );
+
   const currentStats = useMemo(
     () =>
       calculateEffectiveStats(
@@ -74,9 +80,10 @@ export function GarageView() {
         activeGear.allocatedPoints,
         EMPTY_STAT_BLOCK,
         equipBonuses,
-        equipTraits
+        equipTraits,
+        passiveBonuses
       ),
-    [activeGear, equipBonuses, equipTraits]
+    [activeGear, equipBonuses, equipTraits, passiveBonuses]
   );
 
   const previewStats = useMemo(
@@ -87,9 +94,10 @@ export function GarageView() {
         activeGear.allocatedPoints,
         pending,
         equipBonuses,
-        equipTraits
+        equipTraits,
+        passiveBonuses
       ),
-    [activeGear, pending, equipBonuses, equipTraits]
+    [activeGear, pending, equipBonuses, equipTraits, passiveBonuses]
   );
 
   const currentDerived = useMemo(
@@ -98,9 +106,10 @@ export function GarageView() {
         activeGear.classId,
         activeGear.level,
         currentStats,
-        equipTraits
+        equipTraits,
+        passiveBonuses
       ),
-    [activeGear.classId, activeGear.level, currentStats, equipTraits]
+    [activeGear.classId, activeGear.level, currentStats, equipTraits, passiveBonuses]
   );
 
   const previewDerived = useMemo(
@@ -109,9 +118,10 @@ export function GarageView() {
         activeGear.classId,
         activeGear.level,
         previewStats,
-        equipTraits
+        equipTraits,
+        passiveBonuses
       ),
-    [activeGear.classId, activeGear.level, previewStats, equipTraits]
+    [activeGear.classId, activeGear.level, previewStats, equipTraits, passiveBonuses]
   );
 
   const handleSelectGear = (classId: MechClassId) => {

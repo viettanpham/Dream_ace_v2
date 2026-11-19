@@ -6,13 +6,15 @@ export const EN_TRANSLATIONS = {
     'Build and level each Starfighter Gear independently, hunt randomized ship modules, and command a 4-craft squadron in turn-based orbital combat.',
   'app.saveHint': 'Progress auto-saves to localStorage',
   'app.controlsHint':
-    '1 Fire · 2 Skill · 3 Shield · Tab Cycle Target · M Mute · Ctrl+Shift+A Admin',
+    '1 Fire · 2–7 Skills · Q Shield · Tab Cycle Target · M Mute · Ctrl+Shift+A Admin',
   'common.audioOn': 'Audio: On',
   'common.audioMuted': 'Audio: Muted',
   'common.muteTitle': 'Mute sound effects (M)',
   'common.unmuteTitle': 'Unmute sound effects (M)',
   'common.pilot': 'Pilot',
   'common.credits': 'Credits',
+  'common.warPoints': 'War Points',
+  'common.wpShort': 'WP',
   'common.levelShort': 'Lv.',
   'common.statPts': '+{count} Pts',
   'common.confirm': 'Confirm',
@@ -20,6 +22,7 @@ export const EN_TRANSLATIONS = {
   'common.clear': 'Clear',
   'common.all': 'All',
   'common.allClasses': 'All Gear Classes',
+  'common.general': 'General',
   'common.classOnly': '{className} Only',
   'common.classLocked': 'Class-locked',
   'common.itemCount': '{count} items',
@@ -34,6 +37,9 @@ export const EN_TRANSLATIONS = {
   'common.power': 'Power',
   'common.tier': 'Tier {tier}',
   'common.quality': 'Quality {pct}%',
+  'common.turnsShort': '{n}t',
+  'common.frontRow': 'FRONT',
+  'common.backRow': 'BACK',
 
   // Navigation / TopHud / Sidebar
   'nav.hangar': 'Hangar',
@@ -62,7 +68,7 @@ export const EN_TRANSLATIONS = {
   // Garage View (replaces Pilot tab)
   'garage.title': 'Starfighter Garage',
   'garage.subtitle':
-    'Each Gear levels, allocates stats, equips parts, and upgrades skills independently. Buy locked Gears with shared Credits.',
+    'Each Gear levels, allocates stats, equips parts, and learns class skills independently. Buy locked Gears with shared Credits.',
   'garage.rosterTitle': 'Owned & Locked Gears ({owned}/4)',
   'garage.selectGear': 'Select Gear',
   'garage.selectedGear': 'Selected',
@@ -100,32 +106,94 @@ export const EN_TRANSLATIONS = {
   'trait.spRegen': '+{val} SP/Turn',
   'trait.evasionMod': '{val} EVA Handling',
 
-  // Skill View (Levels 1-5)
-  'skill.pageTitle': 'Gear Skills & Upgrades',
+  // Skill View (Full Gear Skill System)
+  'skill.pageTitle': '{gear} Skill Loadout & Shop',
   'skill.pageSubtitle':
-    'Upgrade each owned Gear signature weapon from Lv.1 to Lv.5 with Credits to scale power, status chance, and SP cost.',
-  'skill.activeBadge': 'Active Gear Skill',
-  'skill.allClassesTitle': 'All 4 Gear Class Skills',
-  'skill.spCost': 'SP Cost',
-  'skill.targeting': 'Targeting',
-  'skill.power': 'Power Multiplier',
-  'skill.pierce': 'Armor Pierce',
-  'skill.bonusCrit': 'Bonus Crit',
-  'skill.restore': 'Squad Restore',
-  'skill.statusEffect': 'Status Effect',
-  'skill.levelLabel': 'Skill Lv.{level} / {max}',
-  'skill.upgradeBtn': 'Upgrade to Lv.{next} ({cost} CR)',
-  'skill.maxLevel': 'Max Level (Lv.5)',
-  'skill.lockedGear': 'Unlock in Garage',
-  'skill.cleanseLabel': 'Cleanses Statuses',
+    'Only {gear} and General skills can be learned or equipped on this Gear. Upgrade Lv.1–5 (+10% effect/lv) with Credits; unlock Special & Elite skills with Opening Cards from the War Point Shop.',
+  'skill.activeBadge': 'Active Gear',
+  'skill.barTitle': 'Active Skill Bar ({used}/{max} Slots)',
+  'skill.barHint': 'Click a slotted skill to unequip, or equip learned active skills below.',
+  'skill.emptySlot': 'Empty Slot',
+  'skill.passivesTitle': 'Passive Modules (Always Active Once Learned)',
+  'skill.passiveAlwaysOn': 'ALWAYS ON',
+  'skill.catalogTitle': '{gear} & General Skill Catalog',
+  'skill.category.normal': 'Standard',
+  'skill.category.special': 'Special',
+  'skill.category.elite': 'Elite',
+  'skill.category.passive': 'Passive',
+  'skill.scope.general': 'General',
+  'skill.spCost': 'SP',
+  'skill.cooldown': 'CD {turns}t',
+  'skill.noCooldown': 'No CD',
+  'skill.toggleTag': 'Toggle',
+  'skill.oncePerBattle': '1x / Battle',
+  'skill.targeting': 'Target',
+  'skill.levelLabel': 'Lv.{level}/{max}',
+  'skill.notLearned': 'Unlearned',
+  'skill.learnBtn': 'Learn Lv.1 ({cost} CR)',
+  'skill.upgradeBtn': 'Upgrade Lv.{next} ({cost} CR)',
+  'skill.maxLevel': 'MAX (Lv.5)',
+  'skill.equipBtn': 'Equip to Bar',
+  'skill.equippedBtn': 'Slotted',
+  'skill.unequipBtn': 'Unequip',
+  'skill.barFull': 'Bar Full (6/6)',
+  'skill.reqGearLv': 'Gear Lv.{level}',
+  'skill.needOpeningCard': 'Needs Opening Card',
+  'skill.cardOwned': 'Opening Card Owned',
+  'skill.getCardInWpShop': 'Buy Card (WP Shop) →',
+  'skill.scaleInfo': 'Effect Scale: {pct}%',
+  'skill.filterAll': 'All ({count})',
+  'skill.filterClass': '{className} ({count})',
+  'skill.filterGeneral': 'General ({count})',
+  'skill.filterSpecialElite': 'Special / Elite ({count})',
+  'skill.learnedFeedback': 'Learned {skill} Lv.{level} on {gear}!',
+  'skill.upgradedFeedback': 'Upgraded {skill} to Lv.{level} on {gear}!',
+  'skill.equippedFeedback': 'Slotted {skill} into {gear} Skill Bar.',
+  'skill.unequippedFeedback': 'Removed {skill} from {gear} Skill Bar.',
 
-  // Status Effects
+  // Status Effects (21)
   'status.burn': 'Burn',
-  'status.shield_break': 'Shield Break',
-  'status.slow': 'Slow',
   'status.burn.desc': 'Takes 8% Max HP burn damage at start of turn',
-  'status.shield_break.desc': 'Energy shields disabled for 2 turns',
+  'status.shield_break': 'Shield Break',
+  'status.shield_break.desc': 'Energy shields disabled and cannot absorb damage',
+  'status.slow': 'Slow',
   'status.slow.desc': '-30% Turn Speed',
+  'status.silence': 'Silenced',
+  'status.silence.desc': 'Cannot activate any skills',
+  'status.stealth': 'Stealthed',
+  'status.stealth.desc': 'Untargetable by single-target attacks until revealed or firing',
+  'status.vulnerable': 'Exposed',
+  'status.vulnerable.desc': 'Takes +15% increased damage from all sources',
+  'status.def_up': 'DEF Up',
+  'status.def_up.desc': 'Increased hull defense rating',
+  'status.def_down': 'DEF Down',
+  'status.def_down.desc': 'Reduced hull defense rating',
+  'status.eva_up': 'EVA Up',
+  'status.eva_up.desc': 'Increased evasion & dodge rate',
+  'status.atk_up': 'ATK Up',
+  'status.atk_up.desc': 'Increased weapon & skill attack power',
+  'status.spd_up': 'SPD Up',
+  'status.spd_up.desc': 'Increased turn speed',
+  'status.primary_dmg_up': 'Hotload',
+  'status.primary_dmg_up.desc': 'Primary weapon damage boosted',
+  'status.skill_dmg_up': 'Ordnance+',
+  'status.skill_dmg_up.desc': 'Skill damage boosted',
+  'status.sure_hit': 'Target Lock',
+  'status.sure_hit.desc': 'Next attacks cannot be dodged',
+  'status.counter': 'Riposte',
+  'status.counter.desc': 'Automatically counters the next incoming attack',
+  'status.evade_all': 'Mirage Spin',
+  'status.evade_all.desc': 'Dodges all incoming attacks for 1 round',
+  'status.invincible': 'Stasis',
+  'status.invincible.desc': 'Completely immune to all damage for 1 round',
+  'status.regen_hp': 'Nanite Regen',
+  'status.regen_hp.desc': 'Restores hull HP at the start of each turn',
+  'status.siege_mode': 'Anchor Siege',
+  'status.siege_mode.desc': '+60% damage dealt, EVA reduced to 0',
+  'status.siege_defense': 'Bastion Lock',
+  'status.siege_defense.desc': '+80% DEF & +30% Shield, -30% damage dealt',
+  'status.charging': 'Charging',
+  'status.charging.desc': 'Charging Solar Capacitor — fires automatically next turn',
 
   // Enemy Archetypes
   'archetype.drone': 'Fast Drone',
@@ -137,35 +205,37 @@ export const EN_TRANSLATIONS = {
   // Map View
   'map.pageTitle': 'Orbital Sector Map',
   'map.pageSubtitle':
-    'Clear sectors to unlock deeper orbital zones. Boss sectors grant 5x enemy bounty and guaranteed high-rarity loot.',
+    'Clear sectors to unlock deeper orbital zones. First-time base capture grants a War Points bonus; Boss sectors grant 5x bounty.',
   'map.selectedSector': 'Selected Sector',
   'map.enemyEstimate': 'Estimated Hostiles',
   'map.rewardRate': 'Base Reward Pool',
   'map.dropOdds': 'Epic / Legendary Odds',
   'map.lockedSector': 'Clear previous sector to unlock',
   'map.bossWarning': 'Flagship Boss Present (5x Bounty)',
+  'map.capturedBadge': 'Captured',
+  'map.captureBonus': 'First Capture: +{wp} WP',
 
   // Classes
   'class.striker.name': 'Striker',
   'class.striker.code': 'VX-04 Bomber Gear',
   'class.striker.role': 'Heavy Bomber',
   'class.striker.desc':
-    'Wide-winged heavy bomber with twin incendiary bays, strong ATK, and Burn status pressure.',
+    'Balanced heavy bomber (+3 all stats/pt) armed with wide salvo sweeps, splash warheads, charge beams, and orbital saturation strikes.',
   'class.interceptor.name': 'Interceptor',
   'class.interceptor.code': 'RX-09 Dart Gear',
   'class.interceptor.role': 'Fast Dart Fighter',
   'class.interceptor.desc':
-    'Razor-slim dart starfighter with first-strike velocity, high dodge/crit, and Slow disruption.',
+    'High-velocity dart starfighter (+4 ATK/EVA) excelling at armor-piercing bursts, snap counters, ECM silence, and Mirage evasion.',
   'class.siege.name': 'Siege',
   'class.siege.code': 'HX-12 Gunship Gear',
   'class.siege.role': 'Heavy Gunship',
   'class.siege.desc':
-    'Armored assault gunship mounting a spinal railcannon that shatters shields across all enemies.',
+    'Heavily shielded assault gunship (+4 ATK/SHD) toggling Anchor Siege or Bastion stances to shatter shields and fire Starbreaker lances.',
   'class.support.name': 'Support',
   'class.support.code': 'AX-07 Repair Gear',
-  'class.support.role': 'Repair & Barrier',
+  'class.support.role': 'Repair & Command',
   'class.support.desc':
-    'Orbital support craft with side capacitor pods restoring squad Shields, HP, and cleansing debuffs.',
+    'Tactical fleet craft (+4 DEF/SPR) delivering nanite repairs, SP transfers, stealth radar sweeps, squad buffs, and stasis barriers.',
 
   // Stats
   'stat.attack.label': 'Attack',
@@ -195,23 +265,148 @@ export const EN_TRANSLATIONS = {
   'derived.dodge': 'Dodge',
   'derived.crit': 'Crit',
 
-  // Skills
-  'skill.overdrive_barrage.name': 'Carpet Bomb Salvo',
-  'skill.overdrive_barrage.desc':
-    'Releases incendiary wing bombs piercing 35% Defense and inflicting Burn (8% HP/turn).',
-  'skill.phantom_volley.name': 'Twin Laser Strafe',
-  'skill.phantom_volley.desc':
-    'High-velocity twin strafing run with +25% Crit that inflicts Slow (-30% Speed).',
-  'skill.orbital_railcannon.name': 'Spinal Railcannon',
-  'skill.orbital_railcannon.desc':
-    'Sweeping railgun beam hitting all enemies and applying Shield Break (disables shields 2 turns).',
-  'skill.aegis_pulse.name': 'Aegis Repair Beam',
-  'skill.aegis_pulse.desc':
-    'Fleet-wide repair & barrier pulse restoring Shield/HP and cleansing Burn, Slow, and Shield Break.',
+  // ==================== 38 ORIGINAL SKILLS ====================
+  // GENERAL
+  'skill.gen_hull_brace.name': 'Hull Brace Protocol',
+  'skill.gen_hull_brace.desc':
+    'Reinforces plating for +25% Defense for 3 turns. Usable by all Gear classes.',
+  'skill.gen_thruster_feint.name': 'Thruster Feint',
+  'skill.gen_thruster_feint.desc':
+    'Executes micro-vector jukes for +25% Evasion for 3 turns. Usable by all Gear classes.',
+
+  // STRIKER
+  'skill.str_hotload_shells.name': 'Hotload Munitions',
+  'skill.str_hotload_shells.desc':
+    'Superheats primary weapon magazines, boosting Primary Weapon damage by +30% for 3 turns.',
+  'skill.str_ordnance_amp.name': 'Ordnance Overclock',
+  'skill.str_ordnance_amp.desc':
+    'Overclocks bomb bay guidance, increasing Skill damage by +30% for 3 turns.',
+  'skill.str_deadeye_link.name': 'Deadeye Telemetry',
+  'skill.str_deadeye_link.desc':
+    'Locks predictive fire-control: your next 2 attacks cannot be dodged.',
+  'skill.str_viper_sweep.name': 'Viper Strafe Run',
+  'skill.str_viper_sweep.desc':
+    'Sweeps across up to 3 enemy craft, dealing 60% damage to each target.',
+  'skill.str_carpet_salvo.name': 'Carpet Salvo',
+  'skill.str_carpet_salvo.desc':
+    'Drops a 170% heavy warhead on the primary target plus 50% splash damage to adjacent hostiles.',
+  'skill.str_solar_capacitor.name': 'Solar Capacitor Lance',
+  'skill.str_solar_capacitor.desc':
+    'Spends 1 turn charging solar coils, then automatically unleashes a 320% devastation shot next turn.',
+  'skill.str_phase_shroud.name': 'Phase Shroud',
+  'skill.str_phase_shroud.desc':
+    'Special: Engages phase cloak, becoming untargetable by single-target attacks for 2 turns.',
+  'skill.str_skyfall_protocol.name': 'Skyfall Saturation',
+  'skill.str_skyfall_protocol.desc':
+    'Elite (1x/battle): Calls orbital cluster ordnance striking all enemies for 220% damage.',
+  'skill.str_passive_ordnance.name': 'High-Yield Warheads',
+  'skill.str_passive_ordnance.desc':
+    'Passive: Permanently increases all Skill damage by +5% per skill level.',
+
+  // SIEGE
+  'skill.sge_anchor_protocol.name': 'Anchor Siege Mode',
+  'skill.sge_anchor_protocol.desc':
+    'Toggle: Locks stabilizers for +60% damage dealt, but Evasion drops to 0. Toggle off for 0 SP.',
+  'skill.sge_bastion_lock.name': 'Bastion Bulwark',
+  'skill.sge_bastion_lock.desc':
+    'Toggle: Diverts core power for +80% DEF & +30% Shield, reducing damage dealt by 30%.',
+  'skill.sge_grav_bolas.name': 'Grav-Pulse Snare',
+  'skill.sge_grav_bolas.desc':
+    'Fires a heavy kinetic shell for 110% damage and inflicts Slow (-30% Speed) for 2 turns.',
+  'skill.sge_aegis_sunder.name': 'Aegis Sunder Cannon',
+  'skill.sge_aegis_sunder.desc':
+    'Fires an EMP disruptor for 80% damage that triggers Shield Break (disables shields for 2 turns).',
+  'skill.sge_thermal_mask.name': 'Thermal Masking',
+  'skill.sge_thermal_mask.desc':
+    'Special: Masks signature to become untargetable until your next attack. Cannot be used in Anchor Siege Mode.',
+  'skill.sge_starbreaker_lance.name': 'Starbreaker Rail-Lance',
+  'skill.sge_starbreaker_lance.desc':
+    'Elite (1x/battle): Fires a 400% hyper-velocity lance ignoring both Defense and Energy Shields.',
+  'skill.sge_passive_hull.name': 'Composite Bulkheads',
+  'skill.sge_passive_hull.desc':
+    'Passive: Permanently increases Defense by +4% per skill level.',
+
+  // INTERCEPTOR
+  'skill.int_sabot_burst.name': 'Sabot Needle Burst',
+  'skill.int_sabot_burst.desc':
+    'High-velocity armor-piercing burst dealing 130% damage while piercing 30% Defense.',
+  'skill.int_snap_riposte.name': 'Snap-Turn Riposte',
+  'skill.int_snap_riposte.desc':
+    'Enters counter posture: immediately retaliates against the next incoming enemy attack.',
+  'skill.int_afterburn_slip.name': 'Afterburner Slip',
+  'skill.int_afterburn_slip.desc':
+    'Slips into the Back Row (-15% incoming dmg) and boosts Evasion by +30% for 2 turns.',
+  'skill.int_mach_surge.name': 'Mach Overdrive',
+  'skill.int_mach_surge.desc':
+    'Ignites auxiliary thrusters, surging Turn Speed by +50% for 3 turns.',
+  'skill.int_ecm_blackout.name': 'ECM Blackout Jam',
+  'skill.int_ecm_blackout.desc':
+    'Floods an enemy craft with electronic warfare, inflicting Silence (blocks skills) for 2 turns.',
+  'skill.int_mirage_spin.name': 'Mirage Aileron Roll',
+  'skill.int_mirage_spin.desc':
+    'Special: Executes an impossible high-G evasive spiral, dodging all incoming attacks for 1 round.',
+  'skill.int_redline_fury.name': 'Redline Reactor Fury',
+  'skill.int_redline_fury.desc':
+    'Elite (1x/battle): Strips reactor limiters for +60% ATK & +40% Speed, at the cost of -30% DEF for 3 turns.',
+  'skill.int_passive_vectored.name': 'Vectored Nozzles',
+  'skill.int_passive_vectored.desc':
+    'Passive: Permanently increases Evasion by +3% and Speed by +2% per skill level.',
+
+  // SUPPORT
+  'skill.sup_nanite_mend.name': 'Nanite Hull Mend',
+  'skill.sup_nanite_mend.desc':
+    'Projects a concentrated repair beam restoring 30% Max HP to one selected ally.',
+  'skill.sup_regen_grid.name': 'Nanite Regen Grid',
+  'skill.sup_regen_grid.desc':
+    'Deploys fleet-wide repair drones restoring 10% Max HP per turn to all allies for 3 turns.',
+  'skill.sup_lidar_sweep.name': 'Lidar Tactical Sweep',
+  'skill.sup_lidar_sweep.desc':
+    'Reveals all stealthed hostiles and marks every enemy Exposed (+15% damage taken) for 2 turns.',
+  'skill.sup_flux_transfer.name': 'Flux Capacitor Link',
+  'skill.sup_flux_transfer.desc':
+    'Transfers reactor energy to one selected ally, immediately restoring +20 SP.',
+  'skill.sup_war_hymn.name': 'Tactical Fire-Link',
+  'skill.sup_war_hymn.desc':
+    'Synchronizes squadron targeting computers, granting +20% ATK to all allies for 3 turns.',
+  'skill.sup_aegis_field.name': 'Aegis Capacitor Pulse',
+  'skill.sup_aegis_field.desc':
+    'Pulses fleet capacitors, restoring +10 SP and recharging 25% Max Shield across all allies.',
+  'skill.sup_iron_canopy.name': 'Iron Canopy Matrix',
+  'skill.sup_iron_canopy.desc':
+    'Projects interlocking armor-reinforcement fields, granting +20% DEF to all allies for 3 turns.',
+  'skill.sup_slipstream_link.name': 'Slipstream Telemetry',
+  'skill.sup_slipstream_link.desc':
+    'Shares vector prediction across the wing, granting +20% EVA to all allies for 3 turns.',
+  'skill.sup_stasis_shell.name': 'Chrono Stasis Shell',
+  'skill.sup_stasis_shell.desc':
+    'Special: Encases one selected ally in an impenetrable stasis field (100% damage immunity) for 1 round.',
+  'skill.sup_system_purge.name': 'Squad System Purge',
+  'skill.sup_system_purge.desc':
+    'Special: Purges all negative statuses (Burn, Slow, Silence, Shield Break, Exposed) from all allies.',
+  'skill.sup_genesis_wave.name': 'Genesis Recovery Wave',
+  'skill.sup_genesis_wave.desc':
+    'Elite (1x/battle): Restores 100% Hull HP & Energy Shields and cleanses all debuffs for the entire squadron.',
+  'skill.sup_passive_capacitor.name': 'Auxiliary SP Capacitor',
+  'skill.sup_passive_capacitor.desc':
+    'Passive: Permanently regenerates +1 additional SP per turn per skill level.',
+
+  // Target labels
+  'skill.target.self': 'Self',
+  'skill.target.single_enemy': '1 Enemy',
+  'skill.target.multi_enemy': 'Up to 3 Enemies',
   'skill.target.all_enemies': 'All Enemies',
+  'skill.target.single_ally': '1 Ally',
   'skill.target.all_allies': 'All Allies',
-  'skill.target.single': 'Single Target',
-  'skill.target.multi': 'Single ({hits} hits)',
+
+  // Battle skill usability reasons
+  'battle.skillReason.silenced': 'Silenced — Skills blocked',
+  'battle.skillReason.charging': 'Charging weapon — Fires next turn',
+  'battle.skillReason.on_cooldown': 'Cooldown: {turns} turn(s)',
+  'battle.skillReason.already_used': 'Elite skill already used this battle',
+  'battle.skillReason.blocked_by_siege': 'Blocked while Anchor Siege Mode is ON',
+  'battle.skillReason.insufficient_sp': 'Insufficient SP (need {cost} SP)',
+  'battle.skillReason.class_mismatch': 'Class mismatch',
+  'battle.skillReason.not_equipped': 'Not slotted on Skill Bar',
 
   // Sectors
   'sector.border_outpost.name': 'Kestrel Relay Outpost',
@@ -252,7 +447,7 @@ export const EN_TRANSLATIONS = {
   'hangar.callsign': 'Pilot Callsign',
   'hangar.callsignPlaceholder': 'Pilot Name',
   'hangar.hostilesLevel': 'Hostiles ~Lv.{level}',
-  'hangar.statSubtitle': '+{perLevel} pts/level · Includes active Gear modules',
+  'hangar.statSubtitle': '+{perLevel} pts/level · Includes active Gear modules & passives',
   'hangar.availablePts': 'Unspent Pts',
   'hangar.perPt': '+{gain}/pt',
   'hangar.gearBonus': '(+{bonus} gear)',
@@ -281,16 +476,19 @@ export const EN_TRANSLATIONS = {
   'enchant.msg.failed':
     'Enchant failed ({rate}% chance). {item} remains +{level}; {cost} CR spent.',
 
-  // Shop Screen
-  'shop.title': 'Randomized Parts Market',
+  // Shop Screen + War Point Shop
+  'shop.title': 'Supply & War Point Exchange',
   'shop.subtitle':
-    'Fresh rolled modules auto-refresh after every battle, or refresh manually for {refreshCost} CR. Sell unequipped cargo at {ratio}%.',
+    'Buy/sell randomized ship modules with Credits, or redeem War Points for Special & Elite Skill Opening Cards.',
   'shop.availableCredits': 'Shared Credits',
+  'shop.availableWp': 'War Points',
   'shop.tabBuy': 'Market Stock ({count})',
   'shop.tabSell': 'Sell Cargo ({count})',
+  'shop.tabWarPoints': 'War Point Shop ({owned}/{total})',
   'shop.refreshStock': 'Refresh ({cost} CR)',
   'shop.refreshedMsg': 'Market stock refreshed with newly rolled modules!',
   'shop.equipInHangar': 'Equip in Gear Tab →',
+  'shop.goToSkillTab': 'Learn in Skill Tab →',
   'shop.filterSlot': 'Slot',
   'shop.allSlots': 'All Slots',
   'shop.filterClass': 'Class',
@@ -310,6 +508,13 @@ export const EN_TRANSLATIONS = {
   'shop.sellBtn': 'Sell',
   'shop.compareVs': 'vs Equipped ({gear}):',
   'shop.emptySlotGain': 'Empty slot (all stats gained)',
+  'shop.wpIntro':
+    'Earn War Points (WP) from orbital battles and first-time sector captures. Opening Cards permanently unlock Special & Elite skills for purchase in the Skill Tab.',
+  'shop.openingCardTitle': 'Opening Card: {skill}',
+  'shop.buyCardBtn': 'Buy Card ({cost} WP)',
+  'shop.insufficientWp': 'Need {cost} WP',
+  'shop.cardOwnedBadge': 'Card Owned',
+  'shop.cardBoughtMsg': 'Unlocked Opening Card for {skill} (-{cost} WP)! Learn it in the Skill Tab.',
 
   // Battle Screen
   'battle.round': 'Round {round}',
@@ -319,15 +524,20 @@ export const EN_TRANSLATIONS = {
   'battle.operational': '{alive} / {total} Active',
   'battle.hostileWing': 'Hostile Wing · {sector}',
   'battle.activeCount': '{alive} / {total} Hostiles',
-  'battle.yourTurn': 'Your Turn — Lock target and choose action',
+  'battle.yourTurn': 'Your Turn — Lock target and choose command or skill',
+  'battle.chargingTurn': 'Solar Capacitor charged — Auto-firing...',
   'battle.concluded': 'Engagement Concluded',
   'battle.aiTurn': 'AI Acting:',
-  'battle.targetLock': 'Target:',
+  'battle.targetLock': 'Enemy Lock:',
+  'battle.allyLock': 'Ally Lock:',
   'battle.actionAttack': 'Fire Weapons',
-  'battle.actionAttackSub': 'Primary cannons · +5 SP',
-  'battle.actionSkillSub': '{cost} SP · {target} · Lv.{lv}',
+  'battle.actionAttackSub': 'Primary · +5 SP',
   'battle.actionDefend': 'Raise Shield',
-  'battle.actionDefendSub': '-50% DMG · +12 SP · +SHD',
+  'battle.actionDefendSub': '-50% DMG · +12 SP',
+  'battle.skillBarTitle': 'Equipped Skill Bar',
+  'battle.noSkillsSlotted': 'No active skills equipped on this Gear.',
+  'battle.skillOnTag': 'ON',
+  'battle.skillUsedTag': 'USED',
   'battle.retreat': 'Retreat',
   'battle.skipAnim': 'Skip Anim',
   'battle.combatLog': 'Combat Log',
@@ -336,6 +546,7 @@ export const EN_TRANSLATIONS = {
   'battle.status.active': 'ACTING',
   'battle.status.defending': 'SHIELDED',
   'battle.status.targeted': 'LOCKED',
+  'battle.status.allyTarget': 'ALLY LOCK',
   'battle.status.player': 'PLAYER',
   'battle.status.standby': 'STANDBY',
 
@@ -352,6 +563,8 @@ export const EN_TRANSLATIONS = {
   'summary.levelUpDesc': 'Visit Garage to allocate new stat points for this Gear.',
   'summary.expEarned': '{gear} EXP',
   'summary.creditsAwarded': 'Credits Earned',
+  'summary.warPointsAwarded': 'War Points',
+  'summary.captureBonusNote': 'Includes +{wp} WP Base Capture',
   'summary.battlesToNext': '~{count} wins to Lv.{next}',
   'summary.maxLevelReached': 'Max Level (Lv.50)',
   'summary.sectorUnlocked': 'Unlocked Sector: {sector}',
@@ -368,15 +581,27 @@ export const EN_TRANSLATIONS = {
     '{actor} raises an Energy Shield (-50% dmg{shieldPart}{spPart}).',
   'log.healSquad':
     '{actor} activates {skill} (-{spCost} SP), restoring {total} Shield/HP across the wing.',
+  'log.healSingle':
+    '{actor} repairs {target} with {skill} for +{amount} HP.',
+  'log.energize':
+    '{actor} transfers +{amount} SP to {target} via {skill}.',
   'log.evade': '{target} barrel-rolls and evades {action} from {actor}!',
   'log.damage':
     '{actor} hits {target} with {action} for {breakdown}{critTag}{defendTag}.',
   'log.destroyed': '{target} ({className}) exploded!',
   'log.statusApplied': '{target} afflicted with {status} ({turns}t)!',
   'log.burnTick': '{target} suffers {damage} hull burn damage!',
-  'log.statusCleansed': '{actor} cleansed negative statuses from allies.',
+  'log.regenTick': '{target} regenerates +{amount} hull HP!',
+  'log.statusCleansed': '{actor} purged all negative statuses from allies.',
   'log.splashDamage': '{actor} splash ordnance hits {target} for {damage}!',
   'log.retreat': '{actor} ordered a tactical retreat from the sector.',
+  'log.buffApplied': '{actor} activated {skill} (-{spCost} SP).',
+  'log.stanceToggle': '{actor} switched {skill} {state}.',
+  'log.charging': '{actor} begins charging {skill} — impact imminent next turn!',
+  'log.counterAttack': '{target} executes Snap-Turn Riposte against {actor} for {damage}!',
+  'log.scanReveal': '{actor} sweeps with {skill}, revealing {revealed} cloaked craft & exposing hostiles!',
+  'log.invincibleBlock': '{target} stasis barrier negates all damage from {actor}!',
+  'log.silencedBlocked': '{actor} is Silenced and cannot fire skills — defaults to Primary Lasers.',
   'log.primaryWeapons': 'Primary Lasers',
   'log.breakdownBoth': '{shield} SHD, {hp} HP',
   'log.breakdownShield': '{shield} SHD',

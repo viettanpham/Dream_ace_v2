@@ -1,8 +1,13 @@
-import type { BattleSpeed, ItemRarity, SectorDifficulty } from '../types/game';
+import type {
+  BattleSpeed,
+  ItemRarity,
+  SectorDifficulty,
+  SkillCategory,
+} from '../types/game';
 
 /**
  * Single centralized balance & economy configuration file for DREAM ACE.
- * All leveling, reward, shop, enchant, garage, and skill upgrade constants live here.
+ * All leveling, reward, War Points, skill shop, shop, enchant, and garage constants live here.
  */
 export const BALANCE_CONFIG = {
   // ---- Per-Gear Progression ----
@@ -11,9 +16,9 @@ export const BALANCE_CONFIG = {
   initialStatPoints: 3,
   statPointsPerLevel: 3,
   startingCredits: 350,
+  startingWarPoints: 0,
 
   // EXP to next level = Math.round(expBase * level ^ expExponent)
-  // 60 * level^1.4 -> Lv1->2: 60, Lv2->3: 158, Lv3->4: 279, Lv4->5: 418 (total 915 EXP; ~4-8 battles)
   expBase: 60,
   expExponent: 1.4,
 
@@ -27,12 +32,21 @@ export const BALANCE_CONFIG = {
   enemyCreditsPerLevel: 20,
   bossRewardMultiplier: 5,
 
+  // War Points earned from battles & base captures
+  warPointsPerEnemyBase: 4,
+  warPointsPerEnemyLevel: 1,
+  warPointsBaseCaptureBonus: {
+    Standard: 40,
+    Hard: 80,
+    Elite: 140,
+  } as Record<SectorDifficulty, number>,
+
   // Victory = 100%; Defeat/Retreat = 50% of destroyed enemies + 20% flat consolation of full victory
   victoryRewardRatio: 1.0,
   defeatDestroyedRatio: 0.5,
   defeatConsolationRatio: 0.2,
 
-  // ---- Garage Unlock Prices (by number of Gears currently owned: 1 -> 2nd Gear, etc.) ----
+  // ---- Garage Unlock Prices (by number of Gears currently owned) ----
   garageUnlockPrices: [0, 800, 2000, 4500] as readonly number[],
 
   // ---- Shop Economy ----
@@ -42,16 +56,28 @@ export const BALANCE_CONFIG = {
 
   // ---- Enchant (+0 to +10) ----
   enchantMaxLevel: 10,
-  enchantBonusPerLevel: 0.08, // +8% rolled stats per level
+  enchantBonusPerLevel: 0.08,
   enchantSuccessRates: [100, 92, 84, 75, 66, 58, 50, 42, 36, 30] as readonly number[],
   enchantBaseCostFloor: 40,
   enchantPriceCostFactor: 0.14,
   enchantLevelCostStep: 0.45,
 
-  // ---- Skill Levels (1 to 5) ----
+  // ---- Gear Skill System (Levels 1-5, +10% effect/level, 6-slot active bar) ----
+  maxEquippedActiveSkills: 6,
   skillMaxLevel: 5,
-  // Cost to upgrade FROM level -> level+1 (index 0 = Lv1->2, index 3 = Lv4->5)
+  skillEffectScalePerLevel: 0.1, // +10% effect per level above Lv1
+  skillLevelReqStep: 4, // Gear level needed for skill Lv n = unlockLevel + 4 * (n - 1)
+  skillLearnBaseCost: {
+    normal: 160,
+    passive: 220,
+    special: 420,
+    elite: 750,
+  } as Record<SkillCategory, number>,
   skillUpgradeCosts: [250, 550, 1100, 2200] as readonly number[],
+  openingCardCosts: {
+    special: 80,
+    elite: 160,
+  },
 
   // ---- Randomized Item Rarity Config ----
   rarityAffixCount: {
@@ -112,6 +138,7 @@ export const BALANCE_CONFIG = {
   burnDamageRatio: 0.08, // 8% of Max HP per turn
   slowSpeedPenalty: 0.3, // -30% Turn Speed
   shieldBreakDuration: 2,
+  backRowDamageReduction: 0.15, // 15% damage reduction in back row unless attacker is in Siege Mode
 
   // ---- Battle Speed Delays (ms) ----
   battleSpeedDelays: {
@@ -159,4 +186,18 @@ export function getSkillUpgradeCost(currentLevel: number): number | null {
   if (currentLevel >= BALANCE_CONFIG.skillMaxLevel) return null;
   const idx = Math.max(0, currentLevel - 1);
   return BALANCE_CONFIG.skillUpgradeCosts[idx] ?? null;
+}
+
+export function getSkillPurchaseCost(
+  category: SkillCategory,
+  unlockLevel: number,
+  targetLevel: number
+): number {
+  const base = BALANCE_CONFIG.skillLearnBaseCost[category] + unlockLevel * 18;
+  if (targetLevel <= 1) return base;
+  const stepCost =
+    BALANCE_CONFIG.skillUpgradeCosts[
+      Math.min(BALANCE_CONFIG.skillUpgradeCosts.length - 1, targetLevel - 2)
+    ] ?? 500;
+  return Math.round(stepCost + unlockLevel * 20);
 }

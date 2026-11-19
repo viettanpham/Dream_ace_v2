@@ -1,12 +1,39 @@
-import { Flame, Shield, ShieldOff, Skull, Snowflake } from 'lucide-react';
+import {
+  Anchor,
+  BatteryCharging,
+  Castle,
+  EyeOff,
+  Flame,
+  Gauge,
+  Heart,
+  Radio,
+  RotateCcw,
+  Shield,
+  ShieldAlert,
+  ShieldOff,
+  Skull,
+  Snowflake,
+  Sparkles,
+  Sun,
+  Swords,
+  Target,
+  Wind,
+  Zap,
+} from 'lucide-react';
 import { getEffectiveUnitSpeed, hasStatus } from '../engine/combat';
 import {
   getArchetypeLabel,
   getClassName,
+  getStatusDesc,
   getStatusLabel,
   useI18n,
 } from '../i18n';
-import type { CombatUnit, FloatingPopup } from '../types/game';
+import type {
+  ActiveStatusEffect,
+  CombatUnit,
+  FloatingPopup,
+  StatusEffectType,
+} from '../types/game';
 import { FighterSvg } from './FighterSvg';
 
 interface BattleUnitCardProps {
@@ -57,6 +84,96 @@ function getPopupColor(tone: FloatingPopup['tone']): string {
   }
 }
 
+function getStatusBadgeStyle(st: ActiveStatusEffect): string {
+  switch (st.type) {
+    case 'burn':
+      return 'border-orange-500/50 bg-orange-500/15 text-orange-300';
+    case 'shield_break':
+    case 'def_down':
+    case 'vulnerable':
+      return 'border-red-500/50 bg-red-500/15 text-red-300';
+    case 'slow':
+      return 'border-cyan-500/50 bg-cyan-500/15 text-cyan-300';
+    case 'silence':
+      return 'border-fuchsia-500/50 bg-fuchsia-500/15 text-fuchsia-300';
+    case 'stealth':
+      return 'border-purple-400/60 bg-purple-500/15 text-purple-200';
+    case 'siege_mode':
+    case 'siege_defense':
+    case 'charging':
+      return 'border-amber-400/60 bg-amber-500/15 text-amber-300';
+    case 'invincible':
+    case 'evade_all':
+    case 'regen_hp':
+      return 'border-emerald-400/60 bg-emerald-500/15 text-emerald-300';
+    default:
+      return 'border-sky-400/50 bg-sky-500/15 text-sky-200';
+  }
+}
+
+function StatusMiniIcon({ type }: { type: StatusEffectType }) {
+  const cls = 'w-2.5 h-2.5 shrink-0';
+  switch (type) {
+    case 'burn':
+      return <Flame className={cls} />;
+    case 'shield_break':
+      return <ShieldOff className={cls} />;
+    case 'slow':
+      return <Snowflake className={cls} />;
+    case 'silence':
+      return <Radio className={cls} />;
+    case 'stealth':
+      return <EyeOff className={cls} />;
+    case 'vulnerable':
+    case 'def_down':
+      return <ShieldAlert className={cls} />;
+    case 'siege_mode':
+      return <Anchor className={cls} />;
+    case 'siege_defense':
+      return <Castle className={cls} />;
+    case 'charging':
+      return <BatteryCharging className={cls} />;
+    case 'sure_hit':
+      return <Target className={cls} />;
+    case 'counter':
+      return <RotateCcw className={cls} />;
+    case 'evade_all':
+      return <Sparkles className={cls} />;
+    case 'invincible':
+      return <Sun className={cls} />;
+    case 'regen_hp':
+      return <Heart className={cls} />;
+    case 'spd_up':
+      return <Gauge className={cls} />;
+    case 'eva_up':
+      return <Wind className={cls} />;
+    case 'atk_up':
+    case 'primary_dmg_up':
+      return <Swords className={cls} />;
+    case 'skill_dmg_up':
+      return <Zap className={cls} />;
+    case 'def_up':
+    default:
+      return <Shield className={cls} />;
+  }
+}
+
+function formatStatusSuffix(st: ActiveStatusEffect): string {
+  if (st.type === 'siege_mode' || st.type === 'siege_defense') {
+    return 'ON';
+  }
+  if (st.type === 'charging') {
+    return '⚡';
+  }
+  if (st.charges && st.charges > 0) {
+    return `${st.charges}x`;
+  }
+  if (st.turnsRemaining >= 50) {
+    return '∞';
+  }
+  return `${st.turnsRemaining}t`;
+}
+
 export function BattleUnitCard({
   unit,
   isActiveTurn,
@@ -80,6 +197,7 @@ export function BattleUnitCard({
 
   const isEnemy = unit.side === 'enemy';
   const shieldBroken = hasStatus(unit, 'shield_break');
+  const isStealthed = hasStatus(unit, 'stealth');
   const effectiveSpeed = getEffectiveUnitSpeed(unit);
 
   const hpBarColor =
@@ -96,7 +214,9 @@ export function BattleUnitCard({
     : unit.isDefending
     ? t('battle.status.defending')
     : isTargeted
-    ? t('battle.status.targeted')
+    ? isEnemy
+      ? t('battle.status.targeted')
+      : t('battle.status.allyTarget')
     : unit.isPlayer
     ? t('battle.status.player')
     : t('battle.status.standby');
@@ -106,7 +226,9 @@ export function BattleUnitCard({
     : isActiveTurn
     ? 'border-amber-400 bg-[#141D2C] shadow-[0_0_0_1px_rgba(251,191,36,0.35)]'
     : isTargeted
-    ? 'border-red-400/90 bg-[#1B1319] shadow-[0_0_0_1px_rgba(248,113,113,0.35)]'
+    ? isEnemy
+      ? 'border-red-400/90 bg-[#1B1319] shadow-[0_0_0_1px_rgba(248,113,113,0.35)]'
+      : 'border-emerald-400/90 bg-[#0F1E1A] shadow-[0_0_0_1px_rgba(52,211,153,0.35)]'
     : unit.isBoss
     ? 'border-amber-500/60 bg-[#16111B]/95 hover:border-amber-400'
     : 'border-slate-800/90 bg-[#0E141F]/95 hover:border-slate-700';
@@ -131,7 +253,10 @@ export function BattleUnitCard({
       {...interactiveProps}
       className={`relative rounded-lg border p-3 transition-colors select-none ${cardBorder} ${
         canTarget && unit.alive ? 'cursor-pointer' : ''
-      } ${getAnimClass(unit, skipAnimations)}`}
+      } ${isStealthed && unit.alive ? 'border-dashed opacity-85' : ''} ${getAnimClass(
+        unit,
+        skipAnimations
+      )}`}
     >
       {/* Floating Popups (skipped when skipAnimations active) */}
       {!skipAnimations &&
@@ -152,14 +277,18 @@ export function BattleUnitCard({
           isEnemy ? 'flex-row-reverse text-right' : 'flex-row text-left'
         }`}
       >
-        <div className="relative shrink-0">
+        <div
+          className={`relative shrink-0 ${
+            isStealthed && unit.alive ? 'opacity-60' : ''
+          }`}
+        >
           <FighterSvg
             classId={unit.classId}
             side={unit.side}
             facing={isEnemy ? 'left' : 'right'}
             size="md"
             destroyed={!unit.alive}
-            defending={unit.isDefending}
+            defending={unit.isDefending || hasStatus(unit, 'invincible')}
             impactFlash={!skipAnimations && unit.animState === 'hit'}
             exploding={!skipAnimations && exploding}
           />
@@ -181,6 +310,11 @@ export function BattleUnitCard({
                   <Skull className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                 )}
                 <span className="truncate">{unit.name}</span>
+                {unit.row === 'back' && unit.alive && (
+                  <span className="px-1 py-0.5 rounded bg-sky-500/15 border border-sky-400/40 text-[9px] font-mono-nums font-semibold text-sky-300 shrink-0">
+                    {t('common.backRow')}
+                  </span>
+                )}
               </div>
               <div className="mt-0.5 text-[11px] text-slate-400 truncate">
                 {unit.archetype
@@ -192,6 +326,8 @@ export function BattleUnitCard({
                   className={`font-mono-nums ${
                     hasStatus(unit, 'slow')
                       ? 'text-cyan-400 font-semibold'
+                      : hasStatus(unit, 'spd_up')
+                      ? 'text-emerald-400 font-semibold'
                       : 'text-slate-300'
                   }`}
                 >
@@ -207,7 +343,9 @@ export function BattleUnitCard({
                   : isActiveTurn
                   ? 'text-amber-400'
                   : isTargeted
-                  ? 'text-red-400'
+                  ? isEnemy
+                    ? 'text-red-400'
+                    : 'text-emerald-400'
                   : unit.isDefending
                   ? 'text-sky-400'
                   : unit.isPlayer
@@ -220,32 +358,24 @@ export function BattleUnitCard({
             </div>
           </div>
 
-          {/* Active Status Effects Row */}
+          {/* Active Status Effects Row (all buffs, debuffs, stances) */}
           {unit.alive && unit.statuses.length > 0 && (
             <div
-              className={`flex flex-wrap items-center gap-1.5 ${
+              className={`flex flex-wrap items-center gap-1 ${
                 isEnemy ? 'justify-end' : 'justify-start'
               }`}
             >
               {unit.statuses.map((st) => (
                 <span
                   key={st.type}
-                  title={t(`status.${st.type}.desc`)}
-                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono-nums font-semibold border ${
-                    st.type === 'burn'
-                      ? 'border-orange-500/50 bg-orange-500/15 text-orange-300'
-                      : st.type === 'shield_break'
-                      ? 'border-red-500/50 bg-red-500/15 text-red-300'
-                      : 'border-cyan-500/50 bg-cyan-500/15 text-cyan-300'
-                  }`}
+                  title={getStatusDesc(lang, st.type)}
+                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono-nums font-semibold border ${getStatusBadgeStyle(
+                    st
+                  )}`}
                 >
-                  {st.type === 'burn' && <Flame className="w-2.5 h-2.5" />}
-                  {st.type === 'shield_break' && (
-                    <ShieldOff className="w-2.5 h-2.5" />
-                  )}
-                  {st.type === 'slow' && <Snowflake className="w-2.5 h-2.5" />}
+                  <StatusMiniIcon type={st.type} />
                   <span>
-                    {getStatusLabel(lang, st.type)} {st.turnsRemaining}t
+                    {getStatusLabel(lang, st.type)} {formatStatusSuffix(st)}
                   </span>
                 </span>
               ))}

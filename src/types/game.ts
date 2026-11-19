@@ -31,37 +31,199 @@ export interface DerivedStats {
   skillPower: number;
   armorPiercePct: number; // from equipped weapon/item traits (0 to 50)
   splashPct: number; // splash damage % on basic attacks (0 to 40)
-  spRegenPerTurn: number; // bonus SP regen per turn from item traits
+  spRegenPerTurn: number; // bonus SP regen per turn from item traits + passives
+  passiveSkillDmgPct: number; // from Striker passive
 }
 
-export type StatusEffectType = 'burn' | 'shield_break' | 'slow';
+export type StatusEffectType =
+  | 'burn'
+  | 'shield_break'
+  | 'slow'
+  | 'silence'
+  | 'stealth'
+  | 'vulnerable'
+  | 'def_up'
+  | 'def_down'
+  | 'eva_up'
+  | 'atk_up'
+  | 'spd_up'
+  | 'primary_dmg_up'
+  | 'skill_dmg_up'
+  | 'sure_hit'
+  | 'counter'
+  | 'evade_all'
+  | 'invincible'
+  | 'regen_hp'
+  | 'siege_mode'
+  | 'siege_defense'
+  | 'charging';
 
 export interface ActiveStatusEffect {
   type: StatusEffectType;
-  turnsRemaining: number;
+  turnsRemaining: number; // 99 for active toggle stances
+  magnitude?: number; // e.g., 0.25 = +25%
+  charges?: number; // e.g., sure_hit (2), counter (1)
+  breakOnAttack?: boolean; // Camouflage breaks on next attack
+  isDebuff?: boolean;
+  sourceSkillId?: string;
+  targetId?: string; // stored target for Charge Shot
   sourceName?: string;
 }
 
-export type SkillTargetType = 'single_enemy' | 'all_enemies' | 'all_allies';
+export type SkillClassScope = 'general' | MechClassId;
+
+export type SkillCategory = 'normal' | 'special' | 'elite' | 'passive';
+
+export type SkillTargetType =
+  | 'self'
+  | 'single_enemy'
+  | 'multi_enemy'
+  | 'all_enemies'
+  | 'single_ally'
+  | 'all_allies';
+
+export type SkillIconKey =
+  | 'shield'
+  | 'wind'
+  | 'flame'
+  | 'crosshair'
+  | 'target'
+  | 'zap'
+  | 'bomb'
+  | 'battery'
+  | 'ghost'
+  | 'orbit'
+  | 'anchor'
+  | 'fortress'
+  | 'snowflake'
+  | 'shield_off'
+  | 'eye_off'
+  | 'ray'
+  | 'sword'
+  | 'rotate'
+  | 'corner_down_left'
+  | 'gauge'
+  | 'radio'
+  | 'sparkles'
+  | 'skull'
+  | 'heart'
+  | 'radar'
+  | 'bolt'
+  | 'plus_circle'
+  | 'waves'
+  | 'swords'
+  | 'shield_plus'
+  | 'feather'
+  | 'sun'
+  | 'cleanse'
+  | 'star';
+
+export type SkillEffectKind =
+  | 'buff_def'
+  | 'buff_eva'
+  | 'buff_primary_dmg'
+  | 'buff_skill_dmg'
+  | 'buff_sure_hit'
+  | 'multi_attack'
+  | 'splash_attack'
+  | 'charge_attack'
+  | 'stealth_turns'
+  | 'aoe_elite_attack'
+  | 'toggle_siege_mode'
+  | 'toggle_siege_defense'
+  | 'attack_slow'
+  | 'attack_shield_break'
+  | 'stealth_until_attack'
+  | 'pierce_all_elite'
+  | 'attack_pierce'
+  | 'counter_stance'
+  | 'retreat_back_eva'
+  | 'buff_speed'
+  | 'silence_target'
+  | 'evade_all_round'
+  | 'berserker_buff'
+  | 'heal_single'
+  | 'scan_reveal'
+  | 'energize_single'
+  | 'heal_field_hot'
+  | 'energize_shield_field'
+  | 'team_atk_up'
+  | 'team_def_up'
+  | 'team_eva_up'
+  | 'invincible_ally'
+  | 'purify_team'
+  | 'full_recovery_elite'
+  | 'passive_skill_dmg'
+  | 'passive_def_pct'
+  | 'passive_eva_spd'
+  | 'passive_sp_regen';
 
 export interface SkillDefinition {
   id: string;
-  name: string;
-  description: string;
+  classScope: SkillClassScope;
+  category: SkillCategory;
+  icon: SkillIconKey;
+  unlockLevel: number;
   spCost: number;
-  spCostPerLevel: number;
+  cooldown: number; // turns (0 for toggles / passives / once-per-battle)
   targetType: SkillTargetType;
-  powerMultiplier: number;
-  powerPerLevel: number;
-  defensePierce: number; // 0 to 1
-  hits: number;
-  bonusCrit: number; // percentage points
-  shieldRestoreRatio: number; // % of maxShield restored (for support skills)
-  hpRestoreRatio: number; // % of maxHp restored (for support skills)
-  appliesStatus?: StatusEffectType;
-  statusDuration?: number;
-  statusChance?: number; // 0 to 1
-  cleansesStatus?: boolean;
+  effectKind: SkillEffectKind;
+  powerMultiplier?: number; // e.g., 1.3 for 130%
+  secondaryRatio?: number; // e.g., 0.5 for 50% splash, 0.3 for 30% pierce
+  buffMagnitude?: number; // e.g., 0.25 for +25%
+  secondaryMagnitude?: number; // e.g., second stat bonus in dual buffs
+  duration?: number; // turns
+  maxTargets?: number; // e.g., 3 for Strafing Run
+  charges?: number; // e.g., 2 for Target Lock
+  spAmount?: number; // e.g., +20 SP / +10 SP
+  oncePerBattle?: boolean;
+  isToggle?: boolean;
+  openingCardId?: string;
+}
+
+export interface OpeningCardDefinition {
+  id: string;
+  skillId: string;
+  classId: MechClassId;
+  category: 'special' | 'elite';
+  warPointCost: number;
+}
+
+export interface SkillValidationResult {
+  ok: boolean;
+  reason:
+    | 'ok'
+    | 'invalid_gear'
+    | 'invalid_skill'
+    | 'class_mismatch'
+    | 'max_level'
+    | 'missing_card'
+    | 'level_too_low'
+    | 'insufficient_credits'
+    | 'is_passive'
+    | 'not_learned'
+    | 'already_equipped'
+    | 'bar_full';
+  requiredGearLevel?: number;
+  requiredCardId?: string;
+  cost?: number;
+}
+
+export interface BattleSkillUsability {
+  canUse: boolean;
+  reason:
+    | 'ok'
+    | 'class_mismatch'
+    | 'not_equipped'
+    | 'silenced'
+    | 'charging'
+    | 'on_cooldown'
+    | 'already_used'
+    | 'blocked_by_siege'
+    | 'insufficient_sp';
+  cooldownRemaining: number;
+  spCost: number;
+  isToggleActive?: boolean;
 }
 
 export interface MechClassDefinition {
@@ -110,7 +272,7 @@ export interface ItemSpecialTraits {
   armorPiercePct?: number;
   splashPct?: number;
   spRegenPerTurn?: number;
-  evasionMod?: number; // can be negative on heavy cannons
+  evasionMod?: number;
 }
 
 export interface ItemTemplate {
@@ -155,10 +317,6 @@ export interface ItemInstance {
   specialTraits?: ItemSpecialTraits;
 }
 
-/**
- * Each Gear stores references (instanceId) to items owned in PilotAccount.inventory.
- * An item instanceId can only be referenced by at most ONE Gear at a time.
- */
 export type EquippedSlotIds = Record<EquipmentSlot, string | null>;
 
 export interface EquipValidationResult {
@@ -194,7 +352,8 @@ export interface GearUnit {
   unspentPoints: number;
   allocatedPoints: StatBlock;
   equipped: EquippedSlotIds;
-  skillLevels: Record<string, number>; // skillId -> 1..5
+  skillLevels: Record<string, number>; // learned skillId -> 1..5
+  equippedSkillBar: string[]; // up to 6 active skills (class + general only)
   battlesWon: number;
   battlesFought: number;
 }
@@ -202,15 +361,20 @@ export interface GearUnit {
 export interface PilotAccount {
   name: string;
   credits: number;
+  warPoints: number;
+  ownedOpeningCards: string[];
   inventory: ItemInstance[];
   gears: Record<MechClassId, GearUnit>;
   activeGearId: MechClassId;
   unlockedSectorIds: string[];
+  capturedSectorIds: string[];
 }
 
 export type EnemyArchetype = 'drone' | 'gunship' | 'sniper' | 'repair_ship';
 
 export type CombatSide = 'ally' | 'enemy';
+
+export type CombatRow = 'front' | 'back';
 
 export type UnitAnimState =
   | 'idle'
@@ -226,12 +390,17 @@ export interface CombatUnit {
   name: string;
   callsign: string;
   side: CombatSide;
+  row: CombatRow;
   isPlayer: boolean;
   classId: MechClassId;
   archetype?: EnemyArchetype;
   isBoss?: boolean;
   level: number;
-  skillLevel: number;
+  skillLevel: number; // fallback for NPCs
+  skillLevels: Record<string, number>;
+  equippedSkillIds: string[]; // up to 6 active skills
+  skillCooldowns: Record<string, number>; // skillId -> turns remaining
+  usedOnceSkills: string[]; // Elite skills already consumed this battle
   stats: StatBlock;
   derived: DerivedStats;
   hp: number;
@@ -277,14 +446,24 @@ export type CombatLogTemplateKey =
   | 'log.battleStart'
   | 'log.defend'
   | 'log.healSquad'
+  | 'log.healSingle'
+  | 'log.energize'
   | 'log.evade'
   | 'log.damage'
   | 'log.destroyed'
   | 'log.statusApplied'
   | 'log.burnTick'
+  | 'log.regenTick'
   | 'log.statusCleansed'
   | 'log.splashDamage'
-  | 'log.retreat';
+  | 'log.retreat'
+  | 'log.buffApplied'
+  | 'log.stanceToggle'
+  | 'log.charging'
+  | 'log.counterAttack'
+  | 'log.scanReveal'
+  | 'log.invincibleBlock'
+  | 'log.silencedBlocked';
 
 export interface CombatLogEntry {
   id: string;
@@ -316,6 +495,8 @@ export interface BattleSummary {
   rounds: number;
   expGained: number;
   creditsGained: number;
+  warPointsGained: number;
+  baseCaptureBonusWp: number;
   leveledUp: boolean;
   previousLevel: number;
   newLevel: number;
@@ -332,10 +513,11 @@ export interface BattleState {
   sectorId: string;
   deployedGearId: MechClassId;
   units: CombatUnit[];
-  turnOrder: string[]; // unit IDs sorted by effective speed
+  turnOrder: string[];
   activeTurnIndex: number;
   round: number;
   selectedTargetId: string | null;
+  selectedAllyTargetId: string | null;
   log: CombatLogEntry[];
   popups: FloatingPopup[];
   fxEvents: CombatFxEvent[];

@@ -1,12 +1,9 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import {
-  BALANCE_CONFIG,
-  getGarageUnlockCost,
-  getSkillUpgradeCost,
-} from '../data/balance';
-import { EMPTY_STAT_BLOCK, MECH_CLASSES, MECH_CLASS_LIST } from '../data/classes';
+import { BALANCE_CONFIG, getGarageUnlockCost } from '../data/balance';
+import { EMPTY_STAT_BLOCK, MECH_CLASS_LIST } from '../data/classes';
 import { getNextSectorId, SECTORS_CATALOG } from '../data/maps';
+import { getSkillById } from '../data/skills';
 import {
   calculateBattleRewards,
   chooseAiDecision,
@@ -32,6 +29,12 @@ import {
   migrateSaveData,
 } from '../engine/migration';
 import {
+  buyOpeningCard,
+  equipSkillToGearBar,
+  learnOrUpgradeSkillOnGear,
+  unequipSkillFromGearBar,
+} from '../engine/skills';
+import {
   allocateGearStats,
   applyExpToGear,
   estimateBattlesToNextLevel,
@@ -54,12 +57,15 @@ import type {
   MechClassId,
   PilotAccount,
   ScreenState,
+  SkillValidationResult,
   StatBlock,
 } from '../types/game';
 import { soundFx } from '../utils/sound';
 
+export type ShopSubTab = 'buy' | 'sell' | 'warpoints';
+
 interface GameStoreState {
-  // Persisted state (v4 per-Gear model)
+  // Persisted state (v5 per-Gear + full Skill System + War Points)
   pilot: PilotAccount;
   shopStock: ItemInstance[];
   selectedSectorId: string;
@@ -73,6 +79,7 @@ interface GameStoreState {
   // Session UI / Battle state (transient)
   screen: ScreenState;
   activeTab: BaseTab;
+  shopSubTab: ShopSubTab;
   battle: BattleState | null;
   adminPanelOpen: boolean;
 
@@ -82,6 +89,8 @@ interface GameStoreState {
   // Navigation & Campaign creation
   setScreen: (screen: ScreenState) => void;
   setActiveTab: (tab: BaseTab) => void;
+  setShopSubTab: (subTab: ShopSubTab) => void;
+  openWarPointShop: () => void;
   startCampaign: (pilotName?: string, starterClassId?: MechClassId) => void;
   continueCampaign: () => void;
   resetCampaign: () => void;
@@ -92,8 +101,19 @@ interface GameStoreState {
   buyGear: (classId: MechClassId) => { ok: boolean; cost: number };
   commitStatAllocations: (pending: StatBlock) => void;
   resetStatAllocations: () => void;
-  upgradeActiveGearSkill: () => { ok: boolean; newLevel: number };
   selectSector: (sectorId: string) => void;
+
+  // Gear Skill System actions (engine-enforced class locks & per-Gear bars)
+  learnOrUpgradeSkill: (
+    skillId: string
+  ) => { validation: SkillValidationResult; newLevel: number };
+  equipSkillToBar: (skillId: string) => SkillValidationResult;
+  unequipSkillFromBar: (skillId: string) => void;
+  buyOpeningCardAction: (cardId: string) => {
+    ok: boolean;
+    reason: 'ok' | 'invalid_card' | 'already_owned' | 'insufficient_wp';
+    cost: number;
+  };
 
   // Equipment, Shop & Enchant actions
   equipItem: (instanceId: string) => EquipValidationResult;
@@ -107,7 +127,8 @@ interface GameStoreState {
   // Battle actions
   startBattle: (sectorId?: string) => void;
   selectTarget: (unitId: string) => void;
-  performPlayerAction: (action: ActionType) => void;
+  selectAllyTarget: (unitId: string) => void;
+  performPlayerAction: (action: ActionType, skillId?: string) => void;
   performAiTurn: () => void;
   retreatBattle: () => void;
   forceWinBattle: () => void;
@@ -131,6 +152,8 @@ interface GameStoreState {
   adminResetGearAllocation: () => void;
   adminSetCredits: (amount: number) => void;
   adminAddCredits: (delta: number) => void;
+  adminSetWarPoints: (amount: number) => void;
+  adminAddWarPoints: (delta: number) => void;
   adminGenerateItems: (
     slot: EquipmentSlot,
     tier: number,
@@ -202,11 +225,14 @@ function finalizeBattleOutcome(
 ): Partial<GameStoreState> {
   const deployedGearId = battle.deployedGearId;
   const deployedGear = state.pilot.gears[deployedGearId];
+  const alreadyCaptured = state.pilot.capturedSectorIds.includes(battle.sectorId);
 
   const rewards = calculateBattleRewards(
     updatedUnits,
     won,
-    state.adminConfig.rewardMultiplier
+    state.adminConfig.rewardMultiplier,
+    battle.sectorId,
+    alreadyCaptured
   );
   const droppedItems = rollBattleItemDrops(
     updatedUnits.filter((u) => u.side === 'enemy'),
@@ -222,10 +248,14 @@ function finalizeBattleOutcome(
     rewards.fullVictoryExp
   );
 
-  // Unlock next campaign sector on victory
+  // Unlock next campaign sector & record base capture on victory
   let unlockedSectorId: string | null = null;
   let nextUnlockedSectors = state.pilot.unlockedSectorIds;
+  let nextCapturedSectors = state.pilot.capturedSectorIds;
   if (won) {
+    if (!alreadyCaptured) {
+      nextCapturedSectors = [...state.pilot.capturedSectorIds, battle.sectorId];
+    }
     const candidateNext = getNextSectorId(battle.sectorId);
     if (candidateNext && !state.pilot.unlockedSectorIds.includes(candidateNext)) {
       unlockedSectorId = candidateNext;
@@ -236,15 +266,17 @@ function finalizeBattleOutcome(
   const nextPilot: PilotAccount = {
     ...state.pilot,
     credits: state.pilot.credits + rewards.creditsGained,
+    warPoints: state.pilot.warPoints + rewards.warPointsGained,
     inventory: [...droppedItems, ...state.pilot.inventory],
     gears: {
       ...state.pilot.gears,
       [deployedGearId]: levelResult.updatedGear,
     },
     unlockedSectorIds: nextUnlockedSectors,
+    capturedSectorIds: nextCapturedSectors,
   };
 
-  // Auto-refresh randomized shop stock after every battle!
+  // Auto-refresh randomized shop stock after every battle
   const refreshedShopStock = generateShopStock(
     levelResult.updatedGear.level,
     BALANCE_CONFIG.shopStockSize
@@ -276,6 +308,8 @@ function finalizeBattleOutcome(
         rounds: battle.round,
         expGained: rewards.expGained,
         creditsGained: rewards.creditsGained,
+        warPointsGained: rewards.warPointsGained,
+        baseCaptureBonusWp: rewards.baseCaptureBonusWp,
         leveledUp: levelResult.leveledUp,
         previousLevel: levelResult.previousLevel,
         newLevel: levelResult.newLevel,
@@ -299,6 +333,7 @@ export const useGameStore = create<GameStoreState>()(
       ...initialFresh,
       screen: 'TITLE',
       activeTab: 'gear',
+      shopSubTab: 'buy',
       battle: null,
       adminPanelOpen: false,
 
@@ -321,12 +356,24 @@ export const useGameStore = create<GameStoreState>()(
         set({ screen: 'HANGAR', activeTab });
       },
 
+      setShopSubTab: (shopSubTab) => {
+        soundFx.playClick();
+        set({ shopSubTab });
+      },
+
+      openWarPointShop: () => {
+        soundFx.playClick();
+        set({ screen: 'HANGAR', activeTab: 'shop', shopSubTab: 'warpoints' });
+      },
+
       startCampaign: (pilotName, starterClassId) => {
         const state = get();
         soundFx.playConfirm();
         if (!state.hasSaveData) {
-          const cleanName = (pilotName ?? state.pilot.name).trim().slice(0, 18) || 'Vance';
-          const chosenClass = starterClassId ?? state.pilot.activeGearId ?? 'striker';
+          const cleanName =
+            (pilotName ?? state.pilot.name).trim().slice(0, 18) || 'Vance';
+          const chosenClass =
+            starterClassId ?? state.pilot.activeGearId ?? 'striker';
           const fresh = createFreshCampaignState(cleanName, chosenClass);
           set({
             ...fresh,
@@ -365,6 +412,7 @@ export const useGameStore = create<GameStoreState>()(
           battle: null,
           screen: 'TITLE',
           activeTab: 'gear',
+          shopSubTab: 'buy',
         });
       },
 
@@ -462,37 +510,55 @@ export const useGameStore = create<GameStoreState>()(
         });
       },
 
-      upgradeActiveGearSkill: () => {
+      // ---- GEAR SKILL SYSTEM ACTIONS ----
+      learnOrUpgradeSkill: (skillId) => {
         const state = get();
-        const activeId = state.pilot.activeGearId;
-        const gear = state.pilot.gears[activeId];
-        const sigId = MECH_CLASSES[activeId].signatureSkillId;
-        const currentLv = gear.skillLevels[sigId] ?? 1;
-        const cost = getSkillUpgradeCost(currentLv);
-        if (cost === null || state.pilot.credits < cost) {
-          return { ok: false, newLevel: currentLv };
+        const res = learnOrUpgradeSkillOnGear(
+          state.pilot,
+          state.pilot.activeGearId,
+          skillId
+        );
+        if (res.validation.ok) {
+          soundFx.playVictory();
+          set({ pilot: res.pilot, hasSaveData: true });
         }
+        return { validation: res.validation, newLevel: res.newLevel };
+      },
 
-        const nextLv = currentLv + 1;
-        soundFx.playVictory();
-        set({
-          pilot: {
-            ...state.pilot,
-            credits: state.pilot.credits - cost,
-            gears: {
-              ...state.pilot.gears,
-              [activeId]: {
-                ...gear,
-                skillLevels: {
-                  ...gear.skillLevels,
-                  [sigId]: nextLv,
-                },
-              },
-            },
-          },
-          hasSaveData: true,
-        });
-        return { ok: true, newLevel: nextLv };
+      equipSkillToBar: (skillId) => {
+        const state = get();
+        const res = equipSkillToGearBar(
+          state.pilot,
+          state.pilot.activeGearId,
+          skillId
+        );
+        if (res.validation.ok) {
+          soundFx.playConfirm();
+          set({ pilot: res.pilot, hasSaveData: true });
+        }
+        return res.validation;
+      },
+
+      unequipSkillFromBar: (skillId) => {
+        const state = get();
+        const nextPilot = unequipSkillFromGearBar(
+          state.pilot,
+          state.pilot.activeGearId,
+          skillId
+        );
+        if (nextPilot === state.pilot) return;
+        soundFx.playClick();
+        set({ pilot: nextPilot, hasSaveData: true });
+      },
+
+      buyOpeningCardAction: (cardId) => {
+        const state = get();
+        const res = buyOpeningCard(state.pilot, cardId);
+        if (res.ok) {
+          soundFx.playVictory();
+          set({ pilot: res.pilot, hasSaveData: true });
+        }
+        return { ok: res.ok, reason: res.reason, cost: res.cost };
       },
 
       selectSector: (sectorId) => {
@@ -585,7 +651,6 @@ export const useGameStore = create<GameStoreState>()(
 
       sellItem: (instanceId) => {
         const state = get();
-        // Cannot sell an item currently equipped on any Gear
         if (getItemEquippedByGear(state.pilot.gears, instanceId) !== null) {
           return { ok: false, creditsEarned: 0 };
         }
@@ -663,11 +728,16 @@ export const useGameStore = create<GameStoreState>()(
         const battleState = createInitialBattleState(state.pilot, targetSectorId);
         soundFx.playConfirm();
 
-        // If Admin "Always Win" is active, auto-resolve immediately into Victory!
         if (state.adminConfig.alwaysWin) {
           const defeatedEnemies = battleState.units.map((u) =>
             u.side === 'enemy'
-              ? { ...u, hp: 0, shield: 0, alive: false, animState: 'destroyed' as const }
+              ? {
+                  ...u,
+                  hp: 0,
+                  shield: 0,
+                  alive: false,
+                  animState: 'destroyed' as const,
+                }
               : u
           );
           const outcomePatch = finalizeBattleOutcome(
@@ -707,7 +777,21 @@ export const useGameStore = create<GameStoreState>()(
         });
       },
 
-      performPlayerAction: (action) => {
+      selectAllyTarget: (unitId) => {
+        const { battle } = get();
+        if (!battle || battle.summary) return;
+        const unit = battle.units.find((u) => u.id === unitId);
+        if (!unit || !unit.alive || unit.side !== 'ally') return;
+        soundFx.playClick();
+        set({
+          battle: {
+            ...battle,
+            selectedAllyTargetId: unitId,
+          },
+        });
+      },
+
+      performPlayerAction: (action, skillId) => {
         const state = get();
         const { battle } = state;
         if (!battle || battle.summary || battle.isResolving) return;
@@ -718,13 +802,22 @@ export const useGameStore = create<GameStoreState>()(
 
         const bypassFx = state.skipAnimations || state.battleSpeed === 10;
 
+        // Route single_ally skills to selectedAllyTargetId; offensive actions to selectedTargetId
+        const skillDef = skillId ? getSkillById(skillId) : undefined;
+        const resolvedTargetId =
+          action === 'skill' && skillDef?.targetType === 'single_ally'
+            ? battle.selectedAllyTargetId ?? activeUnit.id
+            : battle.selectedTargetId;
+
         const resolution = resolveUnitAction(
           battle.units,
           activeUnit.id,
           action,
-          battle.selectedTargetId,
+          resolvedTargetId,
           battle.round,
-          state.adminConfig
+          state.adminConfig,
+          Math.random,
+          skillId
         );
         playCue(resolution.soundCue, bypassFx);
 
@@ -735,7 +828,7 @@ export const useGameStore = create<GameStoreState>()(
           (u) => u.side === 'ally' && u.alive
         );
 
-        const nextLog = [...battle.log, ...resolution.logEntries].slice(-70);
+        const nextLog = [...battle.log, ...resolution.logEntries].slice(-80);
         const nextPopups = bypassFx
           ? []
           : [...battle.popups, ...resolution.popups];
@@ -779,7 +872,6 @@ export const useGameStore = create<GameStoreState>()(
           battle.activeTurnIndex
         );
 
-        // Recalculate turn order on new round (respects Slow status!)
         let nextTurnOrder = battle.turnOrder;
         let finalTurnIndex = nextIndex;
         if (wrappedRound) {
@@ -793,6 +885,9 @@ export const useGameStore = create<GameStoreState>()(
         const currentTargetStillAlive = aliveEnemies.some(
           (e) => e.id === battle.selectedTargetId
         );
+        const currentAllyStillAlive = aliveAllies.some(
+          (a) => a.id === battle.selectedAllyTargetId
+        );
 
         set({
           battle: {
@@ -803,6 +898,9 @@ export const useGameStore = create<GameStoreState>()(
             selectedTargetId: currentTargetStillAlive
               ? battle.selectedTargetId
               : aliveEnemies[0]?.id ?? null,
+            selectedAllyTargetId: currentAllyStillAlive
+              ? battle.selectedAllyTargetId
+              : aliveAllies[0]?.id ?? null,
             isResolving: false,
           },
         });
@@ -831,17 +929,26 @@ export const useGameStore = create<GameStoreState>()(
           return;
         }
 
-        if (activeUnit.isPlayer) return;
+        // If player is mid-Charge Shot, auto-release their charged attack immediately!
+        const playerIsCharging =
+          activeUnit.isPlayer &&
+          activeUnit.statuses.some((s) => s.type === 'charging');
+        if (activeUnit.isPlayer && !playerIsCharging) return;
 
         const bypassFx = state.skipAnimations || state.battleSpeed === 10;
-        const decision = chooseAiDecision(activeUnit, battle.units);
+        const decision = playerIsCharging
+          ? { action: 'attack' as ActionType, targetId: battle.selectedTargetId, skillId: undefined }
+          : chooseAiDecision(activeUnit, battle.units);
+
         const resolution = resolveUnitAction(
           battle.units,
           activeUnit.id,
           decision.action,
           decision.targetId,
           battle.round,
-          state.adminConfig
+          state.adminConfig,
+          Math.random,
+          decision.skillId
         );
         playCue(resolution.soundCue, bypassFx);
 
@@ -852,7 +959,7 @@ export const useGameStore = create<GameStoreState>()(
           (u) => u.side === 'ally' && u.alive
         );
 
-        const nextLog = [...battle.log, ...resolution.logEntries].slice(-70);
+        const nextLog = [...battle.log, ...resolution.logEntries].slice(-80);
         const nextPopups = bypassFx
           ? []
           : [...battle.popups, ...resolution.popups];
@@ -909,6 +1016,9 @@ export const useGameStore = create<GameStoreState>()(
         const currentTargetStillAlive = aliveEnemies.some(
           (e) => e.id === battle.selectedTargetId
         );
+        const currentAllyStillAlive = aliveAllies.some(
+          (a) => a.id === battle.selectedAllyTargetId
+        );
 
         set({
           battle: {
@@ -919,6 +1029,9 @@ export const useGameStore = create<GameStoreState>()(
             selectedTargetId: currentTargetStillAlive
               ? battle.selectedTargetId
               : aliveEnemies[0]?.id ?? null,
+            selectedAllyTargetId: currentAllyStillAlive
+              ? battle.selectedAllyTargetId
+              : aliveAllies[0]?.id ?? null,
           },
         });
       },
@@ -959,7 +1072,13 @@ export const useGameStore = create<GameStoreState>()(
         if (!battle || battle.summary) return;
         const defeatedEnemies = battle.units.map((u) =>
           u.side === 'enemy'
-            ? { ...u, hp: 0, shield: 0, alive: false, animState: 'destroyed' as const }
+            ? {
+                ...u,
+                hp: 0,
+                shield: 0,
+                alive: false,
+                animState: 'destroyed' as const,
+              }
             : u
         );
         set(
@@ -1168,6 +1287,29 @@ export const useGameStore = create<GameStoreState>()(
             credits: Math.max(
               0,
               state.pilot.credits + (Math.floor(delta) || 0)
+            ),
+          },
+          hasSaveData: true,
+        }));
+      },
+
+      adminSetWarPoints: (amount) => {
+        set((state) => ({
+          pilot: {
+            ...state.pilot,
+            warPoints: Math.max(0, Math.floor(amount) || 0),
+          },
+          hasSaveData: true,
+        }));
+      },
+
+      adminAddWarPoints: (delta) => {
+        set((state) => ({
+          pilot: {
+            ...state.pilot,
+            warPoints: Math.max(
+              0,
+              state.pilot.warPoints + (Math.floor(delta) || 0)
             ),
           },
           hasSaveData: true,

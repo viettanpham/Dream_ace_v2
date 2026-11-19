@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { AFFIX_SUFFIX_MAP, getItemTemplate } from '../data/items';
 import { useGameStore } from '../store/useGameStore';
 import type {
+  BattleSkillUsability,
   CombatLogEntry,
   CombatLogTag,
   EnemyArchetype,
@@ -12,6 +13,7 @@ import type {
   Language,
   MechClassId,
   SectorDifficulty,
+  SkillCategory,
   SkillTargetType,
   StatKey,
   StatusEffectType,
@@ -76,21 +78,29 @@ export function getSkillDesc(lang: Language, skillId: string): string {
   return translate(lang, `skill.${skillId}.desc` as TranslationKey);
 }
 
+export function getSkillCategoryLabel(
+  lang: Language,
+  category: SkillCategory
+): string {
+  return translate(lang, `skill.category.${category}` as TranslationKey);
+}
+
 export function getSkillTargetLabel(
   lang: Language,
-  targetType: SkillTargetType,
-  hits: number
+  targetType: SkillTargetType
 ): string {
-  if (targetType === 'all_enemies') {
-    return translate(lang, 'skill.target.all_enemies');
-  }
-  if (targetType === 'all_allies') {
-    return translate(lang, 'skill.target.all_allies');
-  }
-  if (hits > 1) {
-    return translate(lang, 'skill.target.multi', { hits });
-  }
-  return translate(lang, 'skill.target.single');
+  return translate(lang, `skill.target.${targetType}` as TranslationKey);
+}
+
+export function getBattleSkillReason(
+  lang: Language,
+  usability: BattleSkillUsability
+): string | null {
+  if (usability.canUse) return null;
+  return translate(lang, `battle.skillReason.${usability.reason}` as TranslationKey, {
+    turns: usability.cooldownRemaining,
+    cost: usability.spCost,
+  });
 }
 
 export function getSectorName(lang: Language, sectorId: string): string {
@@ -129,6 +139,13 @@ export function getStatusLabel(
   status: StatusEffectType
 ): string {
   return translate(lang, `status.${status}` as TranslationKey);
+}
+
+export function getStatusDesc(
+  lang: Language,
+  status: StatusEffectType
+): string {
+  return translate(lang, `status.${status}.desc` as TranslationKey);
 }
 
 export function getArchetypeLabel(
@@ -241,117 +258,197 @@ export function formatCombatLogMessage(
 ): string {
   const p = entry.params;
 
-  if (entry.templateKey === 'log.battleStart') {
-    const sectorId = String(p.sectorId ?? 'border_outpost');
-    const diff = String(p.difficulty ?? 'Standard') as SectorDifficulty;
-    return translate(lang, 'log.battleStart', {
-      sector: getSectorName(lang, sectorId),
-      difficulty: getDifficultyLabel(lang, diff),
-    });
+  switch (entry.templateKey) {
+    case 'log.battleStart': {
+      const sectorId = String(p.sectorId ?? 'border_outpost');
+      const diff = String(p.difficulty ?? 'Standard') as SectorDifficulty;
+      return translate(lang, 'log.battleStart', {
+        sector: getSectorName(lang, sectorId),
+        difficulty: getDifficultyLabel(lang, diff),
+      });
+    }
+
+    case 'log.defend': {
+      const shd = Number(p.shieldRecovered ?? 0);
+      const sp = Number(p.spRecovered ?? 0);
+      const shieldPart =
+        shd > 0 ? `, +${shd} ${getStatShort(lang, 'shield')}` : '';
+      const spPart = sp > 0 ? `, +${sp} SP` : '';
+      return translate(lang, 'log.defend', {
+        actor: String(p.actor ?? ''),
+        shieldPart,
+        spPart,
+      });
+    }
+
+    case 'log.healSquad': {
+      const skillId = String(p.skillId ?? 'sup_aegis_field');
+      return translate(lang, 'log.healSquad', {
+        actor: String(p.actor ?? ''),
+        skill: getSkillName(lang, skillId),
+        spCost: Number(p.spCost ?? 0),
+        total: Number(p.total ?? 0),
+      });
+    }
+
+    case 'log.healSingle': {
+      const skillId = String(p.skillId ?? 'sup_nanite_mend');
+      return translate(lang, 'log.healSingle', {
+        actor: String(p.actor ?? ''),
+        target: String(p.target ?? ''),
+        skill: getSkillName(lang, skillId),
+        amount: Number(p.amount ?? 0),
+      });
+    }
+
+    case 'log.energize': {
+      const skillId = String(p.skillId ?? 'sup_flux_transfer');
+      return translate(lang, 'log.energize', {
+        actor: String(p.actor ?? ''),
+        target: String(p.target ?? ''),
+        skill: getSkillName(lang, skillId),
+        amount: Number(p.amount ?? 0),
+      });
+    }
+
+    case 'log.evade': {
+      const actionText = formatActionParam(lang, p);
+      return translate(lang, 'log.evade', {
+        target: String(p.target ?? ''),
+        actor: String(p.actor ?? ''),
+        action: actionText,
+      });
+    }
+
+    case 'log.damage': {
+      const actionText = formatActionParam(lang, p);
+      const shd = Number(p.shieldAbsorbed ?? 0);
+      const hp = Number(p.hullDamage ?? 0);
+      const breakdown =
+        shd > 0 && hp > 0
+          ? translate(lang, 'log.breakdownBoth', { shield: shd, hp })
+          : shd > 0
+          ? translate(lang, 'log.breakdownShield', { shield: shd })
+          : translate(lang, 'log.breakdownHp', { hp });
+      const critTag = Number(p.isCrit ?? 0)
+        ? translate(lang, 'log.critTag')
+        : '';
+      const defendTag = Number(p.isDefending ?? 0)
+        ? translate(lang, 'log.defendTag')
+        : '';
+
+      return translate(lang, 'log.damage', {
+        actor: String(p.actor ?? ''),
+        action: actionText,
+        target: String(p.target ?? ''),
+        breakdown,
+        critTag,
+        defendTag,
+      });
+    }
+
+    case 'log.destroyed': {
+      const classId = String(p.classId ?? 'striker') as MechClassId;
+      return translate(lang, 'log.destroyed', {
+        target: String(p.target ?? ''),
+        className: getClassName(lang, classId),
+      });
+    }
+
+    case 'log.statusApplied': {
+      const status = String(p.status ?? 'burn') as StatusEffectType;
+      return translate(lang, 'log.statusApplied', {
+        target: String(p.target ?? ''),
+        status: getStatusLabel(lang, status),
+        turns: Number(p.turns ?? 2),
+      });
+    }
+
+    case 'log.burnTick':
+      return translate(lang, 'log.burnTick', {
+        target: String(p.target ?? ''),
+        damage: Number(p.damage ?? 0),
+      });
+
+    case 'log.regenTick':
+      return translate(lang, 'log.regenTick', {
+        target: String(p.target ?? ''),
+        amount: Number(p.amount ?? 0),
+      });
+
+    case 'log.statusCleansed':
+      return translate(lang, 'log.statusCleansed', {
+        actor: String(p.actor ?? ''),
+      });
+
+    case 'log.splashDamage':
+      return translate(lang, 'log.splashDamage', {
+        actor: String(p.actor ?? ''),
+        target: String(p.target ?? ''),
+        damage: Number(p.damage ?? 0),
+      });
+
+    case 'log.retreat':
+      return translate(lang, 'log.retreat', {
+        actor: String(p.actor ?? ''),
+      });
+
+    case 'log.buffApplied': {
+      const skillId = String(p.skillId ?? 'gen_hull_brace');
+      return translate(lang, 'log.buffApplied', {
+        actor: String(p.actor ?? ''),
+        skill: getSkillName(lang, skillId),
+        spCost: Number(p.spCost ?? 0),
+      });
+    }
+
+    case 'log.stanceToggle': {
+      const skillId = String(p.skillId ?? 'sge_anchor_protocol');
+      return translate(lang, 'log.stanceToggle', {
+        actor: String(p.actor ?? ''),
+        skill: getSkillName(lang, skillId),
+        state: String(p.state ?? 'ON'),
+      });
+    }
+
+    case 'log.charging': {
+      const skillId = String(p.skillId ?? 'str_solar_capacitor');
+      return translate(lang, 'log.charging', {
+        actor: String(p.actor ?? ''),
+        skill: getSkillName(lang, skillId),
+      });
+    }
+
+    case 'log.counterAttack':
+      return translate(lang, 'log.counterAttack', {
+        target: String(p.target ?? ''),
+        actor: String(p.actor ?? ''),
+        damage: Number(p.damage ?? 0),
+      });
+
+    case 'log.scanReveal': {
+      const skillId = String(p.skillId ?? 'sup_lidar_sweep');
+      return translate(lang, 'log.scanReveal', {
+        actor: String(p.actor ?? ''),
+        skill: getSkillName(lang, skillId),
+        revealed: Number(p.revealed ?? 0),
+      });
+    }
+
+    case 'log.invincibleBlock':
+      return translate(lang, 'log.invincibleBlock', {
+        target: String(p.target ?? ''),
+        actor: String(p.actor ?? ''),
+      });
+
+    case 'log.silencedBlocked':
+      return translate(lang, 'log.silencedBlocked', {
+        actor: String(p.actor ?? ''),
+      });
+
+    default:
+      return '';
   }
-
-  if (entry.templateKey === 'log.defend') {
-    const shd = Number(p.shieldRecovered ?? 0);
-    const sp = Number(p.spRecovered ?? 0);
-    const shieldPart =
-      shd > 0 ? `, +${shd} ${getStatShort(lang, 'shield')}` : '';
-    const spPart = sp > 0 ? `, +${sp} SP` : '';
-    return translate(lang, 'log.defend', {
-      actor: String(p.actor ?? ''),
-      shieldPart,
-      spPart,
-    });
-  }
-
-  if (entry.templateKey === 'log.healSquad') {
-    const skillId = String(p.skillId ?? 'aegis_pulse');
-    return translate(lang, 'log.healSquad', {
-      actor: String(p.actor ?? ''),
-      skill: getSkillName(lang, skillId),
-      spCost: Number(p.spCost ?? 0),
-      total: Number(p.total ?? 0),
-    });
-  }
-
-  if (entry.templateKey === 'log.evade') {
-    const actionText = formatActionParam(lang, p);
-    return translate(lang, 'log.evade', {
-      target: String(p.target ?? ''),
-      actor: String(p.actor ?? ''),
-      action: actionText,
-    });
-  }
-
-  if (entry.templateKey === 'log.damage') {
-    const actionText = formatActionParam(lang, p);
-    const shd = Number(p.shieldAbsorbed ?? 0);
-    const hp = Number(p.hullDamage ?? 0);
-    const breakdown =
-      shd > 0 && hp > 0
-        ? translate(lang, 'log.breakdownBoth', { shield: shd, hp })
-        : shd > 0
-        ? translate(lang, 'log.breakdownShield', { shield: shd })
-        : translate(lang, 'log.breakdownHp', { hp });
-    const critTag = Number(p.isCrit ?? 0) ? translate(lang, 'log.critTag') : '';
-    const defendTag = Number(p.isDefending ?? 0)
-      ? translate(lang, 'log.defendTag')
-      : '';
-
-    return translate(lang, 'log.damage', {
-      actor: String(p.actor ?? ''),
-      action: actionText,
-      target: String(p.target ?? ''),
-      breakdown,
-      critTag,
-      defendTag,
-    });
-  }
-
-  if (entry.templateKey === 'log.destroyed') {
-    const classId = String(p.classId ?? 'striker') as MechClassId;
-    return translate(lang, 'log.destroyed', {
-      target: String(p.target ?? ''),
-      className: getClassName(lang, classId),
-    });
-  }
-
-  if (entry.templateKey === 'log.statusApplied') {
-    const status = String(p.status ?? 'burn') as StatusEffectType;
-    return translate(lang, 'log.statusApplied', {
-      target: String(p.target ?? ''),
-      status: getStatusLabel(lang, status),
-      turns: Number(p.turns ?? 2),
-    });
-  }
-
-  if (entry.templateKey === 'log.burnTick') {
-    return translate(lang, 'log.burnTick', {
-      target: String(p.target ?? ''),
-      damage: Number(p.damage ?? 0),
-    });
-  }
-
-  if (entry.templateKey === 'log.statusCleansed') {
-    return translate(lang, 'log.statusCleansed', {
-      actor: String(p.actor ?? ''),
-    });
-  }
-
-  if (entry.templateKey === 'log.splashDamage') {
-    return translate(lang, 'log.splashDamage', {
-      actor: String(p.actor ?? ''),
-      target: String(p.target ?? ''),
-      damage: Number(p.damage ?? 0),
-    });
-  }
-
-  if (entry.templateKey === 'log.retreat') {
-    return translate(lang, 'log.retreat', {
-      actor: String(p.actor ?? ''),
-    });
-  }
-
-  return '';
 }
 
 function formatActionParam(

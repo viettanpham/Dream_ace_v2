@@ -1,4 +1,4 @@
-import { Volume2, VolumeX } from 'lucide-react';
+import { Award, Volume2, VolumeX } from 'lucide-react';
 import { getExpForNextLevel } from '../engine/stats';
 import { getClassName, useI18n } from '../i18n';
 import { useGameStore } from '../store/useGameStore';
@@ -28,13 +28,13 @@ export function TopHud() {
         {t('app.title')}
       </button>
 
-      {/* Center: Pilot Name + Active Gear [Lv X] + Shared Credits */}
-      <div className="flex items-center gap-4 sm:gap-7 text-xs sm:text-sm text-slate-300 min-w-0">
+      {/* Center: Pilot Name + Active Gear [Lv X] + Credits + War Points */}
+      <div className="flex items-center gap-3 sm:gap-6 text-xs sm:text-sm text-slate-300 min-w-0">
         <div className="flex items-center gap-2 whitespace-nowrap min-w-0">
           <span className="hidden sm:inline text-slate-400">
             {t('common.pilot')}:
           </span>
-          <span className="font-semibold text-slate-100 truncate max-w-[96px] sm:max-w-none">
+          <span className="font-semibold text-slate-100 truncate max-w-[84px] sm:max-w-none">
             {pilot.name || 'Vance'}
           </span>
           <span className="font-mono-nums font-semibold text-amber-400">
@@ -42,7 +42,7 @@ export function TopHud() {
             {activeGear.level}]
           </span>
           <div
-            className="hidden md:block w-16 h-1.5 bg-slate-800 rounded-sm overflow-hidden"
+            className="hidden lg:block w-16 h-1.5 bg-slate-800 rounded-sm overflow-hidden"
             title={`${activeGear.exp} / ${expNeeded} EXP`}
           >
             <div
@@ -53,13 +53,26 @@ export function TopHud() {
         </div>
 
         <div className="flex items-center gap-1.5 whitespace-nowrap">
-          <span className="hidden sm:inline text-slate-400">
+          <span className="hidden md:inline text-slate-400">
             {t('common.credits')}
           </span>
           <span className="font-mono-nums font-semibold text-amber-300">
             {pilot.credits.toLocaleString()}
           </span>
-          <span className="text-[11px] text-slate-500 sm:hidden">CR</span>
+          <span className="text-[11px] text-slate-500">CR</span>
+        </div>
+
+        <div
+          className="flex items-center gap-1 whitespace-nowrap"
+          title={t('common.warPoints')}
+        >
+          <Award className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+          <span className="font-mono-nums font-semibold text-purple-300">
+            {(pilot.warPoints ?? 0).toLocaleString()}
+          </span>
+          <span className="text-[11px] text-purple-400/80">
+            {t('common.wpShort')}
+          </span>
         </div>
       </div>
 

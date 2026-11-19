@@ -27,6 +27,8 @@ export function AdminPanel() {
   );
   const adminSetCredits = useGameStore((s) => s.adminSetCredits);
   const adminAddCredits = useGameStore((s) => s.adminAddCredits);
+  const adminSetWarPoints = useGameStore((s) => s.adminSetWarPoints);
+  const adminAddWarPoints = useGameStore((s) => s.adminAddWarPoints);
   const adminGenerateItems = useGameStore((s) => s.adminGenerateItems);
   const adminUnlockAllGears = useGameStore((s) => s.adminUnlockAllGears);
   const adminUnlockAllSectors = useGameStore((s) => s.adminUnlockAllSectors);
@@ -40,6 +42,7 @@ export function AdminPanel() {
   const [expInput, setExpInput] = useState('500');
   const [ptsInput, setPtsInput] = useState('10');
   const [creditsInput, setCreditsInput] = useState('5000');
+  const [wpInput, setWpInput] = useState('200');
   const [genSlot, setGenSlot] = useState<EquipmentSlot>('main_weapon');
   const [genTier, setGenTier] = useState<number>(2);
   const [genRarity, setGenRarity] = useState<ItemRarity>('epic');
@@ -245,6 +248,43 @@ export function AdminPanel() {
                     className="h-9 px-3 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold cursor-pointer"
                   >
                     Set CR
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-slate-400">
+                  War Points (Cur: {(pilot.warPoints ?? 0).toLocaleString()} WP)
+                </label>
+                <div className="flex gap-1.5">
+                  <input
+                    type="number"
+                    min={0}
+                    value={wpInput}
+                    onChange={(e) => setWpInput(e.target.value)}
+                    className="w-28 h-9 px-2 rounded border border-slate-700 bg-slate-950 font-mono-nums text-slate-100"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const v = Number(wpInput) || 0;
+                      adminAddWarPoints(v);
+                      flash(`Added +${v.toLocaleString()} WP`);
+                    }}
+                    className="h-9 px-3 rounded bg-purple-600 hover:bg-purple-500 text-white font-semibold cursor-pointer"
+                  >
+                    +Add WP
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const v = Number(wpInput) || 0;
+                      adminSetWarPoints(v);
+                      flash(`Set War Points to ${v.toLocaleString()} WP`);
+                    }}
+                    className="h-9 px-3 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold cursor-pointer"
+                  >
+                    Set WP
                   </button>
                 </div>
               </div>

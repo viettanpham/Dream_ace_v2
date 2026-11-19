@@ -32,6 +32,7 @@ import {
   sumGearSpecialTraits,
   validateEquipOnGear,
 } from '../engine/equipment';
+import { getGearPassiveBonuses } from '../engine/skills';
 import {
   calculateDerivedStats,
   calculateEffectiveStats,
@@ -172,6 +173,11 @@ export function GearView() {
     [previewGear, pilot.inventory]
   );
 
+  const passiveBonuses = useMemo(
+    () => getGearPassiveBonuses(activeGear),
+    [activeGear]
+  );
+
   const currentStats = useMemo(
     () =>
       calculateEffectiveStats(
@@ -180,9 +186,10 @@ export function GearView() {
         activeGear.allocatedPoints,
         EMPTY_STAT_BLOCK,
         currentEquipBonuses,
-        currentEquipTraits
+        currentEquipTraits,
+        passiveBonuses
       ),
-    [activeGear, currentEquipBonuses, currentEquipTraits]
+    [activeGear, currentEquipBonuses, currentEquipTraits, passiveBonuses]
   );
 
   const previewStats = useMemo(
@@ -193,9 +200,10 @@ export function GearView() {
         activeGear.allocatedPoints,
         EMPTY_STAT_BLOCK,
         previewEquipBonuses,
-        previewEquipTraits
+        previewEquipTraits,
+        passiveBonuses
       ),
-    [activeGear, previewEquipBonuses, previewEquipTraits]
+    [activeGear, previewEquipBonuses, previewEquipTraits, passiveBonuses]
   );
 
   const currentDerived = useMemo(
@@ -204,9 +212,10 @@ export function GearView() {
         activeGear.classId,
         activeGear.level,
         currentStats,
-        currentEquipTraits
+        currentEquipTraits,
+        passiveBonuses
       ),
-    [activeGear, currentStats, currentEquipTraits]
+    [activeGear, currentStats, currentEquipTraits, passiveBonuses]
   );
 
   const previewDerived = useMemo(
@@ -215,9 +224,10 @@ export function GearView() {
         activeGear.classId,
         activeGear.level,
         previewStats,
-        previewEquipTraits
+        previewEquipTraits,
+        passiveBonuses
       ),
-    [activeGear, previewStats, previewEquipTraits]
+    [activeGear, previewStats, previewEquipTraits, passiveBonuses]
   );
 
   const powerRating = useMemo(

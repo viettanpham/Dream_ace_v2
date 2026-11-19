@@ -5,16 +5,18 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'app.title': 'DREAM ACE',
   'app.subtitle': 'RPG Chiến Thuật Phi Cơ Không Gian',
   'app.tagline':
-    'Phát triển cấp độ và trang bị riêng cho từng chiến cơ Gear, săn linh kiện chỉ số ngẫu nhiên và chỉ huy phi đội 4 chiếc trong không chiến theo lượt.',
+    'Phát triển cấp độ, trang bị và hệ thống kỹ năng riêng cho từng chiến cơ Gear, săn linh kiện ngẫu nhiên và chỉ huy phi đội 4 chiếc.',
   'app.saveHint': 'Tiến trình tự động lưu vào localStorage',
   'app.controlsHint':
-    '1 Khai hỏa · 2 Kỹ năng · 3 Khiên · Tab Đổi mục tiêu · M Tắt âm · Ctrl+Shift+A Admin',
+    '1 Khai hỏa · 2–7 Kỹ năng · Q Khiên · Tab Đổi mục tiêu · M Tắt âm · Ctrl+Shift+A Admin',
   'common.audioOn': 'Âm thanh: Bật',
   'common.audioMuted': 'Âm thanh: Tắt',
   'common.muteTitle': 'Tắt hiệu ứng âm thanh (M)',
   'common.unmuteTitle': 'Bật hiệu ứng âm thanh (M)',
   'common.pilot': 'Phi công',
   'common.credits': 'Credits',
+  'common.warPoints': 'Điểm Chiến Trận',
+  'common.wpShort': 'WP',
   'common.levelShort': 'Lv.',
   'common.statPts': '+{count} Điểm',
   'common.confirm': 'Xác nhận',
@@ -22,6 +24,7 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'common.clear': 'Hoàn tác',
   'common.all': 'Tất cả',
   'common.allClasses': 'Mọi lớp Gear',
+  'common.general': 'Chung',
   'common.classOnly': 'Riêng {className}',
   'common.classLocked': 'Khóa theo lớp',
   'common.itemCount': '{count} linh kiện',
@@ -36,6 +39,9 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'common.power': 'Lực chiến',
   'common.tier': 'Bậc {tier}',
   'common.quality': 'Chất lượng {pct}%',
+  'common.turnsShort': '{n}l',
+  'common.frontRow': 'TIỀN TUYẾN',
+  'common.backRow': 'HẬU TUYẾN',
 
   // Navigation / TopHud / Sidebar
   'nav.hangar': 'Nhà chứa',
@@ -64,7 +70,7 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   // Garage View (replaces Pilot tab)
   'garage.title': 'Garage Phi Cơ',
   'garage.subtitle':
-    'Mỗi Gear có cấp độ, EXP, điểm chỉ số, 6 ô trang bị và cấp kỹ năng riêng biệt. Dùng Credits chung để mua thêm Gear.',
+    'Mỗi Gear có cấp độ, EXP, điểm chỉ số, 6 ô trang bị và thanh kỹ năng riêng biệt. Dùng Credits chung để mua thêm Gear.',
   'garage.rosterTitle': 'Danh sách Gear ({owned}/4)',
   'garage.selectGear': 'Chọn Gear',
   'garage.selectedGear': 'Đang dùng',
@@ -102,32 +108,94 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'trait.spRegen': '+{val} SP/Lượt',
   'trait.evasionMod': '{val} EVA linh hoạt',
 
-  // Skill View (Levels 1-5)
-  'skill.pageTitle': 'Kỹ năng Gear (Lv.1–5)',
+  // Skill View (Full Gear Skill System)
+  'skill.pageTitle': 'Kỹ năng & Thanh Chiến Đấu — {gear}',
   'skill.pageSubtitle':
-    'Nâng cấp kỹ năng đặc trưng của từng Gear từ Lv.1 đến Lv.5 bằng Credits để tăng uy lực, tỉ lệ hiệu ứng và chi phí SP.',
-  'skill.activeBadge': 'Kỹ năng Gear đang chọn',
-  'skill.allClassesTitle': 'Toàn bộ Kỹ năng 4 lớp Gear',
-  'skill.spCost': 'Tiêu hao SP',
+    'Gear này chỉ học và lắp được kỹ năng lớp {gear} và kỹ năng Chung. Nâng Lv.1–5 (+10% hiệu lực/cấp) bằng Credits; kỹ năng Đặc biệt & Tinh anh cần Thẻ Mở Khóa tại Chợ Chiến Trận (WP).',
+  'skill.activeBadge': 'Gear đang chọn',
+  'skill.barTitle': 'Thanh Kỹ Năng Chủ Động ({used}/{max} Ô)',
+  'skill.barHint': 'Nhấn vào kỹ năng trên thanh để tháo, hoặc chọn kỹ năng đã học bên dưới để lắp.',
+  'skill.emptySlot': 'Ô trống',
+  'skill.passivesTitle': 'Kỹ Năng Bị Động (Tự động bật khi đã học)',
+  'skill.passiveAlwaysOn': 'LUÔN BẬT',
+  'skill.catalogTitle': 'Cửa Hàng Kỹ Năng ({gear} & Chung)',
+  'skill.category.normal': 'Thường',
+  'skill.category.special': 'Đặc biệt',
+  'skill.category.elite': 'Tinh anh',
+  'skill.category.passive': 'Bị động',
+  'skill.scope.general': 'Chung',
+  'skill.spCost': 'SP',
+  'skill.cooldown': 'Hồi {turns} lượt',
+  'skill.noCooldown': 'Không hồi',
+  'skill.toggleTag': 'Bật/Tắt',
+  'skill.oncePerBattle': '1 lần/Trận',
   'skill.targeting': 'Mục tiêu',
-  'skill.power': 'Hệ số sát thương',
-  'skill.pierce': 'Xuyên giáp',
-  'skill.bonusCrit': 'Tăng chí mạng',
-  'skill.restore': 'Hồi phục đội hình',
-  'skill.statusEffect': 'Hiệu ứng trạng thái',
-  'skill.levelLabel': 'Cấp kỹ năng Lv.{level} / {max}',
-  'skill.upgradeBtn': 'Nâng lên Lv.{next} ({cost} CR)',
-  'skill.maxLevel': 'Đã đạt tối đa (Lv.5)',
-  'skill.lockedGear': 'Mở khóa tại Garage',
-  'skill.cleanseLabel': 'Giải trừ hiệu ứng xấu',
+  'skill.levelLabel': 'Lv.{level}/{max}',
+  'skill.notLearned': 'Chưa học',
+  'skill.learnBtn': 'Học Lv.1 ({cost} CR)',
+  'skill.upgradeBtn': 'Nâng Lv.{next} ({cost} CR)',
+  'skill.maxLevel': 'TỐI ĐA (Lv.5)',
+  'skill.equipBtn': 'Lắp lên thanh',
+  'skill.equippedBtn': 'Đã lắp',
+  'skill.unequipBtn': 'Tháo',
+  'skill.barFull': 'Đầy thanh (6/6)',
+  'skill.reqGearLv': 'Gear Lv.{level}',
+  'skill.needOpeningCard': 'Cần Thẻ Mở Khóa',
+  'skill.cardOwned': 'Đã có Thẻ Mở Khóa',
+  'skill.getCardInWpShop': 'Mua Thẻ (Chợ WP) →',
+  'skill.scaleInfo': 'Hiệu lực: {pct}%',
+  'skill.filterAll': 'Tất cả ({count})',
+  'skill.filterClass': '{className} ({count})',
+  'skill.filterGeneral': 'Chung ({count})',
+  'skill.filterSpecialElite': 'Đặc biệt / Tinh anh ({count})',
+  'skill.learnedFeedback': 'Đã học {skill} Lv.{level} cho {gear}!',
+  'skill.upgradedFeedback': 'Đã nâng {skill} lên Lv.{level} cho {gear}!',
+  'skill.equippedFeedback': 'Đã lắp {skill} vào thanh kỹ năng của {gear}.',
+  'skill.unequippedFeedback': 'Đã tháo {skill} khỏi thanh kỹ năng của {gear}.',
 
-  // Status Effects
+  // Status Effects (21)
   'status.burn': 'Thiêu đốt',
-  'status.shield_break': 'Vỡ Khiên',
-  'status.slow': 'Làm chậm',
   'status.burn.desc': 'Mất 8% HP tối đa mỗi đầu lượt',
-  'status.shield_break.desc': 'Vô hiệu hóa Khiên năng lượng trong 2 lượt',
+  'status.shield_break': 'Vỡ Khiên',
+  'status.shield_break.desc': 'Vô hiệu hóa Khiên năng lượng, không thể hấp thụ sát thương',
+  'status.slow': 'Làm chậm',
   'status.slow.desc': 'Giảm 30% Tốc độ lượt',
+  'status.silence': 'Câm lặng',
+  'status.silence.desc': 'Không thể kích hoạt bất kỳ kỹ năng nào',
+  'status.stealth': 'Tàng hình',
+  'status.stealth.desc': 'Không thể bị nhắm đơn mục tiêu cho đến khi lộ diện hoặc khai hỏa',
+  'status.vulnerable': 'Bại lộ',
+  'status.vulnerable.desc': 'Nhận thêm +15% sát thương từ mọi nguồn',
+  'status.def_up': 'Tăng Giáp',
+  'status.def_up.desc': 'Tăng chỉ số Phòng thủ thân tàu',
+  'status.def_down': 'Giảm Giáp',
+  'status.def_down.desc': 'Giảm chỉ số Phòng thủ thân tàu',
+  'status.eva_up': 'Tăng Né',
+  'status.eva_up.desc': 'Tăng chỉ số và tỉ lệ Né đòn',
+  'status.atk_up': 'Tăng Công',
+  'status.atk_up.desc': 'Tăng sức mạnh vũ khí và kỹ năng',
+  'status.spd_up': 'Tăng Tốc',
+  'status.spd_up.desc': 'Tăng tốc độ lượt hành động',
+  'status.primary_dmg_up': 'Đạn Nóng',
+  'status.primary_dmg_up.desc': 'Tăng sát thương vũ khí chính',
+  'status.skill_dmg_up': 'Cường Hóa Đạn',
+  'status.skill_dmg_up.desc': 'Tăng sát thương kỹ năng',
+  'status.sure_hit': 'Khóa Chết',
+  'status.sure_hit.desc': 'Các đòn đánh kế tiếp không thể bị né',
+  'status.counter': 'Phản Đòn',
+  'status.counter.desc': 'Tự động phản công đòn đánh sắp tới của địch',
+  'status.evade_all': 'Ảo Ảnh',
+  'status.evade_all.desc': 'Né tránh toàn bộ đòn tấn công trong 1 vòng',
+  'status.invincible': 'Bất Tử',
+  'status.invincible.desc': 'Miễn nhiễm hoàn toàn mọi sát thương trong 1 vòng',
+  'status.regen_hp': 'Hồi Phục HP',
+  'status.regen_hp.desc': 'Tự động hồi HP thân tàu vào mỗi đầu lượt',
+  'status.siege_mode': 'Neo Pháo',
+  'status.siege_mode.desc': '+60% sát thương gây ra, Né tránh về 0',
+  'status.siege_defense': 'Pháo Đài',
+  'status.siege_defense.desc': '+80% DEF & +30% Khiên, giảm 30% sát thương gây ra',
+  'status.charging': 'Đang Tụ Năng',
+  'status.charging.desc': 'Đang nạp tụ điện Mặt Trời — tự khai hỏa ở lượt sau',
 
   // Enemy Archetypes
   'archetype.drone': 'Drone Tốc độ',
@@ -139,35 +207,37 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   // Map View
   'map.pageTitle': 'Bản đồ Khu vực Quỹ đạo',
   'map.pageSubtitle':
-    'Chinh phục từng khu vực để mở khóa vùng không gian sâu hơn. Khu vực có Boss thưởng gấp 5 lần và chắc chắn rơi đồ phẩm chất cao.',
+    'Chinh phục khu vực để mở không gian sâu hơn. Chiếm căn cứ lần đầu thưởng thêm Điểm Chiến Trận (WP); Boss thưởng x5.',
   'map.selectedSector': 'Khu vực đã chọn',
   'map.enemyEstimate': 'Lực lượng địch dự kiến',
   'map.rewardRate': 'Thưởng ước tính',
   'map.dropOdds': 'Tỉ lệ Sử thi / Huyền thoại',
   'map.lockedSector': 'Thắng khu vực trước để mở khóa',
   'map.bossWarning': 'Có Chiến hạm BOSS (Thưởng x5)',
+  'map.capturedBadge': 'Đã chiếm',
+  'map.captureBonus': 'Chiếm lần đầu: +{wp} WP',
 
   // Classes
   'class.striker.name': 'Striker',
   'class.striker.code': 'VX-04 Oanh Tạc Cơ',
   'class.striker.role': 'Oanh tạc cơ hạng nặng',
   'class.striker.desc':
-    'Oanh tạc cơ cánh rộng mang bom cháy xuyên giáp, ATK cao và gây hiệu ứng Thiêu đốt.',
+    'Oanh tạc cơ toàn diện (+3 mọi chỉ số/điểm), chuyên rải bom diện rộng, bắn nổ lan, tụ năng hủy diệt và không kích quỹ đạo.',
   'class.interceptor.name': 'Interceptor',
   'class.interceptor.code': 'RX-09 Tiêm Kích Mũi Tên',
   'class.interceptor.role': 'Tiêm kích tốc độ cao',
   'class.interceptor.desc':
-    'Tiêm kích mũi tên siêu tốc, ra đòn trước, né/chí mạng cao và làm chậm mục tiêu.',
+    'Tiêm kích mũi tên siêu tốc (+4 ATK/EVA), chuyên bắn xuyên giáp, phản công chớp nhoáng, gây nhiễu Câm lặng và lộn vòng né đòn.',
   'class.siege.name': 'Siege',
   'class.siege.code': 'HX-12 Pháo Hạm Xung Kích',
   'class.siege.role': 'Pháo hạm hạng nặng',
   'class.siege.desc':
-    'Pháo hạm giáp dày mang đại bác railgun quét toàn đội hình địch và phá vỡ Khiên.',
+    'Pháo hạm khiên dày (+4 ATK/SHD), linh hoạt bật trạng thái Neo Pháo hoặc Pháo Đài, phá vỡ Khiên và phóng thương railgun hủy diệt.',
   'class.support.name': 'Support',
   'class.support.code': 'AX-07 Phi Cơ Hỗ Trợ',
-  'class.support.role': 'Sửa chữa & Giải trừ',
+  'class.support.role': 'Sửa chữa & Chỉ huy',
   'class.support.desc':
-    'Phi cơ hỗ trợ hồi Khiên, HP và giải trừ toàn bộ hiệu ứng xấu cho đồng minh.',
+    'Phi cơ hỗ trợ chiến thuật (+4 DEF/SPR), cung cấp sửa chữa nanite, tiếp SP, quét radar phá tàng hình, buff đội hình và lồng bất tử.',
 
   // Stats
   'stat.attack.label': 'Tấn công',
@@ -197,23 +267,148 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'derived.dodge': 'Né đòn',
   'derived.crit': 'Chí mạng',
 
-  // Skills
-  'skill.overdrive_barrage.name': 'Loạt Bom Rải Thảm',
-  'skill.overdrive_barrage.desc':
-    'Thả loạt bom cháy xuyên 35% Phòng thủ và gây Thiêu đốt (8% HP/lượt trong 2 lượt).',
-  'skill.phantom_volley.name': 'Xung Kích Laser Đôi',
-  'skill.phantom_volley.desc':
-    'Bắn 2 loạt laser tốc độ cao (+25% chí mạng) và gây Làm chậm (-30% Tốc độ).',
-  'skill.orbital_railcannon.name': 'Đại Bác Railgun Dọc Thân',
-  'skill.orbital_railcannon.desc':
-    'Quét chùm railgun toàn bộ địch và gây Vỡ Khiên (vô hiệu Khiên 2 lượt).',
-  'skill.aegis_pulse.name': 'Tia Sửa Chữa Aegis',
-  'skill.aegis_pulse.desc':
-    'Hồi Khiên/HP cho toàn bộ phi đội đồng minh đồng thời giải trừ Thiêu đốt, Làm chậm và Vỡ Khiên.',
-  'skill.target.all_enemies': 'Toàn bộ địch',
-  'skill.target.all_allies': 'Toàn bộ đồng minh',
-  'skill.target.single': 'Đơn mục tiêu',
-  'skill.target.multi': 'Đơn mục tiêu ({hits} phát)',
+  // ==================== 38 ORIGINAL SKILLS (VI) ====================
+  // GENERAL
+  'skill.gen_hull_brace.name': 'Gia Cố Thân Vỏ',
+  'skill.gen_hull_brace.desc':
+    'Gia cố giáp thân tàu, tăng +25% Phòng thủ cho bản thân trong 3 lượt. Mọi lớp Gear đều dùng được.',
+  'skill.gen_thruster_feint.name': 'Lách Động Cơ Phụ',
+  'skill.gen_thruster_feint.desc':
+    'Kích hoạt động cơ phản lực phụ, tăng +25% Né tránh cho bản thân trong 3 lượt. Mọi lớp Gear đều dùng được.',
+
+  // STRIKER
+  'skill.str_hotload_shells.name': 'Nạp Đạn Quá Áp',
+  'skill.str_hotload_shells.desc':
+    'Gia nhiệt băng đạn chính, tăng +30% sát thương Vũ khí chính cho bản thân trong 3 lượt.',
+  'skill.str_ordnance_amp.name': 'Khuếch Đại Đầu Đạn',
+  'skill.str_ordnance_amp.desc':
+    'Ép xung bộ dẫn đường khoang bom, tăng +30% sát thương Kỹ năng trong 3 lượt.',
+  'skill.str_deadeye_link.name': 'Khóa Mục Tiêu Tuyệt Đối',
+  'skill.str_deadeye_link.desc':
+    'Kích hoạt radar khóa chết: 2 đòn tấn công kế tiếp của bạn không thể bị né.',
+  'skill.str_viper_sweep.name': 'Quét Đạn Xuyên Tuyến',
+  'skill.str_viper_sweep.desc':
+    'Lướt cánh quét tối đa 3 tàu địch, gây 60% sát thương lên mỗi mục tiêu.',
+  'skill.str_carpet_salvo.name': 'Loạt Bom Rải Thảm',
+  'skill.str_carpet_salvo.desc':
+    'Thả đầu đạn 170% sát thương lên mục tiêu chính và 50% sát thương nổ lan sang tàu địch kế cận.',
+  'skill.str_solar_capacitor.name': 'Pháo Tụ Điện Mặt Trời',
+  'skill.str_solar_capacitor.desc':
+    'Dành 1 lượt tụ năng lượng, sau đó tự động phóng tia hủy diệt 320% sát thương vào lượt kế tiếp.',
+  'skill.str_phase_shroud.name': 'Màn Pha Tàng Hình',
+  'skill.str_phase_shroud.desc':
+    'Đặc biệt: Kích hoạt trường tàng hình pha, không thể bị nhắm đơn mục tiêu trong 2 lượt.',
+  'skill.str_skyfall_protocol.name': 'Mưa Thiên Thạch Quỹ Đạo',
+  'skill.str_skyfall_protocol.desc':
+    'Tinh anh (1 lần/trận): Gọi oanh kích bão hòa toàn đội hình địch gây 220% sát thương.',
+  'skill.str_passive_ordnance.name': 'Đầu Đạn Thuốc Nổ Cao',
+  'skill.str_passive_ordnance.desc':
+    'Bị động: Vĩnh viễn tăng +5% sát thương mọi Kỹ năng mỗi cấp.',
+
+  // SIEGE
+  'skill.sge_anchor_protocol.name': 'Chế Độ Neo Pháo',
+  'skill.sge_anchor_protocol.desc':
+    'Bật/Tắt: Khóa trụ hỏa lực tăng +60% sát thương gây ra, nhưng Né tránh giảm về 0. Tắt không tốn SP.',
+  'skill.sge_bastion_lock.name': 'Khóa Giáp Pháo Đài',
+  'skill.sge_bastion_lock.desc':
+    'Bật/Tắt: Dồn năng lượng phòng thủ (+80% DEF & +30% Khiên), giảm 30% sát thương gây ra.',
+  'skill.sge_grav_bolas.name': 'Đạn Trọng Lực Kìm Hãm',
+  'skill.sge_grav_bolas.desc':
+    'Bắn đạn động năng 110% sát thương và gây Làm chậm (-30% Tốc độ) trong 2 lượt.',
+  'skill.sge_aegis_sunder.name': 'Đại Bác Phá Khiên',
+  'skill.sge_aegis_sunder.desc':
+    'Bắn xung EMP gây 80% sát thương và kích hoạt Vỡ Khiên (vô hiệu hóa khiên địch 2 lượt).',
+  'skill.sge_thermal_mask.name': 'Ngụy Trang Nhiệt',
+  'skill.sge_thermal_mask.desc':
+    'Đặc biệt: Ẩn dấu nhiệt, không thể bị nhắm cho tới đòn đánh kế tiếp. Không thể dùng khi đang bật Neo Pháo.',
+  'skill.sge_starbreaker_lance.name': 'Thương Railgun Phá Tinh',
+  'skill.sge_starbreaker_lance.desc':
+    'Tinh anh (1 lần/trận): Bắn 1 phát siêu tốc 400% sát thương xuyên bỏ toàn bộ Phòng thủ và Khiên.',
+  'skill.sge_passive_hull.name': 'Thân Vỏ Hợp Kim Kép',
+  'skill.sge_passive_hull.desc':
+    'Bị động: Vĩnh viễn tăng +4% Phòng thủ mỗi cấp.',
+
+  // INTERCEPTOR
+  'skill.int_sabot_burst.name': 'Loạt Đạn Xuyên Giáp',
+  'skill.int_sabot_burst.desc':
+    'Bắn loạt đạn sabot siêu tốc gây 130% sát thương và xuyên 30% Phòng thủ mục tiêu.',
+  'skill.int_snap_riposte.name': 'Lật Cánh Phản Đòn',
+  'skill.int_snap_riposte.desc':
+    'Vào thế phản kích: lập tức bắn trả đòn tấn công sắp tới của kẻ địch.',
+  'skill.int_afterburn_slip.name': 'Trượt Đốt Sau',
+  'skill.int_afterburn_slip.desc':
+    'Lùi về Hậu tuyến (-15% sát thương nhận) và tăng +30% Né tránh trong 2 lượt.',
+  'skill.int_mach_surge.name': 'Tăng Tốc Siêu Thanh',
+  'skill.int_mach_surge.desc':
+    'Kích hoạt động cơ siêu thanh, tăng +50% Tốc độ lượt trong 3 lượt.',
+  'skill.int_ecm_blackout.name': 'Gây Nhiễu ECM',
+  'skill.int_ecm_blackout.desc':
+    'Gây nhiễu điện tử toàn phần lên 1 địch, áp dụng Câm lặng (khóa kỹ năng) trong 2 lượt.',
+  'skill.int_mirage_spin.name': 'Xoay Ốc Ảo Ảnh',
+  'skill.int_mirage_spin.desc':
+    'Đặc biệt: Thực hiện cú lộn vòng quá tải G, né hoàn toàn mọi đòn tấn công trong 1 vòng.',
+  'skill.int_redline_fury.name': 'Cuồng Nộ Quá Tải Lò',
+  'skill.int_redline_fury.desc':
+    'Tinh anh (1 lần/trận): Gỡ giới hạn lò phản ứng tăng +60% ATK & +40% Tốc độ, đổi lại -30% DEF trong 3 lượt.',
+  'skill.int_passive_vectored.name': 'Ống Phản Lực Đảo Hướng',
+  'skill.int_passive_vectored.desc':
+    'Bị động: Vĩnh viễn tăng +3% Né tránh và +2% Tốc độ mỗi cấp.',
+
+  // SUPPORT
+  'skill.sup_nanite_mend.name': 'Tia Sửa Chữa Nanite',
+  'skill.sup_nanite_mend.desc':
+    'Chiếu chùm nanite sửa chữa, hồi 30% HP tối đa cho 1 đồng minh đã chọn.',
+  'skill.sup_regen_grid.name': 'Mạng Lưới Hồi Phục',
+  'skill.sup_regen_grid.desc':
+    'Triển khai drone sửa chữa toàn đội hình, hồi 10% HP tối đa mỗi lượt trong 3 lượt.',
+  'skill.sup_lidar_sweep.name': 'Quét Radar Lidar',
+  'skill.sup_lidar_sweep.desc':
+    'Phá toàn bộ tàng hình của địch và đánh dấu Bại lộ (+15% sát thương nhận) lên toàn đội địch trong 2 lượt.',
+  'skill.sup_flux_transfer.name': 'Truyền Năng Lượng Flux',
+  'skill.sup_flux_transfer.desc':
+    'Truyền năng lượng lò phản ứng cho 1 đồng minh đã chọn, hồi ngay +20 SP.',
+  'skill.sup_war_hymn.name': 'Liên Kết Hỏa Lực',
+  'skill.sup_war_hymn.desc':
+    'Đồng bộ máy tính ngắm bắn toàn phi đội, tăng +20% ATK cho toàn bộ đồng minh trong 3 lượt.',
+  'skill.sup_aegis_field.name': 'Xung Tụ Điện Aegis',
+  'skill.sup_aegis_field.desc':
+    'Phát xung tụ điện toàn đội: hồi +10 SP và nạp lại 25% Khiên tối đa cho tất cả đồng minh.',
+  'skill.sup_iron_canopy.name': 'Vòm Giáp Thép',
+  'skill.sup_iron_canopy.desc':
+    'Phủ trường gia cố giáp toàn phi đội, tăng +20% DEF cho tất cả đồng minh trong 3 lượt.',
+  'skill.sup_slipstream_link.name': 'Dẫn Luồng Khí Động',
+  'skill.sup_slipstream_link.desc':
+    'Chia sẻ dữ liệu né đạn toàn phi đội, tăng +20% EVA cho tất cả đồng minh trong 3 lượt.',
+  'skill.sup_stasis_shell.name': 'Lồng Ngưng Đọng Stasis',
+  'skill.sup_stasis_shell.desc':
+    'Đặc biệt: Bao bọc 1 đồng minh bằng lồng thời không, miễn nhiễm 100% sát thương trong 1 vòng.',
+  'skill.sup_system_purge.name': 'Thanh Lọc Hệ Thống',
+  'skill.sup_system_purge.desc':
+    'Đặc biệt: Giải trừ toàn bộ hiệu ứng bất lợi (Thiêu đốt, Làm chậm, Câm lặng, Vỡ Khiên, Bại lộ) cho cả đội.',
+  'skill.sup_genesis_wave.name': 'Sóng Tái Tạo Genesis',
+  'skill.sup_genesis_wave.desc':
+    'Tinh anh (1 lần/trận): Hồi 100% HP & Khiên và xóa sạch mọi hiệu ứng xấu cho toàn bộ phi đội.',
+  'skill.sup_passive_capacitor.name': 'Tụ Điện SP Phụ Trợ',
+  'skill.sup_passive_capacitor.desc':
+    'Bị động: Vĩnh viễn hồi thêm +1 SP mỗi lượt cho mỗi cấp kỹ năng.',
+
+  // Target labels
+  'skill.target.self': 'Bản thân',
+  'skill.target.single_enemy': '1 Địch',
+  'skill.target.multi_enemy': 'Tối đa 3 Địch',
+  'skill.target.all_enemies': 'Toàn bộ Địch',
+  'skill.target.single_ally': '1 Đồng minh',
+  'skill.target.all_allies': 'Toàn đội',
+
+  // Battle skill usability reasons
+  'battle.skillReason.silenced': 'Đang bị Câm lặng — Khóa kỹ năng',
+  'battle.skillReason.charging': 'Đang tụ năng — Tự bắn lượt sau',
+  'battle.skillReason.on_cooldown': 'Đang hồi chiêu: {turns} lượt',
+  'battle.skillReason.already_used': 'Kỹ năng Tinh anh đã dùng trong trận này',
+  'battle.skillReason.blocked_by_siege': 'Không thể dùng khi đang bật Neo Pháo',
+  'battle.skillReason.insufficient_sp': 'Không đủ SP (cần {cost} SP)',
+  'battle.skillReason.class_mismatch': 'Sai lớp Gear',
+  'battle.skillReason.not_equipped': 'Chưa lắp trên thanh kỹ năng',
 
   // Sectors
   'sector.border_outpost.name': 'Trạm Tiếp Sóng Kestrel',
@@ -254,7 +449,7 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'hangar.callsign': 'Tên phi công',
   'hangar.callsignPlaceholder': 'Nhập tên phi công',
   'hangar.hostilesLevel': 'Địch ~Lv.{level}',
-  'hangar.statSubtitle': '+{perLevel} điểm/cấp · Đã cộng chỉ số linh kiện Gear này',
+  'hangar.statSubtitle': '+{perLevel} điểm/cấp · Đã cộng linh kiện & kỹ năng bị động',
   'hangar.availablePts': 'Điểm chưa cộng',
   'hangar.perPt': '+{gain}/đ',
   'hangar.gearBonus': '(+{bonus} đồ)',
@@ -283,16 +478,19 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'enchant.msg.failed':
     'Cường hóa thất bại ({rate}%). {item} giữ nguyên +{level}; đã tiêu {cost} CR.',
 
-  // Shop Screen
-  'shop.title': 'Chợ Linh Kiện Ngẫu Nhiên',
+  // Shop Screen + War Point Shop
+  'shop.title': 'Chợ Linh Kiện & Điểm Chiến Trận',
   'shop.subtitle':
-    'Hàng hóa tự làm mới sau mỗi trận đánh, hoặc làm mới ngay với {refreshCost} CR. Bán đồ chưa lắp thu về {ratio}%.',
+    'Mua/bán linh kiện ngẫu nhiên bằng Credits hoặc đổi Điểm Chiến Trận (WP) lấy Thẻ Mở Khóa kỹ năng Đặc biệt & Tinh anh.',
   'shop.availableCredits': 'Credits chung',
+  'shop.availableWp': 'Điểm Chiến Trận',
   'shop.tabBuy': 'Hàng đang bán ({count})',
   'shop.tabSell': 'Bán từ Kho ({count})',
+  'shop.tabWarPoints': 'Chợ Điểm Chiến Trận ({owned}/{total})',
   'shop.refreshStock': 'Làm mới ({cost} CR)',
   'shop.refreshedMsg': 'Đã làm mới danh sách linh kiện ngẫu nhiên!',
   'shop.equipInHangar': 'Lắp tại tab Gear →',
+  'shop.goToSkillTab': 'Học tại tab Skill →',
   'shop.filterSlot': 'Loại ô',
   'shop.allSlots': 'Tất cả ô',
   'shop.filterClass': 'Lớp Gear',
@@ -312,6 +510,13 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'shop.sellBtn': 'Bán',
   'shop.compareVs': 'So với đồ đang lắp ({gear}):',
   'shop.emptySlotGain': 'Ô trống (nhận toàn bộ chỉ số)',
+  'shop.wpIntro':
+    'Kiếm Điểm Chiến Trận (WP) từ các trận không chiến và thưởng chiếm căn cứ lần đầu. Thẻ Mở Khóa cho phép học kỹ năng Đặc biệt & Tinh anh tại tab Skill.',
+  'shop.openingCardTitle': 'Thẻ Mở Khóa: {skill}',
+  'shop.buyCardBtn': 'Mua Thẻ ({cost} WP)',
+  'shop.insufficientWp': 'Cần {cost} WP',
+  'shop.cardOwnedBadge': 'Đã sở hữu Thẻ',
+  'shop.cardBoughtMsg': 'Đã mua Thẻ Mở Khóa cho {skill} (-{cost} WP)! Hãy học tại tab Skill.',
 
   // Battle Screen
   'battle.round': 'Vòng {round}',
@@ -321,15 +526,20 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'battle.operational': '{alive} / {total} Sẵn sàng',
   'battle.hostileWing': 'Hạm đội Địch · {sector}',
   'battle.activeCount': '{alive} / {total} Hoạt động',
-  'battle.yourTurn': 'Lượt của bạn — Khóa mục tiêu và chọn lệnh tác chiến',
+  'battle.yourTurn': 'Lượt của bạn — Khóa mục tiêu và chọn lệnh hoặc kỹ năng',
+  'battle.chargingTurn': 'Pháo Tụ Điện đã nạp đầy — Tự động khai hỏa...',
   'battle.concluded': 'Trận đánh đã kết thúc',
   'battle.aiTurn': 'AI đang hành động:',
-  'battle.targetLock': 'Mục tiêu:',
+  'battle.targetLock': 'Khóa Địch:',
+  'battle.allyLock': 'Khóa Đồng minh:',
   'battle.actionAttack': 'Khai hỏa',
   'battle.actionAttackSub': 'Pháo chính · +5 SP',
-  'battle.actionSkillSub': '{cost} SP · {target} · Lv.{lv}',
   'battle.actionDefend': 'Bật Khiên',
-  'battle.actionDefendSub': '-50% ST · +12 SP · +SHD',
+  'battle.actionDefendSub': '-50% ST · +12 SP',
+  'battle.skillBarTitle': 'Thanh Kỹ Năng Đã Lắp',
+  'battle.noSkillsSlotted': 'Chưa lắp kỹ năng chủ động nào cho Gear này.',
+  'battle.skillOnTag': 'ĐANG BẬT',
+  'battle.skillUsedTag': 'ĐÃ DÙNG',
   'battle.retreat': 'Rút lui',
   'battle.skipAnim': 'Bỏ hiệu ứng',
   'battle.combatLog': 'Nhật ký Không chiến',
@@ -337,7 +547,8 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'battle.status.destroyed': 'BỊ HẠ',
   'battle.status.active': 'ĐẾN LƯỢT',
   'battle.status.defending': 'BẬT KHIÊN',
-  'battle.status.targeted': 'ĐANG KHÓA',
+  'battle.status.targeted': 'KHÓA ĐỊCH',
+  'battle.status.allyTarget': 'CHỌN ĐỒNG MINH',
   'battle.status.player': 'NGƯỜI CHƠI',
   'battle.status.standby': 'CHỜ LƯỢT',
 
@@ -347,13 +558,15 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'summary.defeat': 'Phi đội Thất thủ',
   'summary.retreatTitle': 'Rút lui Chiến thuật',
   'summary.victoryDesc':
-    'Toàn bộ địch bị tiêu diệt. Nhận 100% tiền thưởng vào ví chung và EXP cho Gear xuất kích.',
+    'Toàn bộ địch bị tiêu diệt. Nhận 100% tiền thưởng, WP và EXP cho Gear xuất kích.',
   'summary.defeatDesc':
     'Nhận 50% thưởng từ địch đã hạ cộng 20% hỗ trợ an ủi.',
   'summary.levelUp': '{gear} thăng cấp: Lv.{prev} → Lv.{next}',
   'summary.levelUpDesc': 'Mở tab Garage để cộng điểm chỉ số mới cho Gear này.',
   'summary.expEarned': 'EXP ({gear})',
   'summary.creditsAwarded': 'Credits nhận được',
+  'summary.warPointsAwarded': 'Điểm Chiến Trận',
+  'summary.captureBonusNote': 'Gồm +{wp} WP chiếm căn cứ',
   'summary.battlesToNext': 'Còn ~{count} trận thắng để lên Lv.{next}',
   'summary.maxLevelReached': 'Đã đạt Cấp tối đa (Lv.50)',
   'summary.sectorUnlocked': 'Đã mở khu vực mới: {sector}',
@@ -370,15 +583,27 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
     '{actor} bật Khiên năng lượng (-50% sát thương{shieldPart}{spPart}).',
   'log.healSquad':
     '{actor} kích hoạt {skill} (-{spCost} SP), hồi tổng cộng {total} Khiên/HP cho toàn đội.',
+  'log.healSingle':
+    '{actor} dùng {skill} sửa chữa {target} hồi +{amount} HP.',
+  'log.energize':
+    '{actor} dùng {skill} tiếp +{amount} SP cho {target}.',
   'log.evade': '{target} lộn vòng né gọn đòn {action} từ {actor}!',
   'log.damage':
     '{actor} dùng {action} bắn trúng {target} gây {breakdown}{critTag}{defendTag}.',
   'log.destroyed': '{target} ({className}) đã phát nổ!',
   'log.statusApplied': '{target} dính hiệu ứng {status} ({turns} lượt)!',
   'log.burnTick': '{target} chịu {damage} sát thương Thiêu đốt!',
-  'log.statusCleansed': '{actor} đã giải trừ hiệu ứng xấu cho đồng minh.',
+  'log.regenTick': '{target} hồi phục +{amount} HP thân tàu!',
+  'log.statusCleansed': '{actor} đã giải trừ toàn bộ hiệu ứng xấu cho đồng minh.',
   'log.splashDamage': 'Đạn nổ lan của {actor} đánh trúng {target} gây {damage}!',
   'log.retreat': '{actor} ra lệnh rút lui chiến thuật khỏi khu vực.',
+  'log.buffApplied': '{actor} kích hoạt {skill} (-{spCost} SP).',
+  'log.stanceToggle': '{actor} chuyển trạng thái {skill}: {state}.',
+  'log.charging': '{actor} bắt đầu tụ năng {skill} — sẽ tự khai hỏa vào lượt sau!',
+  'log.counterAttack': '{target} kích hoạt Lật Cánh Phản Đòn lên {actor} gây {damage}!',
+  'log.scanReveal': '{actor} quét {skill}, phát hiện {revealed} tàu tàng hình & làm bại lộ địch!',
+  'log.invincibleBlock': 'Lồng Stasis của {target} chặn đứng toàn bộ sát thương từ {actor}!',
+  'log.silencedBlocked': '{actor} đang bị Câm lặng không thể dùng kỹ năng — chuyển sang Pháo Chính.',
   'log.primaryWeapons': 'Pháo Chính',
   'log.breakdownBoth': '{shield} Khiên, {hp} HP',
   'log.breakdownShield': '{shield} Khiên',

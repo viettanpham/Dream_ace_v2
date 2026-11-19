@@ -1,5 +1,5 @@
 import { BALANCE_CONFIG } from '../data/balance';
-import { EMPTY_STAT_BLOCK, MECH_CLASSES, MECH_CLASS_LIST } from '../data/classes';
+import { EMPTY_STAT_BLOCK, MECH_CLASS_LIST } from '../data/classes';
 import {
   EMPTY_EQUIPPED_SLOT_IDS,
   EQUIPMENT_SLOTS,
@@ -8,6 +8,12 @@ import {
   LEGACY_ITEM_ID_TO_TEMPLATE,
 } from '../data/items';
 import { SECTORS_CATALOG } from '../data/maps';
+import {
+  CLASS_STARTER_SKILLS,
+  getOpeningCardById,
+  getSkillById,
+  LEGACY_SKILL_ID_MAP,
+} from '../data/skills';
 import type {
   AdminConfig,
   BattleSpeed,
@@ -18,9 +24,10 @@ import type {
   PilotAccount,
 } from '../types/game';
 import { generateItemInstance, generateShopStock } from './equipment';
+import { isSkillAllowedForClass, MAX_ACTIVE_SKILL_BAR } from './skills';
 import { createDefaultGearUnit, createDefaultPilotAccount } from './stats';
 
-export const CURRENT_SAVE_VERSION = 4;
+export const CURRENT_SAVE_VERSION = 5;
 
 export interface PersistedCampaignState {
   pilot: PilotAccount;
@@ -80,6 +87,68 @@ export function createFreshCampaignState(
   };
 }
 
+function sanitizeGearSkills(
+  classId: MechClassId,
+  rawSkillLevels: unknown,
+  rawEquippedBar: unknown
+): { skillLevels: Record<string, number>; equippedSkillBar: string[] } {
+  const cleanLevels: Record<string, number> = {};
+
+  if (rawSkillLevels && typeof rawSkillLevels === 'object') {
+    for (const [rawId, rawLv] of Object.entries(
+      rawSkillLevels as Record<string, unknown>
+    )) {
+      const mappedId = LEGACY_SKILL_ID_MAP[rawId] ?? rawId;
+      const skill = getSkillById(mappedId);
+      if (!skill) continue;
+      // Strictly strip any cross-class skill!
+      if (!isSkillAllowedForClass(skill, classId)) continue;
+      const lv = Math.max(
+        1,
+        Math.min(BALANCE_CONFIG.skillMaxLevel, Number(rawLv) || 1)
+      );
+      cleanLevels[mappedId] = Math.max(cleanLevels[mappedId] ?? 0, lv);
+    }
+  }
+
+  // Ensure starter skills for this class are always learned at >= Lv 1
+  for (const starterId of CLASS_STARTER_SKILLS[classId]) {
+    if (!cleanLevels[starterId]) {
+      cleanLevels[starterId] = 1;
+    }
+  }
+
+  const cleanBar: string[] = [];
+  if (Array.isArray(rawEquippedBar)) {
+    for (const rawId of rawEquippedBar) {
+      if (typeof rawId !== 'string') continue;
+      const mappedId = LEGACY_SKILL_ID_MAP[rawId] ?? rawId;
+      const skill = getSkillById(mappedId);
+      if (
+        skill &&
+        skill.category !== 'passive' &&
+        isSkillAllowedForClass(skill, classId) &&
+        (cleanLevels[mappedId] ?? 0) >= 1 &&
+        !cleanBar.includes(mappedId) &&
+        cleanBar.length < MAX_ACTIVE_SKILL_BAR
+      ) {
+        cleanBar.push(mappedId);
+      }
+    }
+  }
+
+  if (cleanBar.length === 0) {
+    for (const starterId of CLASS_STARTER_SKILLS[classId]) {
+      const sk = getSkillById(starterId);
+      if (sk && sk.category !== 'passive' && cleanBar.length < MAX_ACTIVE_SKILL_BAR) {
+        cleanBar.push(starterId);
+      }
+    }
+  }
+
+  return { skillLevels: cleanLevels, equippedSkillBar: cleanBar };
+}
+
 function convertLegacyItemInstance(
   raw: unknown,
   rng: () => number
@@ -87,7 +156,6 @@ function convertLegacyItemInstance(
   if (!raw || typeof raw !== 'object') return null;
   const obj = raw as Record<string, unknown>;
 
-  // Already new randomized ItemInstance format?
   if (
     typeof obj.instanceId === 'string' &&
     typeof obj.templateId === 'string' &&
@@ -123,7 +191,6 @@ function convertLegacyItemInstance(
     };
   }
 
-  // Legacy v2/v3 item format: { instanceId, itemId, enchantLevel }
   if (typeof obj.itemId === 'string') {
     const mappedTemplateId =
       LEGACY_ITEM_ID_TO_TEMPLATE[obj.itemId] ?? ITEM_TEMPLATES[0].id;
@@ -148,8 +215,7 @@ function convertLegacyItemInstance(
 }
 
 /**
- * Pure, crash-proof save migration from v1/v2/v3 (flat player state) or partial v4
- * into the canonical v4 per-Gear PilotAccount model.
+ * Pure, crash-proof save migration from v1/v2/v3/v4 into canonical v5 (full Gear Skill System + War Points).
  */
 export function migrateSaveData(
   persistedState: unknown,
@@ -188,7 +254,7 @@ export function migrateSaveData(
         : BALANCE_CONFIG.rewardMultDefault,
   };
 
-  // Case A: Already v4 (`pilot` object present)
+  // Case A: v4 / v5 (`pilot` object present)
   if (version >= 4 && raw.pilot && typeof raw.pilot === 'object') {
     const rawPilot = raw.pilot as Partial<PilotAccount>;
     const rawInventory = Array.isArray(rawPilot.inventory)
@@ -223,13 +289,10 @@ export function migrateSaveData(
             claimedIds.add(refId);
           }
         }
-        const sigId = MECH_CLASSES[cls.id].signatureSkillId;
-        const skillLv = Math.max(
-          1,
-          Math.min(
-            BALANCE_CONFIG.skillMaxLevel,
-            Number(rawGear.skillLevels?.[sigId]) || 1
-          )
+        const { skillLevels, equippedSkillBar } = sanitizeGearSkills(
+          cls.id,
+          rawGear.skillLevels,
+          rawGear.equippedSkillBar
         );
         gears[cls.id] = {
           classId: cls.id,
@@ -245,7 +308,8 @@ export function migrateSaveData(
             ...(rawGear.allocatedPoints ?? {}),
           },
           equipped: cleanEquipped,
-          skillLevels: { [sigId]: skillLv },
+          skillLevels,
+          equippedSkillBar,
           battlesWon: Math.max(0, Number(rawGear.battlesWon) || 0),
           battlesFought: Math.max(0, Number(rawGear.battlesFought) || 0),
         };
@@ -254,7 +318,6 @@ export function migrateSaveData(
       }
     }
 
-    // Ensure at least activeGearId is owned
     if (!gears[activeGearId].owned) {
       const anyOwned = MECH_CLASS_LIST.find((c) => gears[c.id].owned);
       if (!anyOwned) {
@@ -269,8 +332,28 @@ export function migrateSaveData(
     const unlockedSectorIds =
       Array.isArray(rawPilot.unlockedSectorIds) &&
       rawPilot.unlockedSectorIds.length > 0
-        ? Array.from(new Set(rawPilot.unlockedSectorIds.filter((s) => typeof s === 'string')))
+        ? Array.from(
+            new Set(
+              rawPilot.unlockedSectorIds.filter((s) => typeof s === 'string')
+            )
+          )
         : [SECTORS_CATALOG[0].id];
+
+    const capturedSectorIds = Array.isArray(rawPilot.capturedSectorIds)
+      ? Array.from(
+          new Set(rawPilot.capturedSectorIds.filter((s) => typeof s === 'string'))
+        )
+      : [];
+
+    const ownedOpeningCards = Array.isArray(rawPilot.ownedOpeningCards)
+      ? Array.from(
+          new Set(
+            rawPilot.ownedOpeningCards.filter(
+              (id) => typeof id === 'string' && Boolean(getOpeningCardById(id))
+            )
+          )
+        )
+      : [];
 
     const rawShop = Array.isArray(raw.shopStock)
       ? raw.shopStock
@@ -287,10 +370,13 @@ export function migrateSaveData(
             ? rawPilot.name.slice(0, 18)
             : 'Vance',
         credits: Math.max(0, Number(rawPilot.credits) || 0),
+        warPoints: Math.max(0, Number(rawPilot.warPoints) || 0),
+        ownedOpeningCards,
         inventory: rawInventory,
         gears,
         activeGearId: finalActiveGearId,
         unlockedSectorIds,
+        capturedSectorIds,
       },
       shopStock:
         rawShop.length > 0
@@ -306,7 +392,7 @@ export function migrateSaveData(
     };
   }
 
-  // Case B: Legacy v1 / v2 / v3 save (`raw.player`) -> migrate into v4 per-Gear model!
+  // Case B: Legacy v1 / v2 / v3 save (`raw.player`) -> migrate into v5 per-Gear model!
   const legacyPlayer = (raw.player ?? {}) as Record<string, unknown>;
   const legacyClass: MechClassId = VALID_CLASSES.has(
     legacyPlayer.classId as MechClassId
@@ -317,7 +403,6 @@ export function migrateSaveData(
   const migratedInventory: ItemInstance[] = [];
   const equippedIds = { ...EMPTY_EQUIPPED_SLOT_IDS };
 
-  // Migrate legacy equipped items into pilot.inventory and link onto legacyClass Gear
   if (legacyPlayer.equipped && typeof legacyPlayer.equipped === 'object') {
     const eqMap = legacyPlayer.equipped as Record<string, unknown>;
     for (const slot of EQUIPMENT_SLOTS) {
@@ -336,7 +421,6 @@ export function migrateSaveData(
     }
   }
 
-  // Migrate legacy bag items
   if (Array.isArray(legacyPlayer.inventory)) {
     for (const item of legacyPlayer.inventory) {
       const converted = convertLegacyItemInstance(item, rng);
@@ -349,7 +433,11 @@ export function migrateSaveData(
   const gears = {} as Record<MechClassId, GearUnit>;
   for (const cls of MECH_CLASS_LIST) {
     if (cls.id === legacyClass) {
-      const sigId = MECH_CLASSES[cls.id].signatureSkillId;
+      const { skillLevels, equippedSkillBar } = sanitizeGearSkills(
+        cls.id,
+        undefined,
+        undefined
+      );
       gears[cls.id] = {
         classId: cls.id,
         owned: true,
@@ -367,7 +455,8 @@ export function migrateSaveData(
           ...((legacyPlayer.allocatedPoints as Record<string, number>) ?? {}),
         },
         equipped: equippedIds,
-        skillLevels: { [sigId]: 1 },
+        skillLevels,
+        equippedSkillBar,
         battlesWon: Math.max(0, Number(legacyPlayer.battlesWon) || 0),
         battlesFought: Math.max(0, Number(legacyPlayer.battlesFought) || 0),
       };
@@ -396,10 +485,13 @@ export function migrateSaveData(
         0,
         Number(legacyPlayer.credits) ?? BALANCE_CONFIG.startingCredits
       ),
+      warPoints: 0,
+      ownedOpeningCards: [],
       inventory: migratedInventory,
       gears,
       activeGearId: legacyClass,
       unlockedSectorIds,
+      capturedSectorIds: [],
     },
     shopStock: generateShopStock(
       migratedLevel,
