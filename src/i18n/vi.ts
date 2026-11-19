@@ -1250,5 +1250,23 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'battle.aiTurnShort': 'Lượt {name}',
   'battle.targetShort': 'Mục tiêu',
   'battle.skillsSheetTitle': 'Kỹ năng chủ động',
+
+  // Tactical Battle Radar View (Targeting toast + Collapsible legend)
+  'radar.invalidFrontAlive': 'Hàng trước vẫn còn sống',
+  'radar.invalidMiddleAlive': 'Hàng giữa vẫn còn sống',
+  'radar.invalidStealthed': 'Mục tiêu đang tàng hình',
+  'radar.invalidDown': 'Đơn vị đã bị hạ gục',
+  'radar.legendToggle': 'Chú giải',
+  'radar.legendTitle': 'Chú giải chiến thuật',
+  'radar.legendActing': 'Vòng đơn vị đang hành động',
+  'radar.legendTarget': 'Vòng mục tiêu & mũi tên ngắm',
+  'radar.legendLocked': 'Bị khóa (hàng gần hơn còn sống)',
+  'radar.legendLongRange': 'Tầm xa / Siege nhắm mọi hàng',
+  'radar.legendExposed': 'Hàng lộ diện (có thể nhắm)',
+  'radar.legendProtected': 'Hàng được che (viền nét đứt)',
+  'radar.legendEmpty': 'Hàng trống',
+  'radar.legendAllyShape': 'Lục giác / Tròn: Bạn & Đồng minh',
+  'radar.legendEnemyShape': 'Hình thoi / Bát giác: Địch & Boss',
+  'radar.legendDown': 'X xám: Đã hạ (không thể chọn)',
 };
 

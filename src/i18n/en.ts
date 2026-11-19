@@ -1248,6 +1248,24 @@ export const EN_TRANSLATIONS = {
   'battle.aiTurnShort': '{name} acting',
   'battle.targetShort': 'Target',
   'battle.skillsSheetTitle': 'Active Skills',
+
+  // Tactical Battle Radar View (Targeting toast + Collapsible legend)
+  'radar.invalidFrontAlive': 'Front row still alive',
+  'radar.invalidMiddleAlive': 'Middle row still alive',
+  'radar.invalidStealthed': 'Target is stealthed',
+  'radar.invalidDown': 'Unit is already down',
+  'radar.legendToggle': 'Legend',
+  'radar.legendTitle': 'Tactical Legend',
+  'radar.legendActing': 'Acting unit ring',
+  'radar.legendTarget': 'Target ring & aim arrow',
+  'radar.legendLocked': 'Locked (nearer row alive)',
+  'radar.legendLongRange': 'Long-range / Siege targets any row',
+  'radar.legendExposed': 'Exposed row (targetable)',
+  'radar.legendProtected': 'Protected row (dashed)',
+  'radar.legendEmpty': 'Empty row',
+  'radar.legendAllyShape': 'Hex / Circle: Player & Allies',
+  'radar.legendEnemyShape': 'Diamond / Octagon: Enemy & Boss',
+  'radar.legendDown': 'Grey X: Down (untargetable)',
 } as const;
 
 export type TranslationKey = keyof typeof EN_TRANSLATIONS;

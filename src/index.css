@@ -389,6 +389,97 @@
   transform-origin: center;
 }
 
+/* Tactical Radar compositor-only animations (transform & opacity only) */
+@keyframes radar-projectile-fly {
+  0% {
+    opacity: 0;
+    transform: translate3d(0px, 0px, 0) scale(0.75);
+  }
+  16% {
+    opacity: 1;
+    transform: translate3d(calc(var(--dx) * 0.16), calc(var(--dy) * 0.16), 0) scale(1);
+  }
+  86% {
+    opacity: 1;
+    transform: translate3d(calc(var(--dx) * 0.92), calc(var(--dy) * 0.92), 0) scale(1.04);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--dx), var(--dy), 0) scale(0.65);
+  }
+}
+
+@keyframes radar-beam-stretch {
+  0% {
+    opacity: 0;
+    transform: scaleX(0.08) scaleY(0.6);
+  }
+  22% {
+    opacity: 0.96;
+    transform: scaleX(1) scaleY(1.15);
+  }
+  78% {
+    opacity: 0.85;
+    transform: scaleX(1) scaleY(0.95);
+  }
+  100% {
+    opacity: 0;
+    transform: scaleX(1) scaleY(0.2);
+  }
+}
+
+@keyframes radar-hit-flash {
+  0% {
+    opacity: 0;
+    transform: scale(0.65);
+  }
+  30% {
+    opacity: 0.92;
+    transform: scale(1.15);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.45);
+  }
+}
+
+@keyframes radar-defeat-fade {
+  0% {
+    opacity: 0.95;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.78);
+  }
+}
+
+.anim-radar-projectile {
+  animation: radar-projectile-fly var(--fx-dur, 360ms) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.anim-radar-beam {
+  animation: radar-beam-stretch var(--fx-dur, 420ms) ease-out forwards;
+  transform-box: fill-box;
+  transform-origin: 0% 50%;
+  will-change: transform, opacity;
+}
+
+.anim-radar-hit-flash {
+  animation: radar-hit-flash var(--hit-dur, 260ms) ease-out forwards;
+  transform-box: fill-box;
+  transform-origin: center;
+  will-change: transform, opacity;
+}
+
+.anim-radar-defeat-fade {
+  animation: radar-defeat-fade var(--defeat-dur, 400ms) ease-out forwards;
+  transform-box: fill-box;
+  transform-origin: center;
+  will-change: transform, opacity;
+}
+
 @keyframes conveyor-shift {
   0% {
     transform: translateX(18px);
@@ -457,6 +548,10 @@
   .anim-token-hover,
   .anim-reticle-pulse,
   .anim-radar-impact,
+  .anim-radar-projectile,
+  .anim-radar-beam,
+  .anim-radar-hit-flash,
+  .anim-radar-defeat-fade,
   .anim-turn-active,
   .anim-turn-arrow,
   .anim-conveyor-shift,

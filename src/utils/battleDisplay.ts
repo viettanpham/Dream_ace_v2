@@ -1,9 +1,33 @@
 import { useEffect, useState } from 'react';
-import type { CombatRow, CombatUnit, FloatingPopup } from '../types/game';
+import { FORMATION_ROWS } from '../data/formationConfig';
+import { getValidEnemyTargets, hasStatus, isLongRangeAction } from '../engine/combat';
+import type {
+  ActionType,
+  BattleSpeed,
+  CombatFxKind,
+  CombatRow,
+  CombatUnit,
+  FloatingPopup,
+} from '../types/game';
 
 export type BattleLayoutMode = 'phone-portrait' | 'tablet' | 'pc';
 
 export type RowExposureState = 'exposed' | 'protected' | 'empty';
+
+export type TargetInvalidReason =
+  | 'unit_down'
+  | 'front_row_alive'
+  | 'middle_row_alive'
+  | 'stealthed'
+  | 'not_enemy';
+
+export interface TargetValidityResult {
+  valid: boolean;
+  blockedByRow: boolean;
+  reason: TargetInvalidReason | null;
+  blockingRow: CombatRow | null;
+  ignoresRowBlocking: boolean;
+}
 
 export interface PopupAnchorPoint {
   x: number;
@@ -27,6 +51,9 @@ export interface StaggeredPopupOptions {
   baseOffsetYPct?: number;
   horizontalSpreadPct?: number;
 }
+
+export const RADAR_LEGEND_STORAGE_KEY = 'starfront_radar_legend_open_v1';
+export const RADAR_MIN_HIT_AREA_PX = 44;
 
 /**
  * Pure responsive layout classifier for the Battle Screen.
@@ -75,6 +102,88 @@ export function useBattleLayoutMode(): BattleLayoutMode {
   }, []);
 
   return mode;
+}
+
+/**
+ * Safely reads prefers-reduced-motion media query.
+ */
+export function getPrefersReducedMotion(): boolean {
+  if (
+    typeof window === 'undefined' ||
+    typeof window.matchMedia !== 'function'
+  ) {
+    return false;
+  }
+  try {
+    return Boolean(
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState<boolean>(() =>
+    getPrefersReducedMotion()
+  );
+
+  useEffect(() => {
+    if (
+      typeof window === 'undefined' ||
+      typeof window.matchMedia !== 'function'
+    ) {
+      return;
+    }
+    const mql = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setReduced(Boolean(mql.matches));
+    const onChange = (e: MediaQueryListEvent) => {
+      setReduced(Boolean(e.matches));
+    };
+    if (typeof mql.addEventListener === 'function') {
+      mql.addEventListener('change', onChange);
+      return () => mql.removeEventListener('change', onChange);
+    }
+    if (typeof mql.addListener === 'function') {
+      mql.addListener(onChange);
+      return () => mql.removeListener(onChange);
+    }
+    return undefined;
+  }, []);
+
+  return reduced;
+}
+
+/**
+ * Persists the collapsible radar legend state in localStorage (closed by default).
+ */
+export function readRadarLegendOpen(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(RADAR_LEGEND_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function writeRadarLegendOpen(open: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(
+      RADAR_LEGEND_STORAGE_KEY,
+      open ? 'true' : 'false'
+    );
+  } catch {
+    // Ignore storage quota or private-mode errors
+  }
+}
+
+/**
+ * Returns the invisible SVG hit-area width/height (in SVG units) sized to remain
+ * >= 44px on phone portrait (vw 380) and tablet/PC landscape (vw 820).
+ */
+export function getRadarHitAreaSize(isLandscape: boolean): number {
+  return isLandscape ? 64 : 52;
 }
 
 /**
@@ -127,6 +236,126 @@ export function computeRowExposure(
   }
 
   return result;
+}
+
+/**
+ * Pure radar target validity evaluator using the existing combat engine rules.
+ * Never alters combat logic; classifies whether a target can be selected and why not:
+ * - Down unit -> invalid ('unit_down')
+ * - Same side -> invalid ('not_enemy')
+ * - Long-range weapon / Siege class / Siege Mode / Sniper -> ignores row blocking
+ * - Stealthed while non-stealthed enemies exist -> invalid ('stealthed')
+ * - Behind an alive Front or Middle row -> invalid ('front_row_alive' | 'middle_row_alive')
+ */
+export function evaluateRadarTargetValidity(
+  units: CombatUnit[],
+  actor: CombatUnit | null,
+  target: CombatUnit,
+  action: ActionType = 'attack',
+  skillId?: string
+): TargetValidityResult {
+  const ignoresRowBlocking = actor
+    ? isLongRangeAction(actor, action, skillId)
+    : false;
+
+  if (!target.alive) {
+    return {
+      valid: false,
+      blockedByRow: false,
+      reason: 'unit_down',
+      blockingRow: null,
+      ignoresRowBlocking,
+    };
+  }
+
+  if (actor && target.side === actor.side) {
+    return {
+      valid: false,
+      blockedByRow: false,
+      reason: 'not_enemy',
+      blockingRow: null,
+      ignoresRowBlocking,
+    };
+  }
+
+  if (!actor) {
+    return {
+      valid: true,
+      blockedByRow: false,
+      reason: null,
+      blockingRow: null,
+      ignoresRowBlocking: false,
+    };
+  }
+
+  const validTargets = getValidEnemyTargets(units, actor, action, skillId);
+  if (validTargets.some((u) => u.id === target.id)) {
+    return {
+      valid: true,
+      blockedByRow: false,
+      reason: null,
+      blockingRow: null,
+      ignoresRowBlocking,
+    };
+  }
+
+  // Distinguish stealth from row-blocking
+  const aliveOpp = units.filter((u) => u.side !== actor.side && u.alive);
+  const nonStealthOpp = aliveOpp.filter((u) => !hasStatus(u, 'stealth'));
+  if (hasStatus(target, 'stealth') && nonStealthOpp.length > 0) {
+    return {
+      valid: false,
+      blockedByRow: false,
+      reason: 'stealthed',
+      blockingRow: null,
+      ignoresRowBlocking,
+    };
+  }
+
+  const pool = nonStealthOpp.length > 0 ? nonStealthOpp : aliveOpp;
+  const firstAliveRow =
+    FORMATION_ROWS.find((row) => pool.some((u) => u.row === row)) ?? 'front';
+
+  return {
+    valid: false,
+    blockedByRow: true,
+    reason:
+      firstAliveRow === 'middle' ? 'middle_row_alive' : 'front_row_alive',
+    blockingRow: firstAliveRow,
+    ignoresRowBlocking,
+  };
+}
+
+/**
+ * Returns attack projectile/beam animation duration in ms (300..500ms at x1),
+ * scaled down by the battle speed setting (x1 / x2 / x3 / x5 / x10).
+ */
+export function computeRadarFxDurationMs(
+  kind: CombatFxKind,
+  battleSpeed: BattleSpeed = 1
+): number {
+  const baseMs =
+    kind === 'missile'
+      ? 460
+      : kind === 'railgun' || kind === 'heal'
+      ? 420
+      : 350;
+  const safeSpeed = Math.max(1, battleSpeed);
+  return Math.max(90, Math.round(baseMs / safeSpeed));
+}
+
+export function computeHitFlashDurationMs(
+  battleSpeed: BattleSpeed = 1
+): number {
+  const safeSpeed = Math.max(1, battleSpeed);
+  return Math.max(80, Math.round(260 / safeSpeed));
+}
+
+export function computeDefeatFadeDurationMs(
+  battleSpeed: BattleSpeed = 1
+): number {
+  const safeSpeed = Math.max(1, battleSpeed);
+  return Math.max(120, Math.round(400 / safeSpeed));
 }
 
 /**

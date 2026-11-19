@@ -170,11 +170,15 @@ export function BattleScreen() {
   useEffect(() => {
     if (!battle || battle.fxEvents.length === 0) return;
     const ids = battle.fxEvents.map((f) => f.id);
+    const fxCleanupMs = Math.max(
+      140,
+      Math.round(500 / Math.max(1, Math.min(3, battleSpeed)))
+    );
     const timer = window.setTimeout(() => {
       clearExpiredFx(ids);
-    }, 480);
+    }, fxCleanupMs);
     return () => window.clearTimeout(timer);
-  }, [battle?.fxEvents, clearExpiredFx]);
+  }, [battle?.fxEvents, battleSpeed, clearExpiredFx]);
 
   useEffect(() => {
     if (!battle || battle.explodedUnitIds.length === 0) return;
@@ -649,6 +653,7 @@ export function BattleScreen() {
           hasSingleAllySkill={hasSingleAllySkill}
           autoBattleEnabled={autoBattleEnabled}
           skipAnimations={bypassFx}
+          battleSpeed={battleSpeed}
           layoutMode={layoutMode}
           onSelectEnemy={(id) => {
             selectTarget(id);
