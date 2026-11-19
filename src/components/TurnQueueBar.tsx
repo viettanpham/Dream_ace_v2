@@ -384,31 +384,47 @@ export function TurnQueueBar({
       data-testid="turn-queue-bar"
       className="relative flex items-center gap-2 min-w-0 w-full"
     >
-      {/* Left Header Badges: [Round N] [In combat] [Enrage?] */}
-      <div className="flex items-center gap-1.5 shrink-0">
-        <span className="px-2 py-1 rounded bg-slate-900 border border-slate-700 font-mono-nums text-[11px] font-bold text-slate-100 whitespace-nowrap">
-          {t('battle.round', { round: queue.round })}
-        </span>
-
+      {/* Left Header Badges: [Swords icon (tooltip)] [Round N (+ inline flame x1.7 when enraged)] */}
+      <div
+        data-testid="turn-queue-header"
+        className="flex items-center gap-1.5 shrink-0"
+      >
         {!battle.summary && (
-          <span className="hidden md:inline-flex items-center gap-1 px-2 py-1 rounded bg-sky-500/12 border border-sky-500/35 text-[11px] font-semibold text-sky-300 whitespace-nowrap">
-            <Swords className="w-3 h-3" />
-            <span>{t('queue.inCombat')}</span>
+          <span
+            data-testid="turn-queue-combat-icon"
+            title={t('queue.inCombat')}
+            aria-label={t('queue.inCombat')}
+            className="inline-flex items-center justify-center w-7 h-7 rounded bg-sky-500/12 border border-sky-500/35 text-sky-300 shrink-0"
+          >
+            <Swords className="w-3.5 h-3.5" aria-hidden="true" />
           </span>
         )}
 
-        {enragePct > 0 && (
-          <span
-            title={t('queue.enrageTooltip', { pct: enragePct, mult: enrageMult })}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded bg-red-500/20 border border-red-500/70 text-[11px] font-mono-nums font-bold text-red-200 whitespace-nowrap animate-pulse"
-          >
-            <Flame className="w-3 h-3 text-orange-400 shrink-0" />
-            <span>{t('queue.enrageBadge', { pct: enragePct })}</span>
-            <span className="hidden sm:inline text-orange-300">
-              ({enrageMult}x)
+        <span
+          data-testid="turn-queue-round-chip"
+          title={
+            enragePct > 0
+              ? t('queue.enrageChipTooltip', { pct: enragePct })
+              : undefined
+          }
+          className={`inline-flex items-center gap-1.5 px-2 py-1 rounded font-mono-nums text-[11px] font-bold whitespace-nowrap ${
+            enragePct > 0
+              ? 'bg-red-950/70 border border-red-500/65 text-slate-100'
+              : 'bg-slate-900 border border-slate-700 text-slate-100'
+          }`}
+        >
+          <span>{t('battle.round', { round: queue.round })}</span>
+          {enragePct > 0 && (
+            <span
+              data-testid="turn-queue-enrage-badge"
+              title={t('queue.enrageChipTooltip', { pct: enragePct })}
+              className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-red-500/25 text-orange-300 text-[10px] font-bold leading-none"
+            >
+              <Flame className="w-3 h-3 text-orange-400 shrink-0" aria-hidden="true" />
+              <span>x{enrageMult}</span>
             </span>
-          </span>
-        )}
+          )}
+        </span>
       </div>
 
       {/* Fixed-Width Non-Scrolling Conveyor Track (overflow-hidden, zero scrollbar, zero auto-scroll) */}

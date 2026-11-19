@@ -4,11 +4,43 @@ import type {
   BattleRoundSnapshot,
   BattleStatsSummary,
   CombatUnit,
+  MechClassId,
   RoundDamagePoint,
   SkillBreakdownStats,
   TeamBattleStats,
   UnitBattleStats,
 } from '../types/game';
+
+const VALID_CLASSES = new Set<MechClassId>([
+  'striker',
+  'interceptor',
+  'siege',
+  'support',
+]);
+
+function safeFinite(value: unknown, fallback = 0): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function safeNonNeg(value: unknown): number {
+  const n = safeFinite(value, 0);
+  return n > 0 ? n : 0;
+}
+
+function safeRoundInt(value: unknown, fallback = 1): number {
+  const n = Math.floor(safeFinite(value, fallback));
+  return n >= 1 ? n : fallback;
+}
+
+function safePct(numerator: number, denominator: number): number {
+  const num = safeNonNeg(numerator);
+  const den = safeNonNeg(denominator);
+  if (den <= 0) return 0;
+  const pct = Math.round((num / den) * 1000) / 10;
+  if (!Number.isFinite(pct)) return 0;
+  return Math.max(0, Math.min(100, pct));
+}
 
 function ensureSkillEntry(
   skills: Record<string, SkillBreakdownStats>,
@@ -33,12 +65,17 @@ function createEmptyTeamStats(
   side: 'ally' | 'enemy',
   units: CombatUnit[]
 ): TeamBattleStats {
-  const sideUnits = units.filter((u) => u.side === side);
-  const aliveCount = sideUnits.filter((u) => u.alive).length;
-  const remainingHp = sideUnits.reduce((sum, u) => sum + (u.alive ? u.hp : 0), 0);
-  const totalMaxHp = sideUnits.reduce((sum, u) => sum + u.derived.maxHp, 0);
-  const remainingHpPct =
-    totalMaxHp > 0 ? Math.round((remainingHp / totalMaxHp) * 1000) / 10 : 0;
+  const sideUnits = units.filter((u) => u && u.side === side);
+  const aliveCount = sideUnits.filter((u) => Boolean(u.alive)).length;
+  const remainingHp = sideUnits.reduce(
+    (sum, u) => sum + (u.alive ? safeNonNeg(u.hp) : 0),
+    0
+  );
+  const totalMaxHp = sideUnits.reduce(
+    (sum, u) => sum + safeNonNeg(u.derived?.maxHp),
+    0
+  );
+  const remainingHpPct = safePct(remainingHp, totalMaxHp);
 
   return {
     side,
@@ -68,30 +105,48 @@ function createEmptyTeamStats(
 }
 
 /**
- * Pure aggregation engine over structured BattleEvent records and per-round HP snapshots.
- * Never mutates inputs; deterministic and accurate at 1x..10x speed and Auto mode.
+ * Total, pure aggregation engine over structured BattleEvent records and per-round HP snapshots.
+ * Never throws, never mutates inputs, never emits NaN/Infinity, and tolerates empty/malformed
+ * events, unknown unit IDs, and removed/dead units.
  */
 export function aggregateBattleStats(
-  units: CombatUnit[],
-  events: BattleEvent[],
-  roundSnapshots: BattleRoundSnapshot[],
+  units: CombatUnit[] | null | undefined,
+  events: BattleEvent[] | null | undefined,
+  roundSnapshots: BattleRoundSnapshot[] | null | undefined,
   currentRound: number
 ): BattleStatsSummary {
+  const safeUnits = Array.isArray(units)
+    ? units.filter((u): u is CombatUnit => Boolean(u && typeof u.id === 'string' && u.id.length > 0))
+    : [];
+  const safeEvents = Array.isArray(events)
+    ? events.filter((e): e is BattleEvent => Boolean(e && typeof e === 'object' && typeof e.type === 'string'))
+    : [];
+  const safeSnapshots = Array.isArray(roundSnapshots)
+    ? roundSnapshots.filter((s): s is BattleRoundSnapshot => Boolean(s && typeof s === 'object'))
+    : [];
+
   const unitStatsMap = new Map<string, UnitBattleStats>();
   const unitSideMap = new Map<string, 'ally' | 'enemy'>();
 
-  for (const u of units) {
-    unitSideMap.set(u.id, u.side);
+  for (const u of safeUnits) {
+    const side: 'ally' | 'enemy' = u.side === 'ally' ? 'ally' : 'enemy';
+    const classId: MechClassId = VALID_CLASSES.has(u.classId)
+      ? u.classId
+      : 'striker';
+    const maxHp = safeNonNeg(u.derived?.maxHp);
+    const hp = Math.min(maxHp > 0 ? maxHp : safeNonNeg(u.hp), safeNonNeg(u.hp));
+
+    unitSideMap.set(u.id, side);
     unitStatsMap.set(u.id, {
       unitId: u.id,
-      name: u.name,
-      classId: u.classId,
-      side: u.side,
-      isPlayer: u.isPlayer,
+      name: typeof u.name === 'string' && u.name.trim().length > 0 ? u.name : u.id,
+      classId,
+      side,
+      isPlayer: Boolean(u.isPlayer),
       isBoss: Boolean(u.isBoss),
-      alive: u.alive,
-      hp: u.hp,
-      maxHp: u.derived.maxHp,
+      alive: Boolean(u.alive),
+      hp,
+      maxHp,
       damageDealt: 0,
       damageTakenHp: 0,
       damageTakenShield: 0,
@@ -116,20 +171,31 @@ export function aggregateBattleStats(
     });
   }
 
-  // Track per-round damage per side for cumulative damage chart
-  const maxRound = Math.max(
-    1,
-    currentRound,
-    ...events.map((e) => e.round),
-    ...roundSnapshots.map((s) => s.round)
-  );
+  // Compute maxRound iteratively (never spread huge arrays into Math.max)
+  let maxRound = safeRoundInt(currentRound, 1);
+  for (let i = 0; i < safeEvents.length; i++) {
+    const r = safeRoundInt(safeEvents[i].round, 1);
+    if (r > maxRound) maxRound = r;
+  }
+  for (let i = 0; i < safeSnapshots.length; i++) {
+    const r = safeRoundInt(safeSnapshots[i].round, 1);
+    if (r > maxRound) maxRound = r;
+  }
+
   const roundAllyDmg = new Map<number, number>();
   const roundEnemyDmg = new Map<number, number>();
 
-  for (const ev of events) {
-    const actor = unitStatsMap.get(ev.actorId);
-    const target = ev.targetId ? unitStatsMap.get(ev.targetId) : undefined;
-    const skillKey = ev.skillId && ev.skillId.length > 0 ? ev.skillId : 'basic_attack';
+  for (let i = 0; i < safeEvents.length; i++) {
+    const ev = safeEvents[i];
+    const evRound = safeRoundInt(ev.round, 1);
+    const actorId = typeof ev.actorId === 'string' ? ev.actorId : '';
+    const targetId = typeof ev.targetId === 'string' ? ev.targetId : '';
+    const actor = actorId ? unitStatsMap.get(actorId) : undefined;
+    const target = targetId ? unitStatsMap.get(targetId) : undefined;
+    const skillKey =
+      typeof ev.skillId === 'string' && ev.skillId.length > 0
+        ? ev.skillId
+        : 'basic_attack';
 
     switch (ev.type) {
       case 'turn_start': {
@@ -149,8 +215,8 @@ export function aggregateBattleStats(
 
       case 'skill_cast': {
         if (actor) {
-          actor.spSpent += ev.spSpent ?? 0;
-          if (ev.skillId) {
+          actor.spSpent += safeNonNeg(ev.spSpent);
+          if (typeof ev.skillId === 'string' && ev.skillId.length > 0) {
             const sk = ensureSkillEntry(actor.skills, ev.skillId);
             sk.uses += 1;
           }
@@ -167,10 +233,13 @@ export function aggregateBattleStats(
       }
 
       case 'damage': {
-        const total = Math.max(0, ev.amount ?? 0);
-        const shd = Math.max(0, ev.shieldAbsorbed ?? 0);
-        const hp = Math.max(0, ev.hpDamage ?? Math.max(0, total - shd));
-        const isBurnSelf = Boolean(ev.flags?.isBurn && ev.actorId === ev.targetId);
+        const total = safeNonNeg(ev.amount);
+        const shd = Math.min(total, safeNonNeg(ev.shieldAbsorbed));
+        const hp =
+          ev.hpDamage !== undefined
+            ? safeNonNeg(ev.hpDamage)
+            : Math.max(0, total - shd);
+        const isBurnSelf = Boolean(ev.flags?.isBurn && actorId && actorId === targetId);
 
         if (actor && !isBurnSelf && !ev.flags?.invincible) {
           actor.damageDealt += total;
@@ -187,11 +256,11 @@ export function aggregateBattleStats(
           }
 
           if (total > 0) {
-            const side = unitSideMap.get(ev.actorId);
+            const side = unitSideMap.get(actorId);
             if (side === 'ally') {
-              roundAllyDmg.set(ev.round, (roundAllyDmg.get(ev.round) ?? 0) + total);
+              roundAllyDmg.set(evRound, (roundAllyDmg.get(evRound) ?? 0) + total);
             } else if (side === 'enemy') {
-              roundEnemyDmg.set(ev.round, (roundEnemyDmg.get(ev.round) ?? 0) + total);
+              roundEnemyDmg.set(evRound, (roundEnemyDmg.get(evRound) ?? 0) + total);
             }
           }
         }
@@ -213,25 +282,29 @@ export function aggregateBattleStats(
       }
 
       case 'heal': {
-        const amt = Math.max(0, ev.amount ?? 0);
+        const amt = safeNonNeg(ev.amount);
         if (actor && amt > 0) {
           actor.healingDone += amt;
-          const sk = ensureSkillEntry(
-            actor.skills,
-            ev.flags?.isRegen ? ev.skillId ?? 'regen_hp' : skillKey
-          );
+          const healSkillKey = ev.flags?.isRegen
+            ? typeof ev.skillId === 'string' && ev.skillId.length > 0
+              ? ev.skillId
+              : 'regen_hp'
+            : skillKey;
+          const sk = ensureSkillEntry(actor.skills, healSkillKey);
           sk.healing += amt;
         }
         break;
       }
 
       case 'shield_grant': {
-        const amt = Math.max(0, ev.amount ?? 0);
+        const amt = safeNonNeg(ev.amount);
         if (actor && amt > 0) {
           actor.shieldGranted += amt;
           const sk = ensureSkillEntry(
             actor.skills,
-            ev.skillId && ev.skillId.length > 0 ? ev.skillId : 'defend'
+            typeof ev.skillId === 'string' && ev.skillId.length > 0
+              ? ev.skillId
+              : 'defend'
           );
           sk.shieldGranted += amt;
         }
@@ -252,7 +325,7 @@ export function aggregateBattleStats(
       }
 
       case 'kill': {
-        if (actor && ev.actorId !== ev.targetId) {
+        if (actor && actorId !== targetId) {
           actor.kills += 1;
         }
         if (target) {
@@ -267,17 +340,18 @@ export function aggregateBattleStats(
     }
   }
 
-  const allyTeam = createEmptyTeamStats('ally', units);
-  const enemyTeam = createEmptyTeamStats('enemy', units);
+  const allyTeam = createEmptyTeamStats('ally', safeUnits);
+  const enemyTeam = createEmptyTeamStats('enemy', safeUnits);
   const unitList: UnitBattleStats[] = [];
 
   for (const stat of unitStatsMap.values()) {
-    stat.critRate =
-      stat.hits > 0 ? Math.round((stat.crits / stat.hits) * 1000) / 10 : 0;
+    stat.critRate = safePct(stat.crits, stat.hits);
     stat.damagePerTurn =
       stat.turnsTaken > 0
-        ? Math.round((stat.damageDealt / stat.turnsTaken) * 10) / 10
-        : stat.damageDealt;
+        ? Math.round((safeNonNeg(stat.damageDealt) / stat.turnsTaken) * 10) / 10
+        : safeNonNeg(stat.damageDealt);
+    if (!Number.isFinite(stat.damagePerTurn)) stat.damagePerTurn = 0;
+
     unitList.push(stat);
 
     const team = stat.side === 'ally' ? allyTeam : enemyTeam;
@@ -299,22 +373,16 @@ export function aggregateBattleStats(
     team.debuffsApplied += stat.debuffsApplied;
   }
 
-  allyTeam.critRate =
-    allyTeam.hits > 0
-      ? Math.round((allyTeam.crits / allyTeam.hits) * 1000) / 10
-      : 0;
-  enemyTeam.critRate =
-    enemyTeam.hits > 0
-      ? Math.round((enemyTeam.crits / enemyTeam.hits) * 1000) / 10
-      : 0;
+  allyTeam.critRate = safePct(allyTeam.crits, allyTeam.hits);
+  enemyTeam.critRate = safePct(enemyTeam.crits, enemyTeam.hits);
 
   // Build cumulative per-round damage series (1..maxRound)
   const roundDamageSeries: RoundDamagePoint[] = [];
   let cumAlly = 0;
   let cumEnemy = 0;
   for (let r = 1; r <= maxRound; r++) {
-    cumAlly += roundAllyDmg.get(r) ?? 0;
-    cumEnemy += roundEnemyDmg.get(r) ?? 0;
+    cumAlly += safeNonNeg(roundAllyDmg.get(r));
+    cumEnemy += safeNonNeg(roundEnemyDmg.get(r));
     roundDamageSeries.push({
       round: r,
       allyCumulativeDamage: cumAlly,
@@ -324,19 +392,45 @@ export function aggregateBattleStats(
 
   // Deduplicate & order HP snapshots by round (latest snapshot for each round wins)
   const snapByRound = new Map<number, BattleRoundSnapshot>();
-  for (const snap of roundSnapshots) {
-    snapByRound.set(snap.round, snap);
+  for (let i = 0; i < safeSnapshots.length; i++) {
+    const snap = safeSnapshots[i];
+    const r = safeRoundInt(snap.round, 1);
+    const allyMax = safeNonNeg(snap.allyMaxHp);
+    const allyHp = safeNonNeg(snap.allyHp);
+    const enemyMax = safeNonNeg(snap.enemyMaxHp);
+    const enemyHp = safeNonNeg(snap.enemyHp);
+    const allyPct =
+      Number.isFinite(snap.allyHpPct)
+        ? Math.max(0, Math.min(100, snap.allyHpPct))
+        : safePct(allyHp, allyMax);
+    const enemyPct =
+      Number.isFinite(snap.enemyHpPct)
+        ? Math.max(0, Math.min(100, snap.enemyHpPct))
+        : safePct(enemyHp, enemyMax);
+
+    snapByRound.set(r, {
+      round: r,
+      allyHp,
+      allyMaxHp: allyMax,
+      allyHpPct: allyPct,
+      enemyHp,
+      enemyMaxHp: enemyMax,
+      enemyHpPct: enemyPct,
+    });
   }
-  const currentLiveSnap: BattleRoundSnapshot = {
-    round: maxRound,
-    allyHp: allyTeam.remainingHp,
-    allyMaxHp: allyTeam.totalMaxHp,
-    allyHpPct: allyTeam.remainingHpPct,
-    enemyHp: enemyTeam.remainingHp,
-    enemyMaxHp: enemyTeam.totalMaxHp,
-    enemyHpPct: enemyTeam.remainingHpPct,
-  };
-  snapByRound.set(maxRound, currentLiveSnap);
+
+  if (safeUnits.length > 0) {
+    const currentLiveSnap: BattleRoundSnapshot = {
+      round: maxRound,
+      allyHp: allyTeam.remainingHp,
+      allyMaxHp: allyTeam.totalMaxHp,
+      allyHpPct: allyTeam.remainingHpPct,
+      enemyHp: enemyTeam.remainingHp,
+      enemyMaxHp: enemyTeam.totalMaxHp,
+      enemyHpPct: enemyTeam.remainingHpPct,
+    };
+    snapByRound.set(maxRound, currentLiveSnap);
+  }
 
   const roundHpSeries = Array.from(snapByRound.values()).sort(
     (a, b) => a.round - b.round
@@ -349,7 +443,7 @@ export function aggregateBattleStats(
     let best: UnitBattleStats | null = null;
     let bestVal = 0;
     for (const u of unitList) {
-      const v = selector(u);
+      const v = safeNonNeg(selector(u));
       if (v > bestVal) {
         bestVal = v;
         best = u;

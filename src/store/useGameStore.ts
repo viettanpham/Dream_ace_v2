@@ -1327,7 +1327,7 @@ export const useGameStore = create<GameStoreState>()(
           ...stampTurnEvents(resolution.events, nextTurnCounter),
         ].slice(-5000);
         const enrichedLogs = enrichLogEntries(resolution.logEntries, activeUnit);
-        const nextLog = [...battle.log, ...enrichedLogs].slice(-80);
+        const nextLog = [...battle.log, ...enrichedLogs];
         const nextPopups = bypassFx
           ? []
           : [...battle.popups, ...resolution.popups];
@@ -1519,7 +1519,7 @@ export const useGameStore = create<GameStoreState>()(
           activeUnit,
           autoRuleNumber
         );
-        const nextLog = [...battle.log, ...enrichedLogs].slice(-80);
+        const nextLog = [...battle.log, ...enrichedLogs];
         const nextPopups = bypassFx
           ? []
           : [...battle.popups, ...resolution.popups];
@@ -1694,7 +1694,7 @@ export const useGameStore = create<GameStoreState>()(
           ...stampTurnEvents(resolution.events, nextTurnCounter),
         ].slice(-5000);
         const enrichedLogs = enrichLogEntries(resolution.logEntries, activeUnit);
-        const nextLog = [...battle.log, ...enrichedLogs].slice(-80);
+        const nextLog = [...battle.log, ...enrichedLogs];
         const nextPopups = bypassFx
           ? []
           : [...battle.popups, ...resolution.popups];
@@ -2188,8 +2188,51 @@ export const useGameStore = create<GameStoreState>()(
       }),
       migrate: (persistedState: unknown, version: number) =>
         migrateSaveData(persistedState, version),
-      onRehydrateStorage: () => (state) => {
+      onRehydrateStorage: () => (state, error) => {
+        if (error) {
+          console.error('[useGameStore] Failed to rehydrate persisted state:', error);
+          return;
+        }
         if (state) {
+          // Validate & sanitize persisted UI slice so corrupted preferences cannot crash on reload
+          const validSpeeds: BattleSpeed[] = [1, 2, 3, 5, 10];
+          if (!validSpeeds.includes(state.battleSpeed)) {
+            state.battleSpeed = 1;
+          }
+          if (
+            state.battleViewMode !== null &&
+            state.battleViewMode !== 'card' &&
+            state.battleViewMode !== 'radar'
+          ) {
+            state.battleViewMode = null;
+          }
+          if (state.language !== 'en' && state.language !== 'vi') {
+            state.language = 'vi';
+          }
+          if (
+            typeof state.selectedSectorId !== 'string' ||
+            !SECTORS_CATALOG.some((s) => s.id === state.selectedSectorId)
+          ) {
+            state.selectedSectorId = SECTORS_CATALOG[0].id;
+          }
+          if (!state.adminConfig || typeof state.adminConfig !== 'object') {
+            state.adminConfig = createDefaultAdminConfig();
+          } else if (
+            typeof state.adminConfig.rewardMultiplier !== 'number' ||
+            !Number.isFinite(state.adminConfig.rewardMultiplier) ||
+            state.adminConfig.rewardMultiplier <= 0
+          ) {
+            state.adminConfig = {
+              ...createDefaultAdminConfig(),
+              ...state.adminConfig,
+              rewardMultiplier: BALANCE_CONFIG.rewardMultDefault,
+            };
+          }
+          // Ensure transient modal/UI flags are always reset on reload
+          state.adminPanelOpen = false;
+          state.tacticsModalOpen = false;
+          state.muted = Boolean(state.muted);
+          state.skipAnimations = Boolean(state.skipAnimations);
           soundFx.setMuted(state.muted);
         }
       },

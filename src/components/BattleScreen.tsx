@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Award,
@@ -39,7 +39,6 @@ import {
   getBattleSkillReason,
   getClassName,
   getItemInstanceName,
-  getLogTagLabel,
   getRarityLabel,
   getSectorName,
   getSkillDesc,
@@ -54,51 +53,19 @@ import type {
   AutoRepeatLimit,
   BattleSpeed,
   CombatFxEvent,
-  CombatLogEntry,
 } from '../types/game';
 import { BattleRadarView } from './BattleRadarView';
 import { BattleStatsModal } from './BattleStatsModal';
 import { BattleUnitCard } from './BattleUnitCard';
 import { BottomSheet } from './BottomSheet';
+import { CombatLogList } from './CombatLogList';
+import { ErrorBoundary } from './ErrorBoundary';
 import { SkillIcon } from './SkillIcon';
 import { TurnQueueBar } from './TurnQueueBar';
 import { UnitDetailSheet } from './UnitDetailSheet';
 
 const BATTLE_SPEEDS: BattleSpeed[] = [1, 2, 3, 5, 10];
 const REPEAT_OPTIONS: AutoRepeatLimit[] = [1, 5, 10, 'infinite'];
-
-function getLogActorColor(entry: CombatLogEntry): string | undefined {
-  if (entry.actorIsPlayer) return 'var(--team-me)';
-  if (entry.actorSide === 'ally') return 'var(--team-ally)';
-  if (entry.actorIsBoss) return 'var(--team-boss)';
-  if (entry.actorSide === 'enemy') return 'var(--team-enemy)';
-  return undefined;
-}
-
-function getLogTagStyle(tag: CombatLogEntry['tag']): string {
-  switch (tag) {
-    case 'CRIT':
-      return 'text-amber-400';
-    case 'KO':
-      return 'text-red-400';
-    case 'SHIELD':
-      return 'text-sky-400';
-    case 'HEAL':
-      return 'text-emerald-400';
-    case 'DEFEND':
-      return 'text-sky-300';
-    case 'STATUS':
-      return 'text-orange-400';
-    case 'EVADE':
-      return 'text-slate-300';
-    case 'SKILL':
-      return 'text-amber-300';
-    case 'ATTACK':
-      return 'text-slate-300';
-    default:
-      return 'text-slate-400';
-  }
-}
 
 function BattleFxOverlay({ fxEvents }: { fxEvents: CombatFxEvent[] }) {
   if (fxEvents.length === 0) return null;
@@ -305,7 +272,6 @@ export function BattleScreen() {
     typeof window !== 'undefined' ? window.innerWidth < 768 : false
   );
 
-  const logEndRef = useRef<HTMLDivElement | null>(null);
   const bypassFx = skipAnimations || battleSpeed === 10;
 
   useEffect(() => {
@@ -334,11 +300,6 @@ export function BattleScreen() {
       activeUnit.alive &&
       !isPlayerCharging
   );
-
-  // Auto-scroll combat log
-  useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: bypassFx ? 'auto' : 'smooth' });
-  }, [battle?.log.length, bypassFx]);
 
   useEffect(() => {
     if (!battle || battle.popups.length === 0) return;
@@ -514,22 +475,25 @@ export function BattleScreen() {
     toggleMute,
   ]);
 
+  const playerUnitForTargets = battle?.units.find((u) => u.side === 'ally' && u.isPlayer);
+  const validBasicTargetIds = useMemo(() => {
+    if (!battle || !playerUnitForTargets) return new Set<string>();
+    return new Set(
+      getValidEnemyTargets(battle.units, playerUnitForTargets, 'attack').map(
+        (u) => u.id
+      )
+    );
+  }, [battle, playerUnitForTargets]);
+
   if (!battle) return null;
 
   const allies = battle.units.filter((u) => u.side === 'ally');
   const enemies = battle.units.filter((u) => u.side === 'enemy');
-  const playerUnit = allies.find((u) => u.isPlayer);
+  const playerUnit = playerUnitForTargets;
   const playerSkillIds = playerUnit?.equippedSkillIds ?? [];
   const hasSingleAllySkill = playerSkillIds.some(
     (id) => getSkillById(id)?.targetType === 'single_ally'
   );
-
-  const validBasicTargetIds = useMemo(() => {
-    if (!playerUnit) return new Set<string>();
-    return new Set(
-      getValidEnemyTargets(battle.units, playerUnit, 'attack').map((u) => u.id)
-    );
-  }, [battle.units, playerUnit]);
 
   const playerHasLongRangeBasic = playerUnit
     ? isLongRangeAction(playerUnit, 'attack')
@@ -1473,8 +1437,8 @@ export function BattleScreen() {
           </div>
 
           {/* Inline Combat Log (Desktop) */}
-          <div className="lg:col-span-4 rounded border border-slate-800 bg-[#070A10] flex flex-col h-32 lg:h-auto lg:max-h-36">
-            <div className="px-3 py-1.5 border-b border-slate-800/90 flex items-center justify-between text-[11px] text-slate-400">
+          <div className="lg:col-span-4 rounded border border-slate-800 bg-[#070A10] flex flex-col h-32 lg:h-36 overflow-hidden">
+            <div className="shrink-0 px-3 py-1.5 border-b border-slate-800/90 flex items-center justify-between text-[11px] text-slate-400">
               <span className="font-semibold text-slate-300">
                 {t('battle.combatLog')}
               </span>
@@ -1482,47 +1446,30 @@ export function BattleScreen() {
                 {t('battle.eventsCount', { count: battle.log.length })}
               </span>
             </div>
-            <div className="flex-1 overflow-y-auto px-3 py-1.5 space-y-1 text-xs tactical-scroll">
-              {battle.log.map((entry) => {
-                const actorColor = getLogActorColor(entry);
-                return (
-                  <div
-                    key={entry.id}
-                    className="leading-snug flex items-baseline gap-2"
-                  >
-                    <span className="font-mono-nums text-[10px] text-slate-500 shrink-0">
-                      R{entry.round}
-                    </span>
-                    <span
-                      className={`font-mono-nums text-[10px] font-semibold shrink-0 w-14 ${getLogTagStyle(
-                        entry.tag
-                      )}`}
-                    >
-                      {getLogTagLabel(lang, entry.tag)}
-                    </span>
-                    <span
-                      className="text-slate-300"
-                      style={actorColor ? { borderLeft: `2px solid ${actorColor}`, paddingLeft: '6px' } : undefined}
-                    >
-                      {formatCombatLogMessage(lang, entry)}
-                    </span>
-                  </div>
-                );
-              })}
-              <div ref={logEndRef} />
-            </div>
+            <CombatLogList
+              entries={battle.log}
+              active={!isMobileViewport}
+              density="compact"
+            />
           </div>
         </div>
       </div>
 
       {/* AUTO-REPEAT BATCH SUMMARY MODAL (when a repeat session finishes or stops) */}
-      {showRepeatBatchSummary && autoRepeatSession && (
-        <div
-          className="fixed inset-0 z-40 bg-black/75 flex items-center justify-center p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="repeat-summary-title"
-        >
+      <ErrorBoundary
+        variant="panel"
+        title={t('auto.repeatSummaryTitle')}
+        resetKey={showRepeatBatchSummary}
+        onClose={clearAutoRepeatSummary}
+        onReloadBattle={() => startBattle(battle.sectorId)}
+      >
+        {showRepeatBatchSummary && autoRepeatSession && (
+          <div
+            className="fixed inset-0 z-40 bg-black/75 flex items-center justify-center p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="repeat-summary-title"
+          >
           <div className="w-full max-w-md rounded-lg border border-emerald-500/50 bg-[#0E1521] p-6 space-y-4 shadow-2xl max-h-[92vh] overflow-y-auto tactical-scroll">
             <div className="space-y-1">
               <div className="text-xs font-semibold tracking-widest uppercase text-emerald-400 flex items-center gap-1.5">
@@ -1655,18 +1602,26 @@ export function BattleScreen() {
                 </button>
               </div>
             </div>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </ErrorBoundary>
 
       {/* VICTORY / DEFEAT / RETREAT RESULTS MODAL (suppressed while Auto-Repeat is actively launching next run) */}
-      {battle.summary && !autoRepeatSession?.active && !showRepeatBatchSummary && (
-        <div
-          className="fixed inset-0 z-40 bg-black/75 flex items-center justify-center p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="battle-outcome-title"
-        >
+      <ErrorBoundary
+        variant="panel"
+        title={t('summary.victory')}
+        resetKey={Boolean(battle.summary)}
+        onClose={returnToHangar}
+        onReloadBattle={() => startBattle(battle.sectorId)}
+      >
+        {battle.summary && !autoRepeatSession?.active && !showRepeatBatchSummary && (
+          <div
+            className="fixed inset-0 z-40 bg-black/75 flex items-center justify-center p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="battle-outcome-title"
+          >
           <div className="w-full max-w-md rounded-lg border border-slate-700 bg-[#0E1521] p-6 space-y-4 shadow-2xl max-h-[92vh] overflow-y-auto tactical-scroll">
             <div className="space-y-1">
               <div
@@ -1876,112 +1831,120 @@ export function BattleScreen() {
                 </button>
               </div>
             </div>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </ErrorBoundary>
 
       {/* UNIT TELEMETRY & TARGET LOCK SHEET */}
-      <UnitDetailSheet
-        unit={inspectedUnit}
+      <ErrorBoundary
+        variant="panel"
+        title={inspectedUnit?.name ?? 'Unit Telemetry'}
+        resetKey={inspectedUnitId ?? 'none'}
         onClose={() => setInspectedUnitId(null)}
-        isTargeted={
-          Boolean(
-            inspectedUnit &&
-              ((inspectedUnit.side === 'enemy' &&
-                battle.selectedTargetId === inspectedUnit.id) ||
-                (inspectedUnit.side === 'ally' &&
-                  hasSingleAllySkill &&
-                  battle.selectedAllyTargetId === inspectedUnit.id))
-          )
-        }
-        canLockEnemy={canPlayerManualAct}
-        canLockAlly={canPlayerManualAct && hasSingleAllySkill}
-        frontRowBlocked={
-          Boolean(
-            inspectedUnit &&
-              inspectedUnit.side === 'enemy' &&
-              !validBasicTargetIds.has(inspectedUnit.id)
-          )
-        }
-        onLockEnemy={selectTarget}
-        onLockAlly={selectAllyTarget}
-      />
+        onReloadBattle={() => startBattle(battle.sectorId)}
+      >
+        <UnitDetailSheet
+          unit={inspectedUnit}
+          onClose={() => setInspectedUnitId(null)}
+          isTargeted={
+            Boolean(
+              inspectedUnit &&
+                ((inspectedUnit.side === 'enemy' &&
+                  battle.selectedTargetId === inspectedUnit.id) ||
+                  (inspectedUnit.side === 'ally' &&
+                    hasSingleAllySkill &&
+                    battle.selectedAllyTargetId === inspectedUnit.id))
+            )
+          }
+          canLockEnemy={canPlayerManualAct}
+          canLockAlly={canPlayerManualAct && hasSingleAllySkill}
+          frontRowBlocked={
+            Boolean(
+              inspectedUnit &&
+                inspectedUnit.side === 'enemy' &&
+                !validBasicTargetIds.has(inspectedUnit.id)
+            )
+          }
+          onLockEnemy={selectTarget}
+          onLockAlly={selectAllyTarget}
+        />
+      </ErrorBoundary>
 
       {/* MOBILE COMBAT LOG BOTTOM SHEET */}
-      <BottomSheet
-        open={logSheetOpen}
-        onClose={() => setLogSheetOpen(false)}
+      <ErrorBoundary
+        variant="panel"
         title={t('battle.combatLog')}
-        subtitle={t('battle.eventsCount', { count: battle.log.length })}
+        resetKey={logSheetOpen}
+        onClose={() => setLogSheetOpen(false)}
+        onReloadBattle={() => startBattle(battle.sectorId)}
       >
-        <div className="space-y-2">
-          {battle.log.map((entry) => {
-            const actorColor = getLogActorColor(entry);
-            return (
-              <div
-                key={entry.id}
-                className="leading-snug flex items-baseline gap-2 text-sm"
-              >
-                <span className="font-mono-nums text-xs text-slate-500 shrink-0">
-                  R{entry.round}
-                </span>
-                <span
-                  className={`font-mono-nums text-xs font-semibold shrink-0 w-14 ${getLogTagStyle(
-                    entry.tag
-                  )}`}
-                >
-                  {getLogTagLabel(lang, entry.tag)}
-                </span>
-                <span
-                  className="text-slate-200"
-                  style={
-                    actorColor
-                      ? { borderLeft: `2px solid ${actorColor}`, paddingLeft: '8px' }
-                      : undefined
-                  }
-                >
-                  {formatCombatLogMessage(lang, entry)}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </BottomSheet>
+        <BottomSheet
+          open={logSheetOpen}
+          onClose={() => setLogSheetOpen(false)}
+          title={t('battle.combatLog')}
+          subtitle={t('battle.eventsCount', { count: battle.log.length })}
+          maxHeightClass="h-[78dvh] max-h-[86dvh]"
+          bodyScrollable={false}
+        >
+          <CombatLogList
+            entries={battle.log}
+            active={logSheetOpen}
+            density="comfortable"
+          />
+        </BottomSheet>
+      </ErrorBoundary>
 
       {/* MOBILE FIELD SUPPLIES & TACTICS BOTTOM SHEET */}
-      <BottomSheet
-        open={suppliesSheetOpen}
-        onClose={() => setSuppliesSheetOpen(false)}
+      <ErrorBoundary
+        variant="panel"
         title={t('battle.suppliesTitle')}
-        footer={
-          <button
-            type="button"
-            onClick={() => {
-              setSuppliesSheetOpen(false);
-              setTacticsModalOpen(true);
-            }}
-            className="w-full min-h-[48px] px-4 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-sm inline-flex items-center justify-center gap-2 cursor-pointer"
-          >
-            <Settings className="w-4 h-4" />
-            <span>{t('battle.openTactics')}</span>
-          </button>
-        }
+        resetKey={suppliesSheetOpen}
+        onClose={() => setSuppliesSheetOpen(false)}
+        onReloadBattle={() => startBattle(battle.sectorId)}
       >
-        <div className="rounded-lg border border-slate-800 bg-[#080D16] p-4 text-sm text-slate-300 leading-relaxed">
-          {t('battle.noConsumables')}
-        </div>
-      </BottomSheet>
+        <BottomSheet
+          open={suppliesSheetOpen}
+          onClose={() => setSuppliesSheetOpen(false)}
+          title={t('battle.suppliesTitle')}
+          footer={
+            <button
+              type="button"
+              onClick={() => {
+                setSuppliesSheetOpen(false);
+                setTacticsModalOpen(true);
+              }}
+              className="w-full min-h-[48px] px-4 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-sm inline-flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Settings className="w-4 h-4" />
+              <span>{t('battle.openTactics')}</span>
+            </button>
+          }
+        >
+          <div className="rounded-lg border border-slate-800 bg-[#080D16] p-4 text-sm text-slate-300 leading-relaxed">
+            {t('battle.noConsumables')}
+          </div>
+        </BottomSheet>
+      </ErrorBoundary>
 
       {/* BATTLE STATISTICS MODAL (OVERVIEW / UNITS / CHARTS) */}
-      <BattleStatsModal
-        open={statsModalOpen}
+      <ErrorBoundary
+        variant="panel"
+        title={t('stats.title')}
+        resetKey={statsModalOpen}
         onClose={() => setStatsModalOpen(false)}
-        battle={battle}
-        enrageBonusPct={getEnemyEnrageBonusPct(
-          battle.round,
-          adminConfig.softEnrageEnabled
-        )}
-      />
+        onReloadBattle={() => startBattle(battle.sectorId)}
+      >
+        <BattleStatsModal
+          open={statsModalOpen}
+          onClose={() => setStatsModalOpen(false)}
+          battle={battle}
+          enrageBonusPct={getEnemyEnrageBonusPct(
+            battle.round,
+            adminConfig.softEnrageEnabled
+          )}
+        />
+      </ErrorBoundary>
     </div>
   );
 }

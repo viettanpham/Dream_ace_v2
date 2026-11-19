@@ -10,6 +10,7 @@ interface BottomSheetProps {
   children: ReactNode;
   footer?: ReactNode;
   maxHeightClass?: string;
+  bodyScrollable?: boolean;
 }
 
 export function BottomSheet({
@@ -20,6 +21,7 @@ export function BottomSheet({
   children,
   footer,
   maxHeightClass = 'max-h-[86dvh]',
+  bodyScrollable = true,
 }: BottomSheetProps) {
   const { t } = useI18n();
 
@@ -76,10 +78,16 @@ export function BottomSheet({
           </button>
         </div>
 
-        {/* Scrollable Content */}
-        <div className="flex-1 min-h-0 overflow-y-auto tactical-scroll p-4 text-sm">
-          {children}
-        </div>
+        {/* Content Body */}
+        {bodyScrollable ? (
+          <div className="flex-1 min-h-0 overflow-y-auto tactical-scroll p-4 text-sm">
+            {children}
+          </div>
+        ) : (
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            {children}
+          </div>
+        )}
 
         {/* Optional Sticky Footer */}
         {footer && (

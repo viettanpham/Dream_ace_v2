@@ -21,14 +21,16 @@ import type {
   UnitBattleStats,
 } from '../types/game';
 
+export type StatsTab = 'overview' | 'units' | 'charts';
+
 interface BattleStatsModalProps {
   open: boolean;
   onClose: () => void;
   battle: BattleState;
   enrageBonusPct: number;
+  initialTab?: StatsTab;
 }
 
-type StatsTab = 'overview' | 'units' | 'charts';
 type SortColumn =
   | 'damageDealt'
   | 'damageTakenTotal'
@@ -58,7 +60,13 @@ function getClassBadgeSymbol(classId: MechClassId): string {
       return '■';
     case 'support':
       return '✚';
+    default:
+      return '●';
   }
+}
+
+function safeSvgNum(val: number, fallback = 0): number {
+  return Number.isFinite(val) ? Math.round(val * 100) / 100 : fallback;
 }
 
 const DONUT_COLORS = [
@@ -76,28 +84,30 @@ export function BattleStatsModal({
   onClose,
   battle,
   enrageBonusPct,
+  initialTab = 'overview',
 }: BattleStatsModalProps) {
   const { lang, t } = useI18n();
-  const [activeTab, setActiveTab] = useState<StatsTab>('overview');
+  const [activeTab, setActiveTab] = useState<StatsTab>(initialTab);
   const [sortCol, setSortCol] = useState<SortColumn>('damageDealt');
   const [sortDesc, setSortDesc] = useState(true);
   const [expandedUnitId, setExpandedUnitId] = useState<string | null>(null);
   const [barMetric, setBarMetric] = useState<BarMetric>('damageDealt');
   const [donutUnitId, setDonutUnitId] = useState<string>(() => {
-    const player = battle.units.find((u) => u.isPlayer);
-    return player?.id ?? battle.units[0]?.id ?? '';
+    const units = Array.isArray(battle?.units) ? battle.units : [];
+    const player = units.find((u) => u.isPlayer);
+    return player?.id ?? units[0]?.id ?? '';
   });
   const [tooltipInfo, setTooltipInfo] = useState<string | null>(null);
 
   const stats = useMemo(
     () =>
       aggregateBattleStats(
-        battle.units,
-        battle.events ?? [],
-        battle.roundSnapshots ?? [],
-        battle.round
+        battle?.units ?? [],
+        battle?.events ?? [],
+        battle?.roundSnapshots ?? [],
+        battle?.round ?? 1
       ),
-    [battle.units, battle.events, battle.roundSnapshots, battle.round]
+    [battle?.units, battle?.events, battle?.roundSnapshots, battle?.round]
   );
 
   const unitById = useMemo(
@@ -107,7 +117,9 @@ export function BattleStatsModal({
 
   const sortedUnits = useMemo(() => {
     return [...stats.units].sort((a, b) => {
-      const diff = (a[sortCol] ?? 0) - (b[sortCol] ?? 0);
+      const aVal = Number.isFinite(a[sortCol]) ? a[sortCol] : 0;
+      const bVal = Number.isFinite(b[sortCol]) ? b[sortCol] : 0;
+      const diff = aVal - bVal;
       if (diff !== 0) return sortDesc ? -diff : diff;
       return a.name.localeCompare(b.name);
     });
@@ -119,56 +131,17 @@ export function BattleStatsModal({
     stats.units[0] ??
     null;
 
-  if (!open) return null;
-
-  const toggleSort = (col: SortColumn) => {
-    if (sortCol === col) {
-      setSortDesc((prev) => !prev);
-    } else {
-      setSortCol(col);
-      setSortDesc(true);
-    }
-  };
-
-  const enragePct = Math.round(enrageBonusPct * 100);
-  const enrageMult = (1 + enrageBonusPct).toFixed(1);
-
-  const totalRemainingHp = Math.max(
-    1,
-    stats.ally.remainingHp + stats.enemy.remainingHp
-  );
-  const allyMomentumPct = Math.round(
-    (stats.ally.remainingHp / totalRemainingHp) * 100
-  );
-  const enemyMomentumPct = 100 - allyMomentumPct;
-
-  // Chart (a): Horizontal Bar Chart sorted by selected metric
-  const barUnits = [...stats.units].sort((a, b) => b[barMetric] - a[barMetric]);
-  const barMax = Math.max(1, ...barUnits.map((u) => u[barMetric]));
-
-  // Chart (b): Cumulative Damage Line Chart
-  const dmgSeries = stats.roundDamageSeries;
-  const maxCumDmg = Math.max(
-    10,
-    ...dmgSeries.map((p) =>
-      Math.max(p.allyCumulativeDamage, p.enemyCumulativeDamage)
-    )
-  );
-
-  // Chart (c): Team HP% per Round Line Chart
-  const hpSeries = stats.roundHpSeries;
-
-  // Chart (d): Donut Chart of Damage by Skill for Selected Unit
+  // CRITICAL: All hooks MUST run before any conditional early return (Rules of Hooks).
   const donutSlices = useMemo(() => {
-    if (!effectiveDonutUnit) return [];
+    if (!effectiveDonutUnit || !effectiveDonutUnit.skills) return [];
     const entries = Object.values(effectiveDonutUnit.skills)
-      .filter((sk) => sk.damage > 0)
+      .filter((sk) => sk && Number.isFinite(sk.damage) && sk.damage > 0)
       .sort((a, b) => b.damage - a.damage);
     const total = entries.reduce((sum, e) => sum + e.damage, 0);
-    if (total <= 0) return [];
+    if (!Number.isFinite(total) || total <= 0) return [];
     let running = 0;
     return entries.map((e, idx) => {
-      const pct = e.damage / total;
+      const pct = Math.max(0, Math.min(1, e.damage / total));
       const start = running;
       running += pct;
       return {
@@ -183,6 +156,65 @@ export function BattleStatsModal({
     });
   }, [effectiveDonutUnit, lang]);
 
+  if (!open) return null;
+
+  const toggleSort = (col: SortColumn) => {
+    if (sortCol === col) {
+      setSortDesc((prev) => !prev);
+    } else {
+      setSortCol(col);
+      setSortDesc(true);
+    }
+  };
+
+  const safeEnrageBonus = Number.isFinite(enrageBonusPct)
+    ? Math.max(0, enrageBonusPct)
+    : 0;
+  const enragePct = Math.round(safeEnrageBonus * 100);
+  const enrageMult = (1 + safeEnrageBonus).toFixed(1);
+
+  const remainingSum = stats.ally.remainingHp + stats.enemy.remainingHp;
+  const allyMomentumPct =
+    remainingSum > 0
+      ? Math.max(
+          0,
+          Math.min(100, Math.round((stats.ally.remainingHp / remainingSum) * 100))
+        )
+      : 50;
+  const enemyMomentumPct = 100 - allyMomentumPct;
+
+  // Chart (a): Horizontal Bar Chart sorted by selected metric
+  const barUnits = [...stats.units].sort(
+    (a, b) => (b[barMetric] ?? 0) - (a[barMetric] ?? 0)
+  );
+  const barPeak = barUnits.reduce(
+    (max, u) => Math.max(max, Number.isFinite(u[barMetric]) ? u[barMetric] : 0),
+    0
+  );
+  const hasBarData = barUnits.length > 0 && barPeak > 0;
+  const barMax = Math.max(1, barPeak);
+
+  // Chart (b): Cumulative Damage Line Chart
+  const dmgSeries = stats.roundDamageSeries;
+  const peakCumDmg = dmgSeries.reduce(
+    (max, p) =>
+      Math.max(
+        max,
+        Number.isFinite(p.allyCumulativeDamage) ? p.allyCumulativeDamage : 0,
+        Number.isFinite(p.enemyCumulativeDamage) ? p.enemyCumulativeDamage : 0
+      ),
+    0
+  );
+  const hasCumDmgData = dmgSeries.length > 0 && peakCumDmg > 0;
+  const maxCumDmg = Math.max(10, peakCumDmg);
+
+  // Chart (c): Team HP% per Round Line Chart
+  const hpSeries = stats.roundHpSeries;
+  const hasHpSeriesData =
+    hpSeries.length > 0 &&
+    stats.units.length > 0 &&
+    (stats.ally.totalMaxHp > 0 || stats.enemy.totalMaxHp > 0);
+
   const renderLinePoints = (
     count: number,
     valueAt: (i: number) => number,
@@ -192,13 +224,21 @@ export function BattleStatsModal({
     padX: number,
     padY: number
   ) => {
-    const innerW = w - padX * 2;
-    const innerH = h - padY * 2;
+    if (count <= 0) return [];
+    const safeMax = Number.isFinite(maxVal) && maxVal > 0 ? maxVal : 1;
+    const innerW = Math.max(1, w - padX * 2);
+    const innerH = Math.max(1, h - padY * 2);
     return Array.from({ length: count }, (_, i) => {
+      const rawVal = valueAt(i);
+      const val = Number.isFinite(rawVal) ? Math.max(0, rawVal) : 0;
       const x =
         count <= 1 ? padX + innerW / 2 : padX + (i / (count - 1)) * innerW;
-      const y = padY + innerH - (Math.min(maxVal, valueAt(i)) / maxVal) * innerH;
-      return { x, y };
+      const ratio = Math.max(0, Math.min(1, val / safeMax));
+      const y = padY + innerH - ratio * innerH;
+      return {
+        x: safeSvgNum(x, padX),
+        y: safeSvgNum(y, padY + innerH),
+      };
     });
   };
 
@@ -208,6 +248,7 @@ export function BattleStatsModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="battle-stats-modal-title"
+      data-testid="battle-stats-modal"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -226,7 +267,8 @@ export function BattleStatsModal({
               </h2>
               <div className="flex flex-wrap items-center gap-2 text-xs font-mono-nums text-slate-400">
                 <span>
-                  {t('stats.roundsLabel')}: <strong className="text-slate-100">{stats.rounds}</strong>
+                  {t('stats.roundsLabel')}:{' '}
+                  <strong className="text-slate-100">{stats.rounds}</strong>
                 </span>
                 <span>·</span>
                 {enragePct > 0 ? (
@@ -265,6 +307,7 @@ export function BattleStatsModal({
               <button
                 key={id}
                 type="button"
+                data-testid={`stats-tab-${id}`}
                 onClick={() => setActiveTab(id)}
                 className={`min-h-[40px] px-3.5 rounded-lg text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
                   active
@@ -285,7 +328,7 @@ export function BattleStatsModal({
             <>
               {/* Battle Momentum Bar */}
               <div className="rounded-lg border border-slate-800 bg-[#0D1523] p-4 space-y-2.5">
-                <div className="flex items-center justify-between text-xs font-semibold">
+                <div className="flex items-center justify-between text-xs font-semibold gap-2">
                   <span className="text-sky-300">
                     {t('stats.teamAlly')} ({stats.ally.remainingHp.toLocaleString()} /{' '}
                     {stats.ally.totalMaxHp.toLocaleString()} HP · {stats.ally.remainingHpPct}%)
@@ -423,6 +466,7 @@ export function BattleStatsModal({
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                   {[
                     {
+                      id: 'dmg',
                       label: t('stats.mvpDamage'),
                       award: stats.mvps.mostDamage,
                       suffix: ' DMG',
@@ -430,6 +474,7 @@ export function BattleStatsModal({
                       color: 'text-amber-300 border-amber-500/35',
                     },
                     {
+                      id: 'heal',
                       label: t('stats.mvpHealing'),
                       award: stats.mvps.mostHealing,
                       suffix: ' HP',
@@ -437,6 +482,7 @@ export function BattleStatsModal({
                       color: 'text-emerald-300 border-emerald-500/35',
                     },
                     {
+                      id: 'taken',
                       label: t('stats.mvpTaken'),
                       award: stats.mvps.mostDamageTaken,
                       suffix: ' DMG',
@@ -444,17 +490,18 @@ export function BattleStatsModal({
                       color: 'text-sky-300 border-sky-500/35',
                     },
                     {
+                      id: 'dodge',
                       label: t('stats.mvpDodges'),
                       award: stats.mvps.mostDodges,
                       suffix: '',
                       Icon: Sparkles,
                       color: 'text-purple-300 border-purple-500/35',
                     },
-                  ].map(({ label, award, suffix, Icon, color }) => {
+                  ].map(({ id, label, award, suffix, Icon, color }) => {
                     const winner = award ? unitById.get(award.unitId) : null;
                     return (
                       <div
-                        key={label}
+                        key={id}
                         className={`rounded-lg border bg-[#0D1523] p-3 space-y-1 ${color}`}
                       >
                         <div className="flex items-center gap-1.5 text-[11px] font-semibold">
@@ -488,182 +535,191 @@ export function BattleStatsModal({
 
           {activeTab === 'units' && (
             <div className="space-y-3">
-              <div className="text-xs text-slate-400">{t('stats.expandHint')}</div>
-              <div className="rounded-lg border border-slate-800 bg-[#0D1523] overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="border-b border-slate-800 bg-[#090E17] text-slate-400">
-                      <th className="py-2.5 px-3 font-semibold">{t('stats.colUnit')}</th>
-                      {(
-                        [
-                          ['damageDealt', t('stats.colDmg')],
-                          ['damageTakenTotal', t('stats.colTaken')],
-                          ['healingDone', t('stats.colHeal')],
-                          ['shieldGranted', t('stats.colShd')],
-                          ['critRate', t('stats.colCrit')],
-                          ['dodges', t('stats.colDodge')],
-                          ['kills', t('stats.colKills')],
-                          ['spSpent', t('stats.colSp')],
-                          ['damagePerTurn', t('stats.colDpt')],
-                        ] as [SortColumn, string][]
-                      ).map(([col, label]) => (
-                        <th key={col} className="py-2.5 px-2 font-semibold whitespace-nowrap">
-                          <button
-                            type="button"
-                            onClick={() => toggleSort(col)}
-                            className={`inline-flex items-center gap-1 cursor-pointer hover:text-white ${
-                              sortCol === col ? 'text-sky-300' : ''
-                            }`}
-                          >
-                            <span>{label}</span>
-                            {sortCol === col && (
-                              <span>{sortDesc ? '↓' : '↑'}</span>
-                            )}
-                          </button>
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/80">
-                    {sortedUnits.map((u) => {
-                      const isExpanded = expandedUnitId === u.unitId;
-                      const accent = getUnitAccentHex(u);
-                      const skillList = Object.values(u.skills).sort(
-                        (a, b) => b.damage + b.healing - (a.damage + a.healing)
-                      );
+              {sortedUnits.length === 0 ? (
+                <div className="rounded-lg border border-slate-800 bg-[#0D1523] py-10 text-center text-xs text-slate-400">
+                  {t('stats.noData')}
+                </div>
+              ) : (
+                <>
+                  <div className="text-xs text-slate-400">{t('stats.expandHint')}</div>
+                  <div className="rounded-lg border border-slate-800 bg-[#0D1523] overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-800 bg-[#090E17] text-slate-400">
+                          <th className="py-2.5 px-3 font-semibold">{t('stats.colUnit')}</th>
+                          {(
+                            [
+                              ['damageDealt', t('stats.colDmg')],
+                              ['damageTakenTotal', t('stats.colTaken')],
+                              ['healingDone', t('stats.colHeal')],
+                              ['shieldGranted', t('stats.colShd')],
+                              ['critRate', t('stats.colCrit')],
+                              ['dodges', t('stats.colDodge')],
+                              ['kills', t('stats.colKills')],
+                              ['spSpent', t('stats.colSp')],
+                              ['damagePerTurn', t('stats.colDpt')],
+                            ] as [SortColumn, string][]
+                          ).map(([col, label]) => (
+                            <th key={col} className="py-2.5 px-2 font-semibold whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={() => toggleSort(col)}
+                                className={`inline-flex items-center gap-1 cursor-pointer hover:text-white ${
+                                  sortCol === col ? 'text-sky-300' : ''
+                                }`}
+                              >
+                                <span>{label}</span>
+                                {sortCol === col && (
+                                  <span>{sortDesc ? '↓' : '↑'}</span>
+                                )}
+                              </button>
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/80">
+                        {sortedUnits.map((u) => {
+                          const isExpanded = expandedUnitId === u.unitId;
+                          const accent = getUnitAccentHex(u);
+                          const skillList = Object.values(u.skills ?? {}).sort(
+                            (a, b) => b.damage + b.healing - (a.damage + a.healing)
+                          );
 
-                      return (
-                        <tr
-                          key={u.unitId}
-                          className="group"
-                        >
-                          <td colSpan={10} className="p-0">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setExpandedUnitId(isExpanded ? null : u.unitId)
-                              }
-                              className="w-full text-left hover:bg-slate-800/40 transition-colors cursor-pointer"
-                            >
-                              <div className="grid grid-cols-[minmax(150px,1.8fr)_repeat(9,minmax(54px,1fr))] items-center">
-                                <div className="py-2.5 px-3 flex items-center gap-2 min-w-0">
-                                  {isExpanded ? (
-                                    <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                                  ) : (
-                                    <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                                  )}
-                                  <span
-                                    className="text-xs font-bold shrink-0"
-                                    style={{ color: accent }}
-                                    title={getClassName(lang, u.classId)}
-                                  >
-                                    {getClassBadgeSymbol(u.classId)}
-                                  </span>
-                                  <div className="min-w-0">
-                                    <div
-                                      className={`font-semibold truncate ${
-                                        u.alive ? 'text-slate-100' : 'text-slate-500 line-through'
-                                      }`}
-                                    >
-                                      {u.name}
-                                    </div>
-                                    <div className="text-[10px] text-slate-500">
-                                      {getClassName(lang, u.classId)}
-                                    </div>
-                                  </div>
-                                </div>
-                                <div className="py-2.5 px-2 font-mono-nums font-semibold text-amber-300">
-                                  {u.damageDealt.toLocaleString()}
-                                </div>
-                                <div className="py-2.5 px-2 font-mono-nums text-slate-200">
-                                  {u.damageTakenTotal.toLocaleString()}
-                                </div>
-                                <div className="py-2.5 px-2 font-mono-nums text-emerald-300">
-                                  {u.healingDone.toLocaleString()}
-                                </div>
-                                <div className="py-2.5 px-2 font-mono-nums text-sky-300">
-                                  {u.shieldGranted.toLocaleString()}
-                                </div>
-                                <div className="py-2.5 px-2 font-mono-nums text-slate-200">
-                                  {u.critRate}%
-                                </div>
-                                <div className="py-2.5 px-2 font-mono-nums text-slate-200">
-                                  {u.dodges}
-                                </div>
-                                <div className="py-2.5 px-2 font-mono-nums text-slate-200">
-                                  {u.kills}/{u.deaths}
-                                </div>
-                                <div className="py-2.5 px-2 font-mono-nums text-purple-300">
-                                  {u.spSpent}
-                                </div>
-                                <div className="py-2.5 px-2 font-mono-nums text-slate-200">
-                                  {u.damagePerTurn}
-                                </div>
-                              </div>
-                            </button>
-
-                            {isExpanded && (
-                              <div className="px-4 py-3 bg-[#090F1A] border-t border-slate-800/80 space-y-2">
-                                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
-                                  <span className="font-semibold text-slate-200">
-                                    {t('stats.skillBreakdownTitle')}
-                                  </span>
-                                  <span className="font-mono-nums">
-                                    {t('stats.hpDamage')}: {u.damageTakenHp.toLocaleString()} ·{' '}
-                                    {t('stats.shieldAbsorbed')}: {u.damageTakenShield.toLocaleString()} ·{' '}
-                                    {t('stats.buffsDebuffs')}: {u.buffsApplied}/{u.debuffsApplied}
-                                  </span>
-                                </div>
-                                {skillList.length === 0 ? (
-                                  <div className="text-xs text-slate-500">
-                                    {t('stats.noSkillUsage')}
-                                  </div>
-                                ) : (
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                                    {skillList.map((sk) => (
-                                      <div
-                                        key={sk.skillId}
-                                        className="rounded border border-slate-800 bg-[#0D1523] px-3 py-2 flex items-center justify-between gap-2"
+                          return (
+                            <tr key={u.unitId} className="group">
+                              <td colSpan={10} className="p-0">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setExpandedUnitId(isExpanded ? null : u.unitId)
+                                  }
+                                  className="w-full text-left hover:bg-slate-800/40 transition-colors cursor-pointer"
+                                >
+                                  <div className="grid grid-cols-[minmax(150px,1.8fr)_repeat(9,minmax(54px,1fr))] items-center">
+                                    <div className="py-2.5 px-3 flex items-center gap-2 min-w-0">
+                                      {isExpanded ? (
+                                        <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                      ) : (
+                                        <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                                      )}
+                                      <span
+                                        className="text-xs font-bold shrink-0"
+                                        style={{ color: accent }}
+                                        title={getClassName(lang, u.classId)}
                                       >
-                                        <div className="min-w-0">
-                                          <div className="text-xs font-semibold text-slate-100 truncate">
-                                            {getStatsSkillLabel(lang, sk.skillId)}
-                                          </div>
-                                          <div className="text-[10px] text-slate-400">
-                                            {t('stats.uses', { count: sk.uses })}
-                                            {sk.crits > 0 ? ` · ${sk.crits} CRIT` : ''}
-                                          </div>
+                                        {getClassBadgeSymbol(u.classId)}
+                                      </span>
+                                      <div className="min-w-0">
+                                        <div
+                                          className={`font-semibold truncate ${
+                                            u.alive
+                                              ? 'text-slate-100'
+                                              : 'text-slate-500 line-through'
+                                          }`}
+                                        >
+                                          {u.name}
                                         </div>
-                                        <div className="text-right font-mono-nums text-xs shrink-0">
-                                          {sk.damage > 0 && (
-                                            <div className="text-amber-300 font-semibold">
-                                              {sk.damage.toLocaleString()} DMG
-                                            </div>
-                                          )}
-                                          {sk.healing > 0 && (
-                                            <div className="text-emerald-300 font-semibold">
-                                              +{sk.healing.toLocaleString()} HP
-                                            </div>
-                                          )}
-                                          {sk.shieldGranted > 0 && (
-                                            <div className="text-sky-300">
-                                              +{sk.shieldGranted.toLocaleString()} SHD
-                                            </div>
-                                          )}
+                                        <div className="text-[10px] text-slate-500">
+                                          {getClassName(lang, u.classId)}
                                         </div>
                                       </div>
-                                    ))}
+                                    </div>
+                                    <div className="py-2.5 px-2 font-mono-nums font-semibold text-amber-300">
+                                      {u.damageDealt.toLocaleString()}
+                                    </div>
+                                    <div className="py-2.5 px-2 font-mono-nums text-slate-200">
+                                      {u.damageTakenTotal.toLocaleString()}
+                                    </div>
+                                    <div className="py-2.5 px-2 font-mono-nums text-emerald-300">
+                                      {u.healingDone.toLocaleString()}
+                                    </div>
+                                    <div className="py-2.5 px-2 font-mono-nums text-sky-300">
+                                      {u.shieldGranted.toLocaleString()}
+                                    </div>
+                                    <div className="py-2.5 px-2 font-mono-nums text-slate-200">
+                                      {u.critRate}%
+                                    </div>
+                                    <div className="py-2.5 px-2 font-mono-nums text-slate-200">
+                                      {u.dodges}
+                                    </div>
+                                    <div className="py-2.5 px-2 font-mono-nums text-slate-200">
+                                      {u.kills}/{u.deaths}
+                                    </div>
+                                    <div className="py-2.5 px-2 font-mono-nums text-purple-300">
+                                      {u.spSpent}
+                                    </div>
+                                    <div className="py-2.5 px-2 font-mono-nums text-slate-200">
+                                      {u.damagePerTurn}
+                                    </div>
+                                  </div>
+                                </button>
+
+                                {isExpanded && (
+                                  <div className="px-4 py-3 bg-[#090F1A] border-t border-slate-800/80 space-y-2">
+                                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
+                                      <span className="font-semibold text-slate-200">
+                                        {t('stats.skillBreakdownTitle')}
+                                      </span>
+                                      <span className="font-mono-nums">
+                                        {t('stats.hpDamage')}: {u.damageTakenHp.toLocaleString()} ·{' '}
+                                        {t('stats.shieldAbsorbed')}:{' '}
+                                        {u.damageTakenShield.toLocaleString()} ·{' '}
+                                        {t('stats.buffsDebuffs')}: {u.buffsApplied}/
+                                        {u.debuffsApplied}
+                                      </span>
+                                    </div>
+                                    {skillList.length === 0 ? (
+                                      <div className="text-xs text-slate-500">
+                                        {t('stats.noSkillUsage')}
+                                      </div>
+                                    ) : (
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                                        {skillList.map((sk) => (
+                                          <div
+                                            key={sk.skillId}
+                                            className="rounded border border-slate-800 bg-[#0D1523] px-3 py-2 flex items-center justify-between gap-2"
+                                          >
+                                            <div className="min-w-0">
+                                              <div className="text-xs font-semibold text-slate-100 truncate">
+                                                {getStatsSkillLabel(lang, sk.skillId)}
+                                              </div>
+                                              <div className="text-[10px] text-slate-400">
+                                                {t('stats.uses', { count: sk.uses })}
+                                                {sk.crits > 0 ? ` · ${sk.crits} CRIT` : ''}
+                                              </div>
+                                            </div>
+                                            <div className="text-right font-mono-nums text-xs shrink-0">
+                                              {sk.damage > 0 && (
+                                                <div className="text-amber-300 font-semibold">
+                                                  {sk.damage.toLocaleString()} DMG
+                                                </div>
+                                              )}
+                                              {sk.healing > 0 && (
+                                                <div className="text-emerald-300 font-semibold">
+                                                  +{sk.healing.toLocaleString()} HP
+                                                </div>
+                                              )}
+                                              {sk.shieldGranted > 0 && (
+                                                <div className="text-sky-300">
+                                                  +{sk.shieldGranted.toLocaleString()} SHD
+                                                </div>
+                                              )}
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
                                   </div>
                                 )}
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -712,46 +768,58 @@ export function BattleStatsModal({
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  {barUnits.map((u) => {
-                    const val = u[barMetric];
-                    const widthPct = Math.max(val > 0 ? 4 : 0, (val / barMax) * 100);
-                    const color = getUnitAccentHex(u);
-                    return (
-                      <button
-                        key={`bar-${u.unitId}`}
-                        type="button"
-                        onClick={() =>
-                          setTooltipInfo(
-                            `${u.name}: ${val.toLocaleString()} (${getClassName(
-                              lang,
-                              u.classId
-                            )})`
-                          )
-                        }
-                        className="w-full text-left group cursor-pointer"
-                      >
-                        <div className="flex items-center justify-between text-xs mb-0.5">
-                          <span className="text-slate-200 font-medium truncate pr-2">
-                            <span style={{ color }} className="mr-1.5">
-                              {getClassBadgeSymbol(u.classId)}
+                {!hasBarData ? (
+                  <div
+                    data-testid="stats-chart-bar-empty"
+                    className="py-6 text-center text-xs text-slate-500"
+                  >
+                    {t('stats.noData')}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {barUnits.map((u) => {
+                      const val = Number.isFinite(u[barMetric]) ? u[barMetric] : 0;
+                      const widthPct = Math.max(
+                        val > 0 ? 4 : 0,
+                        Math.min(100, safeSvgNum((val / barMax) * 100, 0))
+                      );
+                      const color = getUnitAccentHex(u);
+                      return (
+                        <button
+                          key={`bar-${u.unitId}`}
+                          type="button"
+                          onClick={() =>
+                            setTooltipInfo(
+                              `${u.name}: ${val.toLocaleString()} (${getClassName(
+                                lang,
+                                u.classId
+                              )})`
+                            )
+                          }
+                          className="w-full text-left group cursor-pointer"
+                        >
+                          <div className="flex items-center justify-between text-xs mb-0.5">
+                            <span className="text-slate-200 font-medium truncate pr-2">
+                              <span style={{ color }} className="mr-1.5">
+                                {getClassBadgeSymbol(u.classId)}
+                              </span>
+                              {u.name}
                             </span>
-                            {u.name}
-                          </span>
-                          <span className="font-mono-nums text-slate-300 font-semibold shrink-0">
-                            {val.toLocaleString()}
-                          </span>
-                        </div>
-                        <div className="h-3 rounded bg-slate-950 border border-slate-800 overflow-hidden">
-                          <div
-                            className="h-full rounded transition-all duration-300 group-hover:brightness-115"
-                            style={{ width: `${widthPct}%`, backgroundColor: color }}
-                          />
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
+                            <span className="font-mono-nums text-slate-300 font-semibold shrink-0">
+                              {val.toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="h-3 rounded bg-slate-950 border border-slate-800 overflow-hidden">
+                            <div
+                              className="h-full rounded transition-all duration-300 group-hover:brightness-115"
+                              style={{ width: `${widthPct}%`, backgroundColor: color }}
+                            />
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -772,118 +840,127 @@ export function BattleStatsModal({
                       </span>
                     </div>
                   </div>
-                  <svg viewBox="0 0 360 180" className="w-full h-44 select-none">
-                    {[0, 0.5, 1].map((f) => {
-                      const y = 18 + (1 - f) * 130;
-                      return (
-                        <g key={f}>
-                          <line
-                            x1="36"
-                            y1={y}
-                            x2="344"
-                            y2={y}
-                            stroke="#1E293B"
-                            strokeDasharray="3 3"
-                          />
-                          <text
-                            x="30"
-                            y={y + 3}
-                            textAnchor="end"
-                            fill="#64748B"
-                            fontSize="9"
-                          >
-                            {Math.round(maxCumDmg * f)}
-                          </text>
-                        </g>
-                      );
-                    })}
-                    {(() => {
-                      const allyPts = renderLinePoints(
-                        dmgSeries.length,
-                        (i) => dmgSeries[i].allyCumulativeDamage,
-                        maxCumDmg,
-                        360,
-                        166,
-                        36,
-                        18
-                      );
-                      const enemyPts = renderLinePoints(
-                        dmgSeries.length,
-                        (i) => dmgSeries[i].enemyCumulativeDamage,
-                        maxCumDmg,
-                        360,
-                        166,
-                        36,
-                        18
-                      );
-                      return (
-                        <>
-                          <polyline
-                            fill="none"
-                            stroke="#38BDF8"
-                            strokeWidth="2.4"
-                            points={allyPts.map((p) => `${p.x},${p.y}`).join(' ')}
-                          />
-                          <polyline
-                            fill="none"
-                            stroke="#EF4444"
-                            strokeWidth="2.4"
-                            points={enemyPts.map((p) => `${p.x},${p.y}`).join(' ')}
-                          />
-                          {dmgSeries.map((pt, i) => (
-                            <g key={pt.round}>
-                              <circle
-                                cx={allyPts[i].x}
-                                cy={allyPts[i].y}
-                                r="4"
-                                fill="#38BDF8"
-                                className="cursor-pointer"
-                                onClick={() =>
-                                  setTooltipInfo(
-                                    `${t('stats.roundShort', { round: pt.round })} — ${t(
-                                      'stats.teamAlly'
-                                    )}: ${pt.allyCumulativeDamage.toLocaleString()} | ${t(
-                                      'stats.teamEnemy'
-                                    )}: ${pt.enemyCumulativeDamage.toLocaleString()}`
-                                  )
-                                }
-                              />
-                              <circle
-                                cx={enemyPts[i].x}
-                                cy={enemyPts[i].y}
-                                r="4"
-                                fill="#EF4444"
-                                className="cursor-pointer"
-                                onClick={() =>
-                                  setTooltipInfo(
-                                    `${t('stats.roundShort', { round: pt.round })} — ${t(
-                                      'stats.teamAlly'
-                                    )}: ${pt.allyCumulativeDamage.toLocaleString()} | ${t(
-                                      'stats.teamEnemy'
-                                    )}: ${pt.enemyCumulativeDamage.toLocaleString()}`
-                                  )
-                                }
-                              />
-                              {(dmgSeries.length <= 10 ||
-                                i === 0 ||
-                                i === dmgSeries.length - 1 ||
-                                i % Math.ceil(dmgSeries.length / 6) === 0) && (
-                                <text
-                                  x={allyPts[i].x}
-                                  y="174"
-                                  textAnchor="middle"
-                                  fill="#94A3B8"
-                                  fontSize="9"
-                                >
-                                  R{pt.round}
-                                </text>
-                              )}
-                            </g>
-                          ))}
-                        </>
-                      );
-                    })()}
-                  </svg>
+                  {!hasCumDmgData ? (
+                    <div
+                      data-testid="stats-chart-cumdmg-empty"
+                      className="h-44 flex items-center justify-center text-xs text-slate-500"
+                    >
+                      {t('stats.noData')}
+                    </div>
+                  ) : (
+                    <svg viewBox="0 0 360 180" className="w-full h-44 select-none">
+                      {[0, 0.5, 1].map((f) => {
+                        const y = safeSvgNum(18 + (1 - f) * 130, 18);
+                        return (
+                          <g key={f}>
+                            <line
+                              x1="36"
+                              y1={y}
+                              x2="344"
+                              y2={y}
+                              stroke="#1E293B"
+                              strokeDasharray="3 3"
+                            />
+                            <text
+                              x="30"
+                              y={y + 3}
+                              textAnchor="end"
+                              fill="#64748B"
+                              fontSize="9"
+                            >
+                              {Math.round(maxCumDmg * f)}
+                            </text>
+                          </g>
+                        );
+                      })}
+                      {(() => {
+                        const allyPts = renderLinePoints(
+                          dmgSeries.length,
+                          (i) => dmgSeries[i].allyCumulativeDamage,
+                          maxCumDmg,
+                          360,
+                          166,
+                          36,
+                          18
+                        );
+                        const enemyPts = renderLinePoints(
+                          dmgSeries.length,
+                          (i) => dmgSeries[i].enemyCumulativeDamage,
+                          maxCumDmg,
+                          360,
+                          166,
+                          36,
+                          18
+                        );
+                        return (
+                          <>
+                            <polyline
+                              fill="none"
+                              stroke="#38BDF8"
+                              strokeWidth="2.4"
+                              points={allyPts.map((p) => `${p.x},${p.y}`).join(' ')}
+                            />
+                            <polyline
+                              fill="none"
+                              stroke="#EF4444"
+                              strokeWidth="2.4"
+                              points={enemyPts.map((p) => `${p.x},${p.y}`).join(' ')}
+                            />
+                            {dmgSeries.map((pt, i) => (
+                              <g key={pt.round}>
+                                <circle
+                                  cx={allyPts[i].x}
+                                  cy={allyPts[i].y}
+                                  r="4"
+                                  fill="#38BDF8"
+                                  className="cursor-pointer"
+                                  onClick={() =>
+                                    setTooltipInfo(
+                                      `${t('stats.roundShort', { round: pt.round })} — ${t(
+                                        'stats.teamAlly'
+                                      )}: ${pt.allyCumulativeDamage.toLocaleString()} | ${t(
+                                        'stats.teamEnemy'
+                                      )}: ${pt.enemyCumulativeDamage.toLocaleString()}`
+                                    )
+                                  }
+                                />
+                                <circle
+                                  cx={enemyPts[i].x}
+                                  cy={enemyPts[i].y}
+                                  r="4"
+                                  fill="#EF4444"
+                                  className="cursor-pointer"
+                                  onClick={() =>
+                                    setTooltipInfo(
+                                      `${t('stats.roundShort', { round: pt.round })} — ${t(
+                                        'stats.teamAlly'
+                                      )}: ${pt.allyCumulativeDamage.toLocaleString()} | ${t(
+                                        'stats.teamEnemy'
+                                      )}: ${pt.enemyCumulativeDamage.toLocaleString()}`
+                                    )
+                                  }
+                                />
+                                {(dmgSeries.length <= 10 ||
+                                  i === 0 ||
+                                  i === dmgSeries.length - 1 ||
+                                  i % Math.ceil(dmgSeries.length / 6) === 0) && (
+                                  <text
+                                    x={allyPts[i].x}
+                                    y="174"
+                                    textAnchor="middle"
+                                    fill="#94A3B8"
+                                    fontSize="9"
+                                  >
+                                    R{pt.round}
+                                  </text>
+                                )}
+                              </g>
+                            ))}
+                          </>
+                        );
+                      })()}
+                    </svg>
+                  )}
                 </div>
 
                 {/* (c) Team Total HP% per Round Line Chart (Battle Momentum) */}
@@ -903,118 +980,127 @@ export function BattleStatsModal({
                       </span>
                     </div>
                   </div>
-                  <svg viewBox="0 0 360 180" className="w-full h-44 select-none">
-                    {[0, 50, 100].map((pct) => {
-                      const y = 18 + (1 - pct / 100) * 130;
-                      return (
-                        <g key={pct}>
-                          <line
-                            x1="36"
-                            y1={y}
-                            x2="344"
-                            y2={y}
-                            stroke="#1E293B"
-                            strokeDasharray="3 3"
-                          />
-                          <text
-                            x="30"
-                            y={y + 3}
-                            textAnchor="end"
-                            fill="#64748B"
-                            fontSize="9"
-                          >
-                            {pct}%
-                          </text>
-                        </g>
-                      );
-                    })}
-                    {(() => {
-                      const allyPts = renderLinePoints(
-                        hpSeries.length,
-                        (i) => hpSeries[i].allyHpPct,
-                        100,
-                        360,
-                        166,
-                        36,
-                        18
-                      );
-                      const enemyPts = renderLinePoints(
-                        hpSeries.length,
-                        (i) => hpSeries[i].enemyHpPct,
-                        100,
-                        360,
-                        166,
-                        36,
-                        18
-                      );
-                      return (
-                        <>
-                          <polyline
-                            fill="none"
-                            stroke="#10B981"
-                            strokeWidth="2.4"
-                            points={allyPts.map((p) => `${p.x},${p.y}`).join(' ')}
-                          />
-                          <polyline
-                            fill="none"
-                            stroke="#F97316"
-                            strokeWidth="2.4"
-                            points={enemyPts.map((p) => `${p.x},${p.y}`).join(' ')}
-                          />
-                          {hpSeries.map((pt, i) => (
-                            <g key={pt.round}>
-                              <circle
-                                cx={allyPts[i].x}
-                                cy={allyPts[i].y}
-                                r="4"
-                                fill="#10B981"
-                                className="cursor-pointer"
-                                onClick={() =>
-                                  setTooltipInfo(
-                                    `${t('stats.roundShort', { round: pt.round })} HP% — ${t(
-                                      'stats.teamAlly'
-                                    )}: ${pt.allyHpPct}% | ${t('stats.teamEnemy')}: ${
-                                      pt.enemyHpPct
-                                    }%`
-                                  )
-                                }
-                              />
-                              <circle
-                                cx={enemyPts[i].x}
-                                cy={enemyPts[i].y}
-                                r="4"
-                                fill="#F97316"
-                                className="cursor-pointer"
-                                onClick={() =>
-                                  setTooltipInfo(
-                                    `${t('stats.roundShort', { round: pt.round })} HP% — ${t(
-                                      'stats.teamAlly'
-                                    )}: ${pt.allyHpPct}% | ${t('stats.teamEnemy')}: ${
-                                      pt.enemyHpPct
-                                    }%`
-                                  )
-                                }
-                              />
-                              {(hpSeries.length <= 10 ||
-                                i === 0 ||
-                                i === hpSeries.length - 1 ||
-                                i % Math.ceil(hpSeries.length / 6) === 0) && (
-                                <text
-                                  x={allyPts[i].x}
-                                  y="174"
-                                  textAnchor="middle"
-                                  fill="#94A3B8"
-                                  fontSize="9"
-                                >
-                                  R{pt.round}
-                                </text>
-                              )}
-                            </g>
-                          ))}
-                        </>
-                      );
-                    })()}
-                  </svg>
+                  {!hasHpSeriesData ? (
+                    <div
+                      data-testid="stats-chart-hp-empty"
+                      className="h-44 flex items-center justify-center text-xs text-slate-500"
+                    >
+                      {t('stats.noData')}
+                    </div>
+                  ) : (
+                    <svg viewBox="0 0 360 180" className="w-full h-44 select-none">
+                      {[0, 50, 100].map((pct) => {
+                        const y = safeSvgNum(18 + (1 - pct / 100) * 130, 18);
+                        return (
+                          <g key={pct}>
+                            <line
+                              x1="36"
+                              y1={y}
+                              x2="344"
+                              y2={y}
+                              stroke="#1E293B"
+                              strokeDasharray="3 3"
+                            />
+                            <text
+                              x="30"
+                              y={y + 3}
+                              textAnchor="end"
+                              fill="#64748B"
+                              fontSize="9"
+                            >
+                              {pct}%
+                            </text>
+                          </g>
+                        );
+                      })}
+                      {(() => {
+                        const allyPts = renderLinePoints(
+                          hpSeries.length,
+                          (i) => hpSeries[i].allyHpPct,
+                          100,
+                          360,
+                          166,
+                          36,
+                          18
+                        );
+                        const enemyPts = renderLinePoints(
+                          hpSeries.length,
+                          (i) => hpSeries[i].enemyHpPct,
+                          100,
+                          360,
+                          166,
+                          36,
+                          18
+                        );
+                        return (
+                          <>
+                            <polyline
+                              fill="none"
+                              stroke="#10B981"
+                              strokeWidth="2.4"
+                              points={allyPts.map((p) => `${p.x},${p.y}`).join(' ')}
+                            />
+                            <polyline
+                              fill="none"
+                              stroke="#F97316"
+                              strokeWidth="2.4"
+                              points={enemyPts.map((p) => `${p.x},${p.y}`).join(' ')}
+                            />
+                            {hpSeries.map((pt, i) => (
+                              <g key={pt.round}>
+                                <circle
+                                  cx={allyPts[i].x}
+                                  cy={allyPts[i].y}
+                                  r="4"
+                                  fill="#10B981"
+                                  className="cursor-pointer"
+                                  onClick={() =>
+                                    setTooltipInfo(
+                                      `${t('stats.roundShort', { round: pt.round })} HP% — ${t(
+                                        'stats.teamAlly'
+                                      )}: ${pt.allyHpPct}% | ${t('stats.teamEnemy')}: ${
+                                        pt.enemyHpPct
+                                      }%`
+                                    )
+                                  }
+                                />
+                                <circle
+                                  cx={enemyPts[i].x}
+                                  cy={enemyPts[i].y}
+                                  r="4"
+                                  fill="#F97316"
+                                  className="cursor-pointer"
+                                  onClick={() =>
+                                    setTooltipInfo(
+                                      `${t('stats.roundShort', { round: pt.round })} HP% — ${t(
+                                        'stats.teamAlly'
+                                      )}: ${pt.allyHpPct}% | ${t('stats.teamEnemy')}: ${
+                                        pt.enemyHpPct
+                                      }%`
+                                    )
+                                  }
+                                />
+                                {(hpSeries.length <= 10 ||
+                                  i === 0 ||
+                                  i === hpSeries.length - 1 ||
+                                  i % Math.ceil(hpSeries.length / 6) === 0) && (
+                                  <text
+                                    x={allyPts[i].x}
+                                    y="174"
+                                    textAnchor="middle"
+                                    fill="#94A3B8"
+                                    fontSize="9"
+                                  >
+                                    R{pt.round}
+                                  </text>
+                                )}
+                              </g>
+                            ))}
+                          </>
+                        );
+                      })()}
+                    </svg>
+                  )}
                 </div>
               </div>
 
@@ -1024,23 +1110,28 @@ export function BattleStatsModal({
                   <h3 className="font-display text-lg font-bold text-slate-100">
                     {t('stats.chartDonutTitle')}
                   </h3>
-                  <select
-                    value={effectiveDonutUnit?.unitId ?? ''}
-                    onChange={(e) => setDonutUnitId(e.target.value)}
-                    aria-label={t('stats.selectUnit')}
-                    className="min-h-[38px] rounded border border-slate-700 bg-slate-950 px-3 text-xs text-slate-100 cursor-pointer"
-                  >
-                    {stats.units.map((u) => (
-                      <option key={u.unitId} value={u.unitId} className="bg-slate-900">
-                        {u.name} ({u.damageDealt.toLocaleString()} DMG)
-                      </option>
-                    ))}
-                  </select>
+                  {stats.units.length > 0 && (
+                    <select
+                      value={effectiveDonutUnit?.unitId ?? ''}
+                      onChange={(e) => setDonutUnitId(e.target.value)}
+                      aria-label={t('stats.selectUnit')}
+                      className="min-h-[38px] rounded border border-slate-700 bg-slate-950 px-3 text-xs text-slate-100 cursor-pointer"
+                    >
+                      {stats.units.map((u) => (
+                        <option key={u.unitId} value={u.unitId} className="bg-slate-900">
+                          {u.name} ({u.damageDealt.toLocaleString()} DMG)
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
                 {donutSlices.length === 0 ? (
-                  <div className="py-6 text-center text-xs text-slate-500">
-                    {t('stats.noDamageYet')}
+                  <div
+                    data-testid="stats-chart-donut-empty"
+                    className="py-6 text-center text-xs text-slate-500"
+                  >
+                    {t('stats.noData')}
                   </div>
                 ) : (
                   <div className="flex flex-col sm:flex-row items-center gap-6">
@@ -1060,8 +1151,8 @@ export function BattleStatsModal({
                             fill="transparent"
                             stroke={sl.color}
                             strokeWidth="22"
-                            strokeDasharray={`${sl.pct * circ} ${circ}`}
-                            strokeDashoffset={-sl.start * circ}
+                            strokeDasharray={`${safeSvgNum(sl.pct * circ, 0)} ${safeSvgNum(circ, 1)}`}
+                            strokeDashoffset={safeSvgNum(-sl.start * circ, 0)}
                             transform="rotate(-90 70 70)"
                             className="cursor-pointer hover:opacity-90"
                             onClick={() =>
@@ -1082,7 +1173,7 @@ export function BattleStatsModal({
                         fontSize="13"
                         fontWeight="700"
                       >
-                        {effectiveDonutUnit?.damageDealt.toLocaleString()}
+                        {(effectiveDonutUnit?.damageDealt ?? 0).toLocaleString()}
                       </text>
                       <text
                         x="70"

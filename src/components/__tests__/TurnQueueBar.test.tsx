@@ -198,4 +198,55 @@ describe('Conveyor Turn Queue — buildTurnQueue & TurnQueueBar render', () => {
     expect(html).not.toContain('overflow-auto');
     expect(html).not.toContain('overflow-scroll');
   });
+
+  it('TurnQueueBar header renders [Swords icon w/ tooltip] -> [Round N (+ inline flame x1.7 when enraged)] -> [acting chip first] without visible "Đang chiến đấu" text or separate enrage chip', () => {
+    useGameStore.getState().setLanguage('en');
+
+    const units = [
+      makeUnit('e_sniper', 'Void Sniper', 81, 'enemy'),
+      makeUnit('a_player', 'Kira', 74, 'ally', { isPlayer: true }),
+      makeUnit('a_dax', 'Dax', 65, 'ally'),
+      makeUnit('e_boss', 'Iron Boss', 58, 'enemy', { isBoss: true }),
+    ];
+
+    const battle = makeBattle(units, 1, 27);
+    const html = renderToStaticMarkup(
+      createElement(TurnQueueBar, {
+        battle,
+        battleSpeed: 1,
+        skipAnimations: false,
+        enrageBonusPct: 0.7,
+      })
+    );
+
+    // Strip HTML tags to verify visible text does NOT include "In combat" or "Đang chiến đấu"
+    const visibleText = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+    expect(visibleText).not.toContain('In combat');
+    expect(visibleText).not.toContain('Đang chiến đấu');
+
+    // Combat icon MUST carry the tooltip and appear BEFORE the round chip, which MUST appear BEFORE the first chip
+    const iconIdx = html.indexOf('data-testid="turn-queue-combat-icon"');
+    const roundChipIdx = html.indexOf('data-testid="turn-queue-round-chip"');
+    const enrageBadgeIdx = html.indexOf('data-testid="turn-queue-enrage-badge"');
+    const firstChipIdx = html.indexOf('data-testid="turn-queue-chip"');
+    const dividerIdx = html.indexOf('data-testid="turn-queue-divider"');
+
+    expect(iconIdx).toBeGreaterThan(-1);
+    expect(roundChipIdx).toBeGreaterThan(iconIdx);
+    expect(enrageBadgeIdx).toBeGreaterThan(roundChipIdx);
+    expect(firstChipIdx).toBeGreaterThan(enrageBadgeIdx);
+    expect(dividerIdx).toBeGreaterThan(firstChipIdx);
+
+    // Icon tooltip says "Đang chiến đấu" (SSR snapshot uses default store language 'vi')
+    expect(html).toContain('title="Đang chiến đấu"');
+    // Inline flame badge inside Round chip shows x1.7 and has Enrage +70% tooltip
+    expect(html).toContain('x1.7');
+    expect(html).toContain('title="Cuồng nộ: địch gây +70% sát thương"');
+    // Enrage badge is nested inside turn-queue-round-chip (no separate enrage pill after closing round chip)
+    const roundChipSegment = html.slice(roundChipIdx, firstChipIdx);
+    expect(roundChipSegment).toContain('Vòng 27');
+    expect(roundChipSegment).toContain('data-testid="turn-queue-enrage-badge"');
+    expect(roundChipSegment).toContain('x1.7');
+  });
 });
+

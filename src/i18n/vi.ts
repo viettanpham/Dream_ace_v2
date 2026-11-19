@@ -960,4 +960,20 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'map.defendBtn': 'Phòng thủ căn cứ ({size}v{size})',
   'map.assaultBtn': 'Tấn công căn cứ ({size}v{size})',
   'map.patrolBtn': 'Xuất kích tuần tra ({size}v{size})',
+
+  // Sửa lỗi màn hình chiến đấu: Biểu đồ trống, Nhật ký bám đáy, Cuồng nộ gọn, Error Boundaries
+  'stats.noData': 'Chưa có dữ liệu',
+  'battle.jumpToLatest': 'Xuống mới nhất',
+  'queue.enrageChipTooltip': 'Cuồng nộ: địch gây +{pct}% sát thương',
+  'error.title': 'Đã xảy ra sự cố hiển thị',
+  'error.panelTitle': 'Lỗi hiển thị bảng',
+  'error.description':
+    'Đã xảy ra lỗi không mong muốn trong bảng này. Trạng thái trận đấu vẫn được bảo toàn.',
+  'error.globalDescription':
+    'Đã xảy ra lỗi khiến giao diện tạm gián đoạn. Bạn có thể tải lại hoặc sao chép chi tiết lỗi.',
+  'error.closeBtn': 'Đóng',
+  'error.reloadBattleBtn': 'Tải lại trận',
+  'error.reloadAppBtn': 'Tải lại ứng dụng',
+  'error.copyErrorBtn': 'Sao chép lỗi',
+  'error.copiedBtn': 'Đã sao chép',
 };

@@ -958,6 +958,22 @@ export const EN_TRANSLATIONS = {
   'map.defendBtn': 'Defend Base ({size}v{size})',
   'map.assaultBtn': 'Assault Base ({size}v{size})',
   'map.patrolBtn': 'Patrol Sortie ({size}v{size})',
+
+  // Battle Screen Fixes: Empty Charts, Combat Log Stick-to-Bottom, Turn Queue Enrage, Error Boundaries
+  'stats.noData': 'No data yet',
+  'battle.jumpToLatest': 'Jump to latest',
+  'queue.enrageChipTooltip': 'Enrage: enemies deal +{pct}% damage',
+  'error.title': 'Something went wrong',
+  'error.panelTitle': 'Panel display error',
+  'error.description':
+    'An unexpected error occurred in this panel. Your battle state is intact.',
+  'error.globalDescription':
+    'An unexpected error interrupted the display. You can reload or copy the error details.',
+  'error.closeBtn': 'Close',
+  'error.reloadBattleBtn': 'Reload battle',
+  'error.reloadAppBtn': 'Reload app',
+  'error.copyErrorBtn': 'Copy error',
+  'error.copiedBtn': 'Copied',
 } as const;
 
 export type TranslationKey = keyof typeof EN_TRANSLATIONS;
