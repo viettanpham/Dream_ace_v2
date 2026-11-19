@@ -51,6 +51,7 @@ import {
 import {
   BattleVfxOverlay,
   type ManualAimLineSpec,
+  type RowSlideEffect,
 } from './BattleVfxOverlay';
 
 interface BattleRadarViewProps {
@@ -64,6 +65,7 @@ interface BattleRadarViewProps {
   speechBubblesEnabled?: boolean;
   battleSpeed?: BattleSpeed;
   effectsMode?: BattleEffectsMode;
+  effectsDebugEnabled?: boolean;
   playerWeaponId?: string | null;
   layoutMode?: BattleLayoutMode;
   onSelectEnemy: (unitId: string) => void;
@@ -71,12 +73,12 @@ interface BattleRadarViewProps {
   onInspectUnit: (unit: CombatUnit) => void;
 }
 
-interface TokenPos {
+export interface TokenPos {
   x: number;
   y: number;
 }
 
-interface RowLaneRect {
+export interface RowLaneRect {
   side: 'ally' | 'enemy';
   row: CombatRow;
   x: number;
@@ -284,18 +286,16 @@ const ClassCenterIcon = memo(function ClassCenterIcon({
 });
 
 /**
- * Builds 3-row lanes per side with content-aware widths/heights so populated rows fill
- * the field comfortably and empty rows shrink instead of leaving large empty gaps.
+ * Builds 3 fixed-position row lanes (front/middle/back) per side.
+ * Lane geometry is strictly fixed and independent of unit counts or alive/dead state
+ * so rows never resize or reflow when units die or a row becomes empty.
  */
-function buildRowLanes(
+export function buildRowLanes(
   isLandscape: boolean,
   vw: number,
   vh: number,
-  units: CombatUnit[]
+  _units?: CombatUnit[]
 ): RowLaneRect[] {
-  const hasUnits = (side: 'ally' | 'enemy', row: CombatRow) =>
-    units.some((u) => u.side === side && u.row === row);
-
   const distribute = (
     totalSpan: number,
     gap: number,
@@ -317,12 +317,9 @@ function buildRowLanes(
     const allyRows: CombatRow[] = ['back', 'middle', 'front'];
     const enemyRows: CombatRow[] = ['front', 'middle', 'back'];
 
-    const allyWeights = allyRows.map((r) => (hasUnits('ally', r) ? 1.28 : 0.56));
-    const enemyWeights = enemyRows.map((r) =>
-      hasUnits('enemy', r) ? 1.28 : 0.56
-    );
-    const allyWidths = distribute(halfW, laneGap, allyWeights);
-    const enemyWidths = distribute(halfW, laneGap, enemyWeights);
+    const fixedWeights = [1, 1, 1];
+    const allyWidths = distribute(halfW, laneGap, fixedWeights);
+    const enemyWidths = distribute(halfW, laneGap, fixedWeights);
 
     const lanes: RowLaneRect[] = [];
     let curX = padX;
@@ -368,7 +365,7 @@ function buildRowLanes(
     return lanes;
   }
 
-  // Portrait 6 horizontal bands: Enemy Back -> Middle -> Front || Ally Front -> Middle -> Back
+  // Portrait 6 fixed horizontal bands: Enemy Back -> Middle -> Front || Ally Front -> Middle -> Back
   const padX = 8;
   const padY = 8;
   const centerGap = 12;
@@ -379,16 +376,9 @@ function buildRowLanes(
   const enemyRows: CombatRow[] = ['back', 'middle', 'front'];
   const allyRows: CombatRow[] = ['front', 'middle', 'back'];
 
-  const enemyHeights = distribute(
-    halfH,
-    laneGap,
-    enemyRows.map((r) => (hasUnits('enemy', r) ? 1.26 : 0.58))
-  );
-  const allyHeights = distribute(
-    halfH,
-    laneGap,
-    allyRows.map((r) => (hasUnits('ally', r) ? 1.26 : 0.58))
-  );
+  const fixedWeights = [1, 1, 1];
+  const enemyHeights = distribute(halfH, laneGap, fixedWeights);
+  const allyHeights = distribute(halfH, laneGap, fixedWeights);
 
   const lanes: RowLaneRect[] = [];
   let curY = padY;
@@ -434,7 +424,7 @@ function buildRowLanes(
   return lanes;
 }
 
-function computeUnitPositions(
+export function computeUnitPositions(
   units: CombatUnit[],
   lanes: RowLaneRect[],
   isLandscape: boolean
@@ -444,7 +434,11 @@ function computeUnitPositions(
   for (const lane of lanes) {
     const rowUnits = units
       .filter((u) => u.side === lane.side && u.row === lane.row)
-      .sort((a, b) => (a.formationCol ?? 0) - (b.formationCol ?? 0));
+      .sort(
+        (a, b) =>
+          (a.formationCol ?? 0) - (b.formationCol ?? 0) ||
+          a.id.localeCompare(b.id)
+      );
 
     const count = rowUnits.length;
     if (count === 0) continue;
@@ -1021,6 +1015,7 @@ export function BattleRadarView({
   speechBubblesEnabled = true,
   battleSpeed = 1,
   effectsMode = 'full',
+  effectsDebugEnabled = false,
   playerWeaponId = null,
   layoutMode: layoutModeProp,
   onSelectEnemy,
@@ -1056,6 +1051,7 @@ export function BattleRadarView({
     isDebuff: boolean;
   } | null>(null);
   const [fadingDefeatIds, setFadingDefeatIds] = useState<string[]>([]);
+  const [rowSlides, setRowSlides] = useState<RowSlideEffect[]>([]);
   const [hoveredTargetId, setHoveredTargetId] = useState<string | null>(null);
   const [visibleBubbleId, setVisibleBubbleId] = useState<string | null>(
     battle.wingmanChat?.id ?? null
@@ -1068,7 +1064,11 @@ export function BattleRadarView({
   const longPressTimerRef = useRef<number | null>(null);
   const longPressFiredRef = useRef(false);
   const prevAliveMapRef = useRef<Map<string, boolean>>(new Map());
+  const prevRowPosMapRef = useRef<Map<string, { row: CombatRow; pos: TokenPos }>>(
+    new Map()
+  );
   const defeatTimersRef = useRef<Map<string, number>>(new Map());
+  const rowSlideTimersRef = useRef<Map<string, number>>(new Map());
 
   const registerMarkerRef = useCallback(
     (unitId: string, el: SVGGElement | null) => {
@@ -1174,6 +1174,10 @@ export function BattleRadarView({
         window.clearTimeout(timerId);
       });
       defeatTimersRef.current.clear();
+      rowSlideTimersRef.current.forEach((timerId) => {
+        window.clearTimeout(timerId);
+      });
+      rowSlideTimersRef.current.clear();
     };
   }, []);
 
@@ -1218,14 +1222,49 @@ export function BattleRadarView({
   const cy = vh / 2;
 
   const lanes = useMemo(
-    () => buildRowLanes(isLandscape, vw, vh, battle.units),
-    [isLandscape, vw, vh, battle.units]
+    () => buildRowLanes(isLandscape, vw, vh),
+    [isLandscape, vw, vh]
   );
 
   const posMap = useMemo(
     () => computeUnitPositions(battle.units, lanes, isLandscape),
     [battle.units, lanes, isLandscape]
   );
+
+  // Detect engine-driven unit row changes and play a short compositor-only slide animation
+  useEffect(() => {
+    const prevMap = prevRowPosMapRef.current;
+    const newSlides: RowSlideEffect[] = [];
+    const slideDurationMs = Math.max(140, Math.round(320 / Math.max(1, battleSpeed)));
+
+    for (const u of battle.units) {
+      const curPos = posMap.get(u.id);
+      if (!curPos) continue;
+      const prev = prevMap.get(u.id);
+      if (prev && prev.row !== u.row && u.alive && !animationsSkipped) {
+        newSlides.push({
+          id: `slide_${u.id}_${Date.now()}_${u.row}`,
+          unitId: u.id,
+          side: u.side,
+          fromPos: prev.pos,
+          toPos: curPos,
+          durationMs: slideDurationMs,
+        });
+      }
+      prevMap.set(u.id, { row: u.row, pos: curPos });
+    }
+
+    if (newSlides.length === 0) return;
+
+    setRowSlides((prev) => [...prev, ...newSlides].slice(-8));
+    for (const slide of newSlides) {
+      const timerId = window.setTimeout(() => {
+        setRowSlides((prev) => prev.filter((s) => s.id !== slide.id));
+        rowSlideTimersRef.current.delete(slide.id);
+      }, slide.durationMs + 60);
+      rowSlideTimersRef.current.set(slide.id, timerId);
+    }
+  }, [battle.units, posMap, battleSpeed, animationsSkipped]);
 
   const enemyExposure = useMemo(
     () => computeRowExposure(battle.units, 'enemy'),
@@ -1843,6 +1882,9 @@ export function BattleRadarView({
         manualAimLine={manualAimLine}
         hitFlashUnitIds={fxHitTargetIds}
         defeatFadingUnitIds={defeatFadingSet}
+        rowSlides={rowSlides}
+        renderedPopupCount={vfxConfig.showFloatingNumbers ? staggeredPopups.length : 0}
+        effectsDebugEnabled={effectsDebugEnabled}
       />
 
       {/* Collapsible Tactical Legend (closed by default, persisted in localStorage) */}
@@ -2007,7 +2049,10 @@ export function BattleRadarView({
 
       {/* Staggered Floating Popups (max 6 simultaneous; kept when Effects=Off, skipped on reduced motion) */}
       {vfxConfig.showFloatingNumbers && staggeredPopups.length > 0 && (
-        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div
+          data-testid="radar-popups-layer"
+          className="pointer-events-none absolute inset-0 overflow-hidden z-30"
+        >
           {staggeredPopups.map((item) => {
             const isSmall = isCompactPopupTone(item.popup.tone);
             return (
@@ -2021,7 +2066,7 @@ export function BattleRadarView({
                   animationDelay: `${item.delayMs}ms`,
                   animationDuration: `${item.durationMs}ms`,
                 }}
-                className={`absolute z-20 font-display font-bold tracking-wide drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] whitespace-nowrap ${
+                className={`absolute font-display font-bold tracking-wide drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] whitespace-nowrap ${
                   isSmall
                     ? 'text-[12px] px-1 rounded bg-[#050a12]/80 anim-popup-tight'
                     : item.popup.tone === 'crit'

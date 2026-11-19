@@ -1936,7 +1936,8 @@ export const useGameStore = create<GameStoreState>()(
         const activeUnit = battle.units.find((u) => u.id === activeUnitId);
         if (!activeUnit || !activeUnit.isPlayer || !activeUnit.alive) return;
 
-        const bypassFx = state.skipAnimations || state.battleSpeed === 10;
+        const skipVisualFx = state.skipAnimations;
+        const muteSound = state.skipAnimations || state.battleSpeed === 10;
 
         // Route single_ally skills to selectedAllyTargetId; offensive actions to selectedTargetId
         const skillDef = skillId ? getSkillById(skillId) : undefined;
@@ -1955,7 +1956,7 @@ export const useGameStore = create<GameStoreState>()(
           Math.random,
           skillId
         );
-        playCue(resolution.soundCue, bypassFx);
+        playCue(resolution.soundCue, muteSound);
 
         const targetedEnemy =
           resolvedTargetId &&
@@ -1977,17 +1978,19 @@ export const useGameStore = create<GameStoreState>()(
         ].slice(-5000);
         const enrichedLogs = enrichLogEntries(resolution.logEntries, activeUnit);
         const nextLog = [...battle.log, ...enrichedLogs];
-        const nextPopups = bypassFx
+        const nextPopups = skipVisualFx
           ? []
-          : [...battle.popups, ...resolution.popups];
-        const nextFx =
-          bypassFx || !resolution.fxEvent
-            ? []
-            : [...battle.fxEvents, resolution.fxEvent];
-        const nextExploded =
-          bypassFx || resolution.destroyedUnitIds.length === 0
-            ? []
-            : [...battle.explodedUnitIds, ...resolution.destroyedUnitIds];
+          : [...battle.popups, ...resolution.popups].slice(-18);
+        const nextFx = skipVisualFx
+          ? []
+          : resolution.fxEvent
+          ? [...battle.fxEvents, resolution.fxEvent].slice(-12)
+          : battle.fxEvents;
+        const nextExploded = skipVisualFx
+          ? []
+          : resolution.destroyedUnitIds.length > 0
+          ? [...battle.explodedUnitIds, ...resolution.destroyedUnitIds].slice(-8)
+          : battle.explodedUnitIds;
 
         if (aliveEnemies.length === 0 || aliveAllies.length === 0) {
           const won = aliveEnemies.length === 0;
@@ -2132,7 +2135,8 @@ export const useGameStore = create<GameStoreState>()(
         const autoRuleNumber =
           choice.matchedRuleIndex !== null ? choice.matchedRuleIndex + 1 : 0;
 
-        const bypassFx = state.skipAnimations || state.battleSpeed === 10;
+        const skipVisualFx = state.skipAnimations;
+        const muteSound = state.skipAnimations || state.battleSpeed === 10;
         const resolution = resolveUnitAction(
           battle.units,
           activeUnit.id,
@@ -2143,7 +2147,7 @@ export const useGameStore = create<GameStoreState>()(
           Math.random,
           choice.skillId
         );
-        playCue(resolution.soundCue, bypassFx);
+        playCue(resolution.soundCue, muteSound);
 
         const targetedEnemy =
           choice.targetId &&
@@ -2169,17 +2173,19 @@ export const useGameStore = create<GameStoreState>()(
           autoRuleNumber
         );
         const nextLog = [...battle.log, ...enrichedLogs];
-        const nextPopups = bypassFx
+        const nextPopups = skipVisualFx
           ? []
-          : [...battle.popups, ...resolution.popups];
-        const nextFx =
-          bypassFx || !resolution.fxEvent
-            ? []
-            : [...battle.fxEvents, resolution.fxEvent];
-        const nextExploded =
-          bypassFx || resolution.destroyedUnitIds.length === 0
-            ? []
-            : [...battle.explodedUnitIds, ...resolution.destroyedUnitIds];
+          : [...battle.popups, ...resolution.popups].slice(-18);
+        const nextFx = skipVisualFx
+          ? []
+          : resolution.fxEvent
+          ? [...battle.fxEvents, resolution.fxEvent].slice(-12)
+          : battle.fxEvents;
+        const nextExploded = skipVisualFx
+          ? []
+          : resolution.destroyedUnitIds.length > 0
+          ? [...battle.explodedUnitIds, ...resolution.destroyedUnitIds].slice(-8)
+          : battle.explodedUnitIds;
 
         if (aliveEnemies.length === 0 || aliveAllies.length === 0) {
           const won = aliveEnemies.length === 0;
@@ -2309,7 +2315,8 @@ export const useGameStore = create<GameStoreState>()(
           activeUnit.statuses.some((s) => s.type === 'charging');
         if (activeUnit.isPlayer && !playerIsCharging) return;
 
-        const bypassFx = state.skipAnimations || state.battleSpeed === 10;
+        const skipVisualFx = state.skipAnimations;
+        const muteSound = state.skipAnimations || state.battleSpeed === 10;
         const decision = playerIsCharging
           ? {
               action: 'attack' as ActionType,
@@ -2328,7 +2335,7 @@ export const useGameStore = create<GameStoreState>()(
           Math.random,
           decision.skillId
         );
-        playCue(resolution.soundCue, bypassFx);
+        playCue(resolution.soundCue, muteSound);
 
         const aliveEnemies = resolution.updatedUnits.filter(
           (u) => u.side === 'enemy' && u.alive
@@ -2344,17 +2351,19 @@ export const useGameStore = create<GameStoreState>()(
         ].slice(-5000);
         const enrichedLogs = enrichLogEntries(resolution.logEntries, activeUnit);
         const nextLog = [...battle.log, ...enrichedLogs];
-        const nextPopups = bypassFx
+        const nextPopups = skipVisualFx
           ? []
-          : [...battle.popups, ...resolution.popups];
-        const nextFx =
-          bypassFx || !resolution.fxEvent
-            ? []
-            : [...battle.fxEvents, resolution.fxEvent];
-        const nextExploded =
-          bypassFx || resolution.destroyedUnitIds.length === 0
-            ? []
-            : [...battle.explodedUnitIds, ...resolution.destroyedUnitIds];
+          : [...battle.popups, ...resolution.popups].slice(-18);
+        const nextFx = skipVisualFx
+          ? []
+          : resolution.fxEvent
+          ? [...battle.fxEvents, resolution.fxEvent].slice(-12)
+          : battle.fxEvents;
+        const nextExploded = skipVisualFx
+          ? []
+          : resolution.destroyedUnitIds.length > 0
+          ? [...battle.explodedUnitIds, ...resolution.destroyedUnitIds].slice(-8)
+          : battle.explodedUnitIds;
 
         if (aliveEnemies.length === 0 || aliveAllies.length === 0) {
           const won = aliveEnemies.length === 0;
@@ -2412,7 +2421,7 @@ export const useGameStore = create<GameStoreState>()(
         // Occasional AI wingman radio callout (~28% chance when animations are enabled)
         let nextWingmanChat = battle.wingmanChat ?? null;
         if (
-          !bypassFx &&
+          !skipVisualFx &&
           activeUnit.side === 'ally' &&
           !activeUnit.isPlayer &&
           Math.random() < 0.28

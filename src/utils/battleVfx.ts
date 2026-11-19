@@ -241,9 +241,23 @@ export function computeVfxDurationMs(
   return Math.max(85, Math.round(baseMs / safeSpeed));
 }
 
+export const POPUP_CLEANUP_DELAY_MS = 1350;
+
+/**
+ * Computes a safe FX cleanup delay that always outlives the longest projectile + delayed
+ * impact animation at every speed (x1..x10) so effects are never removed prematurely.
+ */
+export function computeFxCleanupDelayMs(battleSpeed: BattleSpeed = 1): number {
+  const longestVfxMs = computeVfxDurationMs('area', battleSpeed);
+  const impactEndMs =
+    Math.round(longestVfxMs * 0.48) +
+    Math.max(110, Math.round(longestVfxMs * 0.68));
+  return Math.max(200, impactEndMs + 80);
+}
+
 /**
  * At x5 / x10 speeds, or whenever Effects != Full, decorative particles are skipped
- * while keeping the primary hit/heal effect and floating numbers.
+ * while keeping projectiles, main hit/heal effects, status popups, and floating numbers.
  */
 export function shouldSkipDecorativeParticles(
   battleSpeed: BattleSpeed,
@@ -293,14 +307,14 @@ export function resolveEffectiveVfxConfig(
   const isHighSpeed = battleSpeed >= 5;
   const skipParticles = shouldSkipDecorativeParticles(battleSpeed, effectsMode);
 
-  // Compact mode or x5/x10: keep main hit/heal & numbers, skip decorative particles & ambient sweep
+  // Compact mode or x5/x10: keep projectiles, main hit/heal, status FX & numbers;
+  // skip decorative particles & ambient sweep to stay crisp and fast.
   if (effectsMode === 'compact' || isHighSpeed) {
     return {
       mode: effectsMode,
-      // At x5/x10 keep only main hit/heal + numbers (skip trailing projectiles & decorative particles)
-      showProjectiles: !isHighSpeed,
+      showProjectiles: true,
       showMainImpactOrHeal: true,
-      showStatusEffects: !isHighSpeed,
+      showStatusEffects: true,
       showDecorativeParticles: false,
       showFloatingNumbers: true,
       showAmbientSweep: false,

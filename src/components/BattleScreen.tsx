@@ -74,6 +74,8 @@ import {
   type RowExposureState,
 } from '../utils/battleDisplay';
 import {
+  computeFxCleanupDelayMs,
+  POPUP_CLEANUP_DELAY_MS,
   readBattleEffectsMode,
   writeBattleEffectsMode,
   type BattleEffectsMode,
@@ -161,7 +163,11 @@ export function BattleScreen() {
   const [effectsMode, setEffectsMode] = useState<BattleEffectsMode>(() =>
     readBattleEffectsMode()
   );
+  const [effectsDebugEnabled, setEffectsDebugEnabled] = useState<boolean>(false);
   const [cardToast, setCardToast] = useState<string | null>(null);
+  const popupCleanupTimersRef = useRef<Map<string, number>>(new Map());
+  const fxCleanupTimersRef = useRef<Map<string, number>>(new Map());
+  const explodedCleanupTimersRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     setSelectedLoopCount(autoRepeatLimit);
@@ -217,7 +223,7 @@ export function BattleScreen() {
     return item?.templateId ?? null;
   }, [battle, pilot]);
 
-  const bypassFx = skipAnimations || battleSpeed === 10;
+  const bypassFx = skipAnimations;
 
   const effectiveViewMode =
     battleViewMode ?? (isPhonePortrait ? 'radar' : 'radar');
@@ -236,35 +242,86 @@ export function BattleScreen() {
       !isPlayerCharging
   );
 
+  // Clean up all per-ID expiry timers on unmount
   useEffect(() => {
-    if (!battle || battle.popups.length === 0) return;
-    const ids = battle.popups.map((p) => p.id);
-    const timer = window.setTimeout(() => {
-      clearExpiredPopups(ids);
-    }, 1050);
-    return () => window.clearTimeout(timer);
+    return () => {
+      popupCleanupTimersRef.current.forEach((tId) => window.clearTimeout(tId));
+      popupCleanupTimersRef.current.clear();
+      fxCleanupTimersRef.current.forEach((tId) => window.clearTimeout(tId));
+      fxCleanupTimersRef.current.clear();
+      explodedCleanupTimersRef.current.forEach((tId) => window.clearTimeout(tId));
+      explodedCleanupTimersRef.current.clear();
+    };
+  }, []);
+
+  // Per-ID popup expiry so overlapping turns never cancel or prematurely wipe active popups
+  useEffect(() => {
+    if (!battle) return;
+    const activeIds = new Set(battle.popups.map((p) => p.id));
+
+    for (const p of battle.popups) {
+      if (!popupCleanupTimersRef.current.has(p.id)) {
+        const timerId = window.setTimeout(() => {
+          popupCleanupTimersRef.current.delete(p.id);
+          clearExpiredPopups([p.id]);
+        }, POPUP_CLEANUP_DELAY_MS);
+        popupCleanupTimersRef.current.set(p.id, timerId);
+      }
+    }
+
+    popupCleanupTimersRef.current.forEach((timerId, id) => {
+      if (!activeIds.has(id)) {
+        window.clearTimeout(timerId);
+        popupCleanupTimersRef.current.delete(id);
+      }
+    });
   }, [battle?.popups, clearExpiredPopups]);
 
+  // Per-ID FX expiry with speed-scaled delay that always outlives the full animation at x1..x10
   useEffect(() => {
-    if (!battle || battle.fxEvents.length === 0) return;
-    const ids = battle.fxEvents.map((f) => f.id);
-    const fxCleanupMs = Math.max(
-      120,
-      Math.round(680 / Math.max(1, battleSpeed))
-    );
-    const timer = window.setTimeout(() => {
-      clearExpiredFx(ids);
-    }, fxCleanupMs);
-    return () => window.clearTimeout(timer);
+    if (!battle) return;
+    const activeIds = new Set(battle.fxEvents.map((f) => f.id));
+    const fxCleanupMs = computeFxCleanupDelayMs(battleSpeed);
+
+    for (const fx of battle.fxEvents) {
+      if (!fxCleanupTimersRef.current.has(fx.id)) {
+        const timerId = window.setTimeout(() => {
+          fxCleanupTimersRef.current.delete(fx.id);
+          clearExpiredFx([fx.id]);
+        }, fxCleanupMs);
+        fxCleanupTimersRef.current.set(fx.id, timerId);
+      }
+    }
+
+    fxCleanupTimersRef.current.forEach((timerId, id) => {
+      if (!activeIds.has(id)) {
+        window.clearTimeout(timerId);
+        fxCleanupTimersRef.current.delete(id);
+      }
+    });
   }, [battle?.fxEvents, battleSpeed, clearExpiredFx]);
 
+  // Per-ID defeat/explosion expiry
   useEffect(() => {
-    if (!battle || battle.explodedUnitIds.length === 0) return;
-    const ids = [...battle.explodedUnitIds];
-    const timer = window.setTimeout(() => {
-      clearExplodedUnits(ids);
-    }, 640);
-    return () => window.clearTimeout(timer);
+    if (!battle) return;
+    const activeIds = new Set(battle.explodedUnitIds);
+
+    for (const unitId of battle.explodedUnitIds) {
+      if (!explodedCleanupTimersRef.current.has(unitId)) {
+        const timerId = window.setTimeout(() => {
+          explodedCleanupTimersRef.current.delete(unitId);
+          clearExplodedUnits([unitId]);
+        }, 640);
+        explodedCleanupTimersRef.current.set(unitId, timerId);
+      }
+    }
+
+    explodedCleanupTimersRef.current.forEach((timerId, id) => {
+      if (!activeIds.has(id)) {
+        window.clearTimeout(timerId);
+        explodedCleanupTimersRef.current.delete(id);
+      }
+    });
   }, [battle?.explodedUnitIds, clearExplodedUnits]);
 
   useEffect(() => {
@@ -875,6 +932,7 @@ export function BattleScreen() {
           speechBubblesEnabled={speechBubblesEnabled}
           battleSpeed={battleSpeed}
           effectsMode={effectsMode}
+          effectsDebugEnabled={effectsDebugEnabled}
           playerWeaponId={playerWeaponId}
           layoutMode={layoutMode}
           onSelectEnemy={(id) => {
@@ -1916,6 +1974,26 @@ export function BattleScreen() {
               </span>
               <span className="font-mono-nums text-[12px]">
                 {skipAnimations ? 'ON' : 'OFF'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="battle-toggle-effects-debug"
+              onClick={() => setEffectsDebugEnabled((prev) => !prev)}
+              aria-pressed={effectsDebugEnabled}
+              className={`min-h-[44px] px-3.5 rounded-lg border text-[13px] font-semibold flex items-center justify-between cursor-pointer ${
+                effectsDebugEnabled
+                  ? 'border-amber-400 bg-amber-500/20 text-amber-200'
+                  : 'border-slate-700 bg-slate-900 text-slate-300'
+              }`}
+            >
+              <span className="inline-flex items-center gap-2.5">
+                <Info className="w-4 h-4 text-amber-400" />
+                <span>{t('battle.effectsDebug')}</span>
+              </span>
+              <span className="font-mono-nums text-[12px]">
+                {effectsDebugEnabled ? 'ON' : 'OFF'}
               </span>
             </button>
 

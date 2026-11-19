@@ -827,7 +827,8 @@ export type CombatLogTemplateKey =
   | 'log.scanReveal'
   | 'log.invincibleBlock'
   | 'log.silencedBlocked'
-  | 'log.wingmanChat';
+  | 'log.wingmanChat'
+  | 'log.unitMovesRow';
 
 export interface CombatLogEntry {
   id: string;

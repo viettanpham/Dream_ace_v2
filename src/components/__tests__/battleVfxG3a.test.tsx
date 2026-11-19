@@ -252,16 +252,18 @@ describe('G3a Pure Functions: Weapon VFX selection, FIFO queue limit, speed scal
       animationsSkipped: false,
     });
 
-    // Full at x5/x10: keep main hit/heal + numbers, skip decorative particles & projectiles
+    // Full at x5/x10: keep projectiles, main hit/heal, status FX & numbers; skip decorative particles
     expect(resolveEffectiveVfxConfig('full', 5, false, false)).toMatchObject({
-      showProjectiles: false,
+      showProjectiles: true,
       showMainImpactOrHeal: true,
+      showStatusEffects: true,
       showDecorativeParticles: false,
       showFloatingNumbers: true,
     });
     expect(resolveEffectiveVfxConfig('full', 10, false, false)).toMatchObject({
-      showProjectiles: false,
+      showProjectiles: true,
       showMainImpactOrHeal: true,
+      showStatusEffects: true,
       showDecorativeParticles: false,
       showFloatingNumbers: true,
     });
@@ -533,7 +535,7 @@ describe('G3a Component Tests: Manual-only aim line, HTML-only VFX overlay, redu
     const svg = container!.querySelector('svg');
     expect(svg!.querySelector('[data-testid^="radar-fx-"]')).toBeNull();
 
-    // At x5: smoke particles and projectiles are skipped, while main impact flash remains
+    // At x5: decorative smoke particles are skipped, while projectile & main impact flash remain
     act(() => {
       root!.render(
         createElement(BattleRadarView, {
@@ -559,7 +561,7 @@ describe('G3a Component Tests: Manual-only aim line, HTML-only VFX overlay, redu
     ).toBeNull();
     expect(
       container!.querySelector('[data-testid="vfx-missile-fx_missile-e1"]')
-    ).toBeNull();
+    ).not.toBeNull();
     expect(
       container!.querySelector('[data-testid="vfx-crit-flash-fx_missile-e1"]')
     ).not.toBeNull();

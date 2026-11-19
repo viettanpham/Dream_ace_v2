@@ -132,9 +132,8 @@ export function getPrefersReducedMotion(): boolean {
     return false;
   }
   try {
-    return Boolean(
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    );
+    const mql = window.matchMedia('(prefers-reduced-motion: reduce)');
+    return mql?.matches === true;
   } catch {
     return false;
   }
@@ -150,20 +149,31 @@ export function usePrefersReducedMotion(): boolean {
       typeof window === 'undefined' ||
       typeof window.matchMedia !== 'function'
     ) {
+      setReduced(false);
       return;
     }
-    const mql = window.matchMedia('(prefers-reduced-motion: reduce)');
-    setReduced(Boolean(mql.matches));
+    let mql: MediaQueryList | null = null;
+    try {
+      mql = window.matchMedia('(prefers-reduced-motion: reduce)');
+    } catch {
+      setReduced(false);
+      return;
+    }
+    if (!mql) {
+      setReduced(false);
+      return;
+    }
+    setReduced(mql.matches === true);
     const onChange = (e: MediaQueryListEvent) => {
-      setReduced(Boolean(e.matches));
+      setReduced(e.matches === true);
     };
     if (typeof mql.addEventListener === 'function') {
       mql.addEventListener('change', onChange);
-      return () => mql.removeEventListener('change', onChange);
+      return () => mql!.removeEventListener('change', onChange);
     }
     if (typeof mql.addListener === 'function') {
       mql.addListener(onChange);
-      return () => mql.removeListener(onChange);
+      return () => mql!.removeListener(onChange);
     }
     return undefined;
   }, []);

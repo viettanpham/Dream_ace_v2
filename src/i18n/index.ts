@@ -627,6 +627,19 @@ function formatCombatLogBody(
       });
     }
 
+    case 'log.unitMovesRow': {
+      const rowKey =
+        p.row === 'front'
+          ? 'common.frontRow'
+          : p.row === 'middle'
+          ? 'common.middleRow'
+          : 'common.backRow';
+      return translate(lang, 'log.unitMovesRow', {
+        actor: String(p.actor ?? ''),
+        row: translate(lang, rowKey),
+      });
+    }
+
     default:
       return '';
   }

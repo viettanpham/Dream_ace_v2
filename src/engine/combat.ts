@@ -2353,6 +2353,17 @@ function resolveUnitActionCore(
             templateKey: 'log.buffApplied',
             params: { actor: act.name, skillId: skill.id, spCost: usability.spCost },
           });
+          if (targetRetreatRow !== act.row) {
+            logs.push({
+              id: nextId('log'),
+              round,
+              actorName: act.name,
+              actorSide: act.side,
+              tag: 'SKILL',
+              templateKey: 'log.unitMovesRow',
+              params: { actor: act.name, row: targetRetreatRow },
+            });
+          }
           return {
             updatedUnits: nextUnits,
             logEntries: logs,

@@ -33,6 +33,32 @@ export interface ManualAimLineSpec {
   isAllySupport: boolean;
 }
 
+export interface RowSlideEffect {
+  id: string;
+  unitId: string;
+  side: CombatSide;
+  fromPos: PopupAnchorPoint;
+  toPos: PopupAnchorPoint;
+  durationMs: number;
+}
+
+export interface RectLike {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+export interface OverlayPoint {
+  x: number;
+  y: number;
+  xPct: number;
+  yPct: number;
+  leftCss: string;
+  topCss: string;
+  usedFallback: boolean;
+}
+
 interface BattleVfxOverlayProps {
   battle: BattleState;
   containerRef: React.RefObject<HTMLDivElement | null>;
@@ -46,17 +72,126 @@ interface BattleVfxOverlayProps {
   manualAimLine: ManualAimLineSpec | null;
   hitFlashUnitIds: Set<string>;
   defeatFadingUnitIds: Set<string>;
+  rowSlides?: RowSlideEffect[];
+  renderedPopupCount?: number;
+  effectsDebugEnabled?: boolean;
 }
 
-interface PixelPoint {
-  x: number;
-  y: number;
+function isFinitePositive(n: number): boolean {
+  return Number.isFinite(n) && n > 0;
+}
+
+function isValidRect(rect: RectLike | null | undefined): rect is RectLike {
+  return Boolean(
+    rect &&
+      Number.isFinite(rect.left) &&
+      Number.isFinite(rect.top) &&
+      isFinitePositive(rect.width) &&
+      isFinitePositive(rect.height)
+  );
 }
 
 /**
- * Computes unit center in container-relative pixels from the live unit marker's bounding box.
- * Falls back to proportional viewBox coordinates when bounding rects are empty (e.g. JSDOM).
+ * Projects a radar SVG layout point into overlay coordinates relative to the radar container.
+ * Uses xMidYMid meet pixel projection when the container has a real non-zero box, and falls back
+ * to proportional container percentages when container measurement is 0 or invalid.
  */
+export function resolveSvgPointInOverlay(
+  svgPos: PopupAnchorPoint | null | undefined,
+  containerRect: RectLike | null | undefined,
+  vw: number,
+  vh: number
+): OverlayPoint | null {
+  if (
+    !svgPos ||
+    !Number.isFinite(svgPos.x) ||
+    !Number.isFinite(svgPos.y)
+  ) {
+    return null;
+  }
+  const safeVw = isFinitePositive(vw) ? vw : 720;
+  const safeVh = isFinitePositive(vh) ? vh : 420;
+
+  if (isValidRect(containerRect)) {
+    const scale = Math.min(
+      containerRect.width / safeVw,
+      containerRect.height / safeVh
+    );
+    const renderedW = safeVw * scale;
+    const renderedH = safeVh * scale;
+    const offsetX = (containerRect.width - renderedW) / 2;
+    const offsetY = (containerRect.height - renderedH) / 2;
+    const x = offsetX + svgPos.x * scale;
+    const y = offsetY + svgPos.y * scale;
+    const xPct = Math.max(0, Math.min(100, (x / containerRect.width) * 100));
+    const yPct = Math.max(0, Math.min(100, (y / containerRect.height) * 100));
+    return {
+      x,
+      y,
+      xPct,
+      yPct,
+      leftCss: `${x.toFixed(1)}px`,
+      topCss: `${y.toFixed(1)}px`,
+      usedFallback: true,
+    };
+  }
+
+  // Container bounding rect is 0 or unavailable (e.g. pre-layout or JSDOM):
+  // use proportional percentage of the radar container derived from radar layout.
+  const xPct = Math.max(0, Math.min(100, (svgPos.x / safeVw) * 100));
+  const yPct = Math.max(0, Math.min(100, (svgPos.y / safeVh) * 100));
+  return {
+    x: svgPos.x,
+    y: svgPos.y,
+    xPct,
+    yPct,
+    leftCss: `${xPct.toFixed(2)}%`,
+    topCss: `${yPct.toFixed(2)}%`,
+    usedFallback: true,
+  };
+}
+
+/**
+ * Resolves a unit's center in container-relative coordinates.
+ * Prefers a valid measured bounding rect inside the radar container, and falls back to
+ * proportional radar-layout coordinates whenever the measured box is 0, NaN, or out of bounds.
+ */
+export function resolveOverlayUnitPoint(
+  unitId: string,
+  containerRect: RectLike | null | undefined,
+  markerRect: RectLike | null | undefined,
+  svgPosMap: Map<string, PopupAnchorPoint>,
+  vw: number,
+  vh: number
+): OverlayPoint | null {
+  if (isValidRect(containerRect) && isValidRect(markerRect)) {
+    const x = markerRect.left - containerRect.left + markerRect.width / 2;
+    const y = markerRect.top - containerRect.top + markerRect.height / 2;
+    if (
+      Number.isFinite(x) &&
+      Number.isFinite(y) &&
+      x > 0 &&
+      y > 0 &&
+      x < containerRect.width &&
+      y < containerRect.height
+    ) {
+      const xPct = (x / containerRect.width) * 100;
+      const yPct = (y / containerRect.height) * 100;
+      return {
+        x,
+        y,
+        xPct,
+        yPct,
+        leftCss: `${x.toFixed(1)}px`,
+        topCss: `${y.toFixed(1)}px`,
+        usedFallback: false,
+      };
+    }
+  }
+
+  return resolveSvgPointInOverlay(svgPosMap.get(unitId), containerRect, vw, vh);
+}
+
 function measureUnitCenter(
   unitId: string,
   containerEl: HTMLDivElement | null,
@@ -64,39 +199,16 @@ function measureUnitCenter(
   svgPosMap: Map<string, PopupAnchorPoint>,
   vw: number,
   vh: number
-): PixelPoint | null {
-  const cRect = containerEl?.getBoundingClientRect();
-  const hasRealBox = Boolean(cRect && cRect.width > 0 && cRect.height > 0);
-  const markerEl = markerMap?.get(unitId);
-
-  if (hasRealBox && cRect && markerEl) {
-    const mRect = markerEl.getBoundingClientRect();
-    if (mRect.width > 0 || mRect.height > 0) {
-      return {
-        x: mRect.left - cRect.left + mRect.width / 2,
-        y: mRect.top - cRect.top + mRect.height / 2,
-      };
-    }
-  }
-
-  const svgPos = svgPosMap.get(unitId);
-  if (!svgPos) return null;
-
-  if (hasRealBox && cRect) {
-    // Preserve aspect ratio mapping (meet) matching the SVG's xMidYMid meet scaling
-    const scale = Math.min(cRect.width / Math.max(1, vw), cRect.height / Math.max(1, vh));
-    const renderedW = vw * scale;
-    const renderedH = vh * scale;
-    const offsetX = (cRect.width - renderedW) / 2;
-    const offsetY = (cRect.height - renderedH) / 2;
-    return {
-      x: offsetX + svgPos.x * scale,
-      y: offsetY + svgPos.y * scale,
-    };
-  }
-
-  // Fallback for JSDOM / pre-layout measurements
-  return { x: svgPos.x, y: svgPos.y };
+): OverlayPoint | null {
+  const cRect = containerEl?.getBoundingClientRect() ?? null;
+  const markerEl = markerMap?.get(unitId) ?? null;
+  // Measure the ring-centered hit-area rect inside the marker so nameplates/status icons
+  // below the marker do not skew the vertical center.
+  const hitEl = markerEl?.querySelector<Element>(
+    `[data-testid="radar-hit-area-${unitId}"]`
+  );
+  const mRect = (hitEl ?? markerEl)?.getBoundingClientRect() ?? null;
+  return resolveOverlayUnitPoint(unitId, cRect, mRect, svgPosMap, vw, vh);
 }
 
 function resolveFxActorAndTargets(
@@ -151,10 +263,11 @@ function getTeamPalette(side: CombatSide): {
 }
 
 /**
- * Firefox-safe HTML overlay rendering ALL animated battle visual effects:
+ * Firefox-safe HTML overlay rendering ALL animated battle visual effects inside the radar container:
  * - Uses ONLY absolutely positioned HTML elements with transform: translate3d/rotate/scale and opacity.
  * - Zero animated SVG transforms, zero transform-box, zero offset-path, zero SVG SMIL.
- * - Computes positions from unit marker bounding boxes at event time so any radar scale works.
+ * - Computes positions relative to the radar container and falls back to proportional radar-layout
+ *   positions if bounding-box measurement is 0 or invalid instead of skipping the effect.
  * - Enforces max 2 simultaneous status effects per unit with FIFO queuing.
  */
 export function BattleVfxOverlay({
@@ -170,6 +283,9 @@ export function BattleVfxOverlay({
   manualAimLine,
   hitFlashUnitIds,
   defeatFadingUnitIds,
+  rowSlides = [],
+  renderedPopupCount = 0,
+  effectsDebugEnabled = false,
 }: BattleVfxOverlayProps) {
   const { t } = useI18n();
   const [unitQueue, setUnitQueue] = useState<UnitEffectQueueState<QueuedUnitVfx>>(
@@ -181,15 +297,35 @@ export function BattleVfxOverlay({
   const prevUnitsRef = useRef<CombatUnit[]>(battle.units);
   const activeTimersRef = useRef<Map<string, number>>(new Map());
   const fxPointSnapshotRef = useRef<
-    Map<string, { from: PixelPoint; targets: Record<string, PixelPoint> }>
+    Map<
+      string,
+      { from: OverlayPoint; targets: Record<string, OverlayPoint>; usedFallback: boolean }
+    >
   >(new Map());
+  const seenCreatedIdsRef = useRef<Set<string>>(new Set());
+  const lastTurnCounterRef = useRef<number>(battle.turnCounter);
 
-  // Re-measure overlay coordinates cleanly on resize
+  // Re-measure overlay coordinates cleanly on window resize and container ResizeObserver updates
   useEffect(() => {
     const onResize = () => setLayoutTick((n) => n + 1);
     window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
+
+    let observer: ResizeObserver | null = null;
+    if (
+      typeof ResizeObserver !== 'undefined' &&
+      containerRef.current
+    ) {
+      observer = new ResizeObserver(() => {
+        setLayoutTick((n) => n + 1);
+      });
+      observer.observe(containerRef.current);
+    }
+
+    return () => {
+      window.removeEventListener('resize', onResize);
+      observer?.disconnect();
+    };
+  }, [containerRef]);
 
   // Cleanup active timers on unmount
   useEffect(() => {
@@ -199,6 +335,12 @@ export function BattleVfxOverlay({
     };
   }, []);
 
+  // Reset debug seen-ID tracker when a brand-new battle begins
+  if (battle.turnCounter < lastTurnCounterRef.current) {
+    seenCreatedIdsRef.current.clear();
+  }
+  lastTurnCounterRef.current = battle.turnCounter;
+
   // Derive status effects from newly appended battle events & unit state transitions
   useEffect(() => {
     const prevCount = prevEventCountRef.current;
@@ -207,6 +349,8 @@ export function BattleVfxOverlay({
     const newEvents =
       battle.events.length > prevCount
         ? battle.events.slice(prevCount)
+        : battle.events.length < prevCount && battle.turnCounter <= 1
+        ? battle.events
         : [];
 
     prevEventCountRef.current = battle.events.length;
@@ -245,6 +389,7 @@ export function BattleVfxOverlay({
   }, [
     battle.events,
     battle.units,
+    battle.turnCounter,
     battleSpeed,
     vfxConfig.showStatusEffects,
     vfxConfig.animationsSkipped,
@@ -290,7 +435,7 @@ export function BattleVfxOverlay({
     });
   }, [unitQueue]);
 
-  // Capture bounding-box positions at event time for active CombatFxEvents
+  // Capture container-relative positions (with proportional fallback) for active CombatFxEvents
   const fxRenderItems = useMemo(() => {
     void layoutTick;
     if (
@@ -311,7 +456,8 @@ export function BattleVfxOverlay({
       const { actor, targetIds } = resolveFxActorAndTargets(fx, battle);
       let snap = fxPointSnapshotRef.current.get(fx.id);
 
-      if (!snap) {
+      // Re-measure if no snapshot yet OR if the cached snapshot was a pre-layout fallback
+      if (!snap || snap.usedFallback) {
         const fromPt = actor
           ? measureUnitCenter(
               actor.id,
@@ -322,7 +468,8 @@ export function BattleVfxOverlay({
               vh
             )
           : null;
-        const targetPts: Record<string, PixelPoint> = {};
+        const targetPts: Record<string, OverlayPoint> = {};
+        let anyFallback = Boolean(fromPt?.usedFallback);
         for (const tid of targetIds) {
           const pt = measureUnitCenter(
             tid,
@@ -332,11 +479,17 @@ export function BattleVfxOverlay({
             vw,
             vh
           );
-          if (pt) targetPts[tid] = pt;
+          if (pt) {
+            targetPts[tid] = pt;
+            if (pt.usedFallback) anyFallback = true;
+          }
         }
         if (fromPt) {
-          snap = { from: fromPt, targets: targetPts };
-          fxPointSnapshotRef.current.set(fx.id, snap);
+          snap = { from: fromPt, targets: targetPts, usedFallback: anyFallback };
+          // Only lock the snapshot once real non-fallback measurements are available
+          if (!anyFallback) {
+            fxPointSnapshotRef.current.set(fx.id, snap);
+          }
         }
       }
 
@@ -376,7 +529,7 @@ export function BattleVfxOverlay({
     layoutTick,
   ]);
 
-  // Measure Manual-only thin targeting line from live bounding boxes
+  // Measure Manual-only thin targeting line from live bounding boxes (or proportional fallback)
   const manualAimGeometry = useMemo(() => {
     void layoutTick;
     if (!manualAimLine) return null;
@@ -406,15 +559,15 @@ export function BattleVfxOverlay({
 
     const ux = dx / dist;
     const uy = dy / dist;
-    const startX = from.x + ux * pad;
-    const startY = from.y + uy * pad;
     const length = dist - pad * 2;
     const angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
 
     return {
       ...manualAimLine,
-      startX,
-      startY,
+      leftCss: from.leftCss,
+      topCss: from.topCss,
+      offsetX: ux * pad,
+      offsetY: uy * pad,
       length,
       angleDeg,
     };
@@ -423,7 +576,7 @@ export function BattleVfxOverlay({
   const hitFlashDurationMs = computeHitFlashDurationMs(battleSpeed);
   const defeatFadeDurationMs = computeDefeatFadeDurationMs(battleSpeed);
 
-  const unitCenter = (unitId: string): PixelPoint | null =>
+  const unitCenter = (unitId: string): OverlayPoint | null =>
     measureUnitCenter(
       unitId,
       containerRef.current,
@@ -435,6 +588,36 @@ export function BattleVfxOverlay({
 
   const activeStatusEffects = Object.values(unitQueue.activeByUnit).flat();
 
+  // Compute Effects Debug counts synchronously (created / active / rendered)
+  for (const fx of battle.fxEvents) seenCreatedIdsRef.current.add(`fx:${fx.id}`);
+  for (const pop of battle.popups) seenCreatedIdsRef.current.add(`pop:${pop.id}`);
+  for (const st of activeStatusEffects) seenCreatedIdsRef.current.add(`st:${st.id}`);
+  for (const sl of rowSlides) seenCreatedIdsRef.current.add(`slide:${sl.id}`);
+
+  const debugCreatedCount = seenCreatedIdsRef.current.size;
+  const debugActiveCount =
+    battle.fxEvents.length +
+    battle.popups.length +
+    activeStatusEffects.length +
+    rowSlides.length;
+
+  const renderedFxCount = fxRenderItems.filter(
+    (item) =>
+      item.snap &&
+      item.targetIds.some((tid) => Boolean(item.snap?.targets[tid]))
+  ).length;
+  const renderedStatusCount = vfxConfig.showStatusEffects
+    ? activeStatusEffects.filter((st) => Boolean(unitCenter(st.unitId))).length
+    : 0;
+  const renderedSlideCount = !vfxConfig.animationsSkipped ? rowSlides.length : 0;
+  const debugRenderedCount =
+    renderedFxCount +
+    renderedPopupCount +
+    renderedStatusCount +
+    renderedSlideCount;
+
+  const containerRectNow = containerRef.current?.getBoundingClientRect() ?? null;
+
   return (
     <div
       data-testid="radar-vfx-overlay"
@@ -442,6 +625,19 @@ export function BattleVfxOverlay({
       data-particles-enabled={vfxConfig.showDecorativeParticles ? 'true' : 'false'}
       className="pointer-events-none absolute inset-0 overflow-hidden z-20"
     >
+      {/* Hidden unless "Effects debug" is enabled in the "..." menu */}
+      {effectsDebugEnabled && (
+        <div
+          data-testid="radar-effects-debug-counter"
+          data-created={debugCreatedCount}
+          data-active={debugActiveCount}
+          data-rendered={debugRenderedCount}
+          className="pointer-events-none absolute top-1.5 left-1.5 z-30 rounded border border-amber-400/70 bg-[#050a12]/90 px-2 py-0.5 font-mono-nums text-[11px] font-semibold text-amber-200 shadow"
+        >
+          FX {debugCreatedCount} / {debugActiveCount} / {debugRenderedCount}
+        </div>
+      )}
+
       {/* Pure HTML Ambient Radar Sweep (transform rotate only; no SVG transform) */}
       {vfxConfig.showAmbientSweep && (
         <div
@@ -462,14 +658,14 @@ export function BattleVfxOverlay({
           data-to={manualAimGeometry.toId}
           style={{
             position: 'absolute',
-            left: 0,
-            top: 0,
+            left: manualAimGeometry.leftCss,
+            top: manualAimGeometry.topCss,
             width: `${manualAimGeometry.length.toFixed(1)}px`,
             height: '2px',
             transformOrigin: '0% 50%',
-            transform: `translate3d(${manualAimGeometry.startX.toFixed(
+            transform: `translate3d(${manualAimGeometry.offsetX.toFixed(
               1
-            )}px, ${manualAimGeometry.startY.toFixed(1)}px, 0) rotate(${manualAimGeometry.angleDeg.toFixed(
+            )}px, ${manualAimGeometry.offsetY.toFixed(1)}px, 0) rotate(${manualAimGeometry.angleDeg.toFixed(
               2
             )}deg)`,
             background: manualAimGeometry.isAllySupport
@@ -495,6 +691,49 @@ export function BattleVfxOverlay({
         </div>
       )}
 
+      {/* Short compositor-only slide animation when the engine moves a unit to another row */}
+      {!vfxConfig.animationsSkipped &&
+        rowSlides.map((slide) => {
+          const fromPt = resolveSvgPointInOverlay(
+            slide.fromPos,
+            containerRectNow,
+            vw,
+            vh
+          );
+          const toPt = resolveSvgPointInOverlay(
+            slide.toPos,
+            containerRectNow,
+            vw,
+            vh
+          );
+          if (!fromPt || !toPt) return null;
+          const dx = toPt.x - fromPt.x;
+          const dy = toPt.y - fromPt.y;
+          const palette = getTeamPalette(slide.side);
+          return (
+            <div
+              key={slide.id}
+              data-testid={`vfx-row-slide-${slide.unitId}`}
+              className="vfx-row-slide absolute rounded-full"
+              style={
+                {
+                  left: fromPt.leftCss,
+                  top: fromPt.topCss,
+                  width: '32px',
+                  height: '32px',
+                  marginLeft: '-16px',
+                  marginTop: '-16px',
+                  border: `2px solid ${palette.primary}`,
+                  backgroundColor: palette.glow,
+                  '--dx': `${dx.toFixed(1)}px`,
+                  '--dy': `${dy.toFixed(1)}px`,
+                  '--vfx-dur': `${slide.durationMs}ms`,
+                } as CSSProperties
+              }
+            />
+          );
+        })}
+
       {/* Weapon Attack Visual Effects (HTML translate3d + opacity only) */}
       {fxRenderItems.map(
         ({
@@ -518,6 +757,7 @@ export function BattleVfxOverlay({
               data-fx-kind={fx.kind}
               data-weapon-vfx={isHealFx ? 'heal' : weaponStyle}
               data-fx-duration={durationMs}
+              data-used-fallback={snap.usedFallback ? 'true' : 'false'}
               className="pointer-events-none absolute inset-0"
             >
               {targetIds.map((targetId, tIdx) => {
@@ -537,17 +777,17 @@ export function BattleVfxOverlay({
                     <div
                       key={targetId}
                       data-testid={`vfx-heal-ring-${targetId}`}
-                      className="vfx-ring-expand absolute left-0 top-0 rounded-full"
+                      className="vfx-ring-expand absolute rounded-full"
                       style={
                         {
+                          left: to.leftCss,
+                          top: to.topCss,
                           width: '44px',
                           height: '44px',
                           marginLeft: '-22px',
                           marginTop: '-22px',
                           border: '2px solid #34d399',
                           boxShadow: '0 0 10px rgba(52, 211, 153, 0.45)',
-                          '--tx': `${to.x.toFixed(1)}px`,
-                          '--ty': `${to.y.toFixed(1)}px`,
                           '--vfx-dur': `${vfxDurationMs}ms`,
                         } as CSSProperties
                       }
@@ -560,27 +800,38 @@ export function BattleVfxOverlay({
                 const dist = Math.max(12, Math.hypot(dx, dy));
                 const angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
 
-                // On dodge, overshoot slightly past the target
-                const endX =
-                  outcome === 'dodge' ? from.x + dx * 1.18 : to.x;
-                const endY =
-                  outcome === 'dodge' ? from.y + dy * 1.18 : to.y;
+                // Relative travel vector from `from` (overshoot slightly on dodge)
+                const relEndX = outcome === 'dodge' ? dx * 1.18 : dx;
+                const relEndY = outcome === 'dodge' ? dy * 1.18 : dy;
 
-                // Curve control waypoints for missiles (pure translate3d, zero offset-path)
+                // Curve control waypoints relative to `from` for missiles (pure translate3d, zero offset-path)
                 const curveSign = isAlly ? -1 : 1;
                 const nx = -dy / dist;
                 const ny = dx / dist;
                 const arcHeight = Math.min(46, Math.max(18, dist * 0.16)) * curveSign;
-                const mx1 = from.x + (endX - from.x) * 0.36 + nx * arcHeight;
-                const my1 = from.y + (endY - from.y) * 0.36 + ny * arcHeight;
-                const mx2 = from.x + (endX - from.x) * 0.72 + nx * (arcHeight * 0.65);
-                const my2 = from.y + (endY - from.y) * 0.72 + ny * (arcHeight * 0.65);
-                const ang1 =
-                  (Math.atan2(my1 - from.y, mx1 - from.x) * 180) / Math.PI;
+                const relMx1 = relEndX * 0.36 + nx * arcHeight;
+                const relMy1 = relEndY * 0.36 + ny * arcHeight;
+                const relMx2 = relEndX * 0.72 + nx * (arcHeight * 0.65);
+                const relMy2 = relEndY * 0.72 + ny * (arcHeight * 0.65);
+                const ang1 = (Math.atan2(relMy1, relMx1) * 180) / Math.PI;
                 const ang2 =
-                  (Math.atan2(my2 - my1, mx2 - mx1) * 180) / Math.PI;
+                  (Math.atan2(relMy2 - relMy1, relMx2 - relMx1) * 180) / Math.PI;
                 const ang3 =
-                  (Math.atan2(endY - my2, endX - mx2) * 180) / Math.PI;
+                  (Math.atan2(relEndY - relMy2, relEndX - relMx2) * 180) / Math.PI;
+
+                // Proportional smoke puff anchor positions
+                const puff1LeftCss = from.usedFallback
+                  ? `${(from.xPct + (to.xPct - from.xPct) * 0.36).toFixed(2)}%`
+                  : `${(from.x + relMx1).toFixed(1)}px`;
+                const puff1TopCss = from.usedFallback
+                  ? `${(from.yPct + (to.yPct - from.yPct) * 0.36).toFixed(2)}%`
+                  : `${(from.y + relMy1).toFixed(1)}px`;
+                const puff2LeftCss = from.usedFallback
+                  ? `${(from.xPct + (to.xPct - from.xPct) * 0.72).toFixed(2)}%`
+                  : `${(from.x + relMx2).toFixed(1)}px`;
+                const puff2TopCss = from.usedFallback
+                  ? `${(from.yPct + (to.yPct - from.yPct) * 0.72).toFixed(2)}%`
+                  : `${(from.y + relMy2).toFixed(1)}px`;
 
                 const impactDelayMs = Math.round(vfxDurationMs * 0.48);
                 const impactDurMs = Math.max(110, Math.round(vfxDurationMs * 0.68));
@@ -589,15 +840,17 @@ export function BattleVfxOverlay({
 
                 return (
                   <div key={targetId} className="absolute inset-0">
-                    {/* 1) PROJECTILE OR BEAM (skipped at x5/x10 high-speed compacting) */}
+                    {/* 1) PROJECTILE OR BEAM */}
                     {vfxConfig.showProjectiles && !isSecondaryAreaHit && (
                       <>
                         {weaponStyle === 'beam' && (
                           <div
                             data-testid={`vfx-beam-${fx.id}-${targetId}`}
-                            className="vfx-beam-fire absolute left-0 top-0"
+                            className="vfx-beam-fire absolute"
                             style={
                               {
+                                left: from.leftCss,
+                                top: from.topCss,
                                 width: `${dist.toFixed(1)}px`,
                                 height: isAlly ? '6px' : '8px',
                                 marginTop: isAlly ? '-3px' : '-4px',
@@ -607,8 +860,6 @@ export function BattleVfxOverlay({
                                   ? `linear-gradient(180deg, transparent, ${palette.primary}, #ffffff, ${palette.primary}, transparent)`
                                   : `repeating-linear-gradient(90deg, ${palette.primary} 0px, ${palette.core} 8px, #ef4444 14px)`,
                                 boxShadow: `0 0 10px ${palette.glow}`,
-                                '--sx': `${from.x.toFixed(1)}px`,
-                                '--sy': `${from.y.toFixed(1)}px`,
                                 '--ang': `${angleDeg.toFixed(2)}deg`,
                                 '--vfx-dur': `${vfxDurationMs}ms`,
                               } as CSSProperties
@@ -620,9 +871,11 @@ export function BattleVfxOverlay({
                           <>
                             <div
                               data-testid={`vfx-missile-${fx.id}-${targetId}`}
-                              className="vfx-missile-arc absolute left-0 top-0"
+                              className="vfx-missile-arc absolute"
                               style={
                                 {
+                                  left: from.leftCss,
+                                  top: from.topCss,
                                   width: '18px',
                                   height: '8px',
                                   marginLeft: '-9px',
@@ -633,14 +886,12 @@ export function BattleVfxOverlay({
                                     : 'polygon(0% 50%, 28% 0%, 100% 25%, 82% 50%, 100% 75%, 28% 100%)',
                                   background: `linear-gradient(90deg, ${palette.primary}, ${palette.core})`,
                                   boxShadow: `0 0 8px ${palette.glow}`,
-                                  '--sx': `${from.x.toFixed(1)}px`,
-                                  '--sy': `${from.y.toFixed(1)}px`,
-                                  '--mx1': `${mx1.toFixed(1)}px`,
-                                  '--my1': `${my1.toFixed(1)}px`,
-                                  '--mx2': `${mx2.toFixed(1)}px`,
-                                  '--my2': `${my2.toFixed(1)}px`,
-                                  '--ex': `${endX.toFixed(1)}px`,
-                                  '--ey': `${endY.toFixed(1)}px`,
+                                  '--mx1': `${relMx1.toFixed(1)}px`,
+                                  '--my1': `${relMy1.toFixed(1)}px`,
+                                  '--mx2': `${relMx2.toFixed(1)}px`,
+                                  '--my2': `${relMy2.toFixed(1)}px`,
+                                  '--dx': `${relEndX.toFixed(1)}px`,
+                                  '--dy': `${relEndY.toFixed(1)}px`,
                                   '--ang1': `${ang1.toFixed(2)}deg`,
                                   '--ang2': `${ang2.toFixed(2)}deg`,
                                   '--ang3': `${ang3.toFixed(2)}deg`,
@@ -651,23 +902,31 @@ export function BattleVfxOverlay({
                             {/* Decorative smoke trail puffs (Full mode at x1..x3 only) */}
                             {vfxConfig.showDecorativeParticles &&
                               [
-                                { px: mx1, py: my1, delay: Math.round(vfxDurationMs * 0.24) },
-                                { px: mx2, py: my2, delay: Math.round(vfxDurationMs * 0.48) },
+                                {
+                                  leftCss: puff1LeftCss,
+                                  topCss: puff1TopCss,
+                                  delay: Math.round(vfxDurationMs * 0.24),
+                                },
+                                {
+                                  leftCss: puff2LeftCss,
+                                  topCss: puff2TopCss,
+                                  delay: Math.round(vfxDurationMs * 0.48),
+                                },
                               ].map((puff, pIdx) => (
                                 <span
                                   key={pIdx}
                                   data-testid={`vfx-particle-smoke-${fx.id}-${pIdx}`}
-                                  className="vfx-smoke-puff absolute left-0 top-0 rounded-full"
+                                  className="vfx-smoke-puff absolute rounded-full"
                                   style={
                                     {
+                                      left: puff.leftCss,
+                                      top: puff.topCss,
                                       width: '9px',
                                       height: '9px',
                                       marginLeft: '-4.5px',
                                       marginTop: '-4.5px',
                                       backgroundColor: 'rgba(203, 213, 225, 0.55)',
                                       animationDelay: `${puff.delay}ms`,
-                                      '--px': `${puff.px.toFixed(1)}px`,
-                                      '--py': `${puff.py.toFixed(1)}px`,
                                       '--vfx-dur': `${Math.max(120, Math.round(vfxDurationMs * 0.65))}ms`,
                                     } as CSSProperties
                                   }
@@ -679,9 +938,11 @@ export function BattleVfxOverlay({
                         {(weaponStyle === 'cannon' || weaponStyle === 'area') && (
                           <div
                             data-testid={`vfx-cannon-${fx.id}-${targetId}`}
-                            className="vfx-cannon-fly absolute left-0 top-0"
+                            className="vfx-cannon-fly absolute"
                             style={
                               {
+                                left: from.leftCss,
+                                top: from.topCss,
                                 width: weaponStyle === 'area' ? '22px' : '20px',
                                 height: weaponStyle === 'area' ? '7px' : '5px',
                                 marginLeft: '-10px',
@@ -690,14 +951,12 @@ export function BattleVfxOverlay({
                                 borderRadius: isAlly ? '2px 9999px 9999px 2px' : '1px',
                                 background: `linear-gradient(90deg, transparent 0%, ${palette.primary} 42%, ${palette.core} 100%)`,
                                 boxShadow: `0 0 8px ${palette.glow}`,
-                                '--sx': `${from.x.toFixed(1)}px`,
-                                '--sy': `${from.y.toFixed(1)}px`,
-                                '--sx1': `${(from.x + (endX - from.x) * 0.14).toFixed(1)}px`,
-                                '--sy1': `${(from.y + (endY - from.y) * 0.14).toFixed(1)}px`,
-                                '--ex1': `${(from.x + (endX - from.x) * 0.86).toFixed(1)}px`,
-                                '--ey1': `${(from.y + (endY - from.y) * 0.86).toFixed(1)}px`,
-                                '--ex': `${endX.toFixed(1)}px`,
-                                '--ey': `${endY.toFixed(1)}px`,
+                                '--dx1': `${(relEndX * 0.14).toFixed(1)}px`,
+                                '--dy1': `${(relEndY * 0.14).toFixed(1)}px`,
+                                '--dx2': `${(relEndX * 0.86).toFixed(1)}px`,
+                                '--dy2': `${(relEndY * 0.86).toFixed(1)}px`,
+                                '--dx': `${relEndX.toFixed(1)}px`,
+                                '--dy': `${relEndY.toFixed(1)}px`,
                                 '--ang': `${angleDeg.toFixed(2)}deg`,
                                 '--vfx-dur': `${vfxDurationMs}ms`,
                               } as CSSProperties
@@ -711,15 +970,15 @@ export function BattleVfxOverlay({
                     {vfxConfig.showMainImpactOrHeal && outcome === 'dodge' && (
                       <div
                         data-testid={`vfx-dodge-${fx.id}-${targetId}`}
-                        className="vfx-dodge-slide absolute left-0 top-0 flex flex-col items-center"
+                        className="vfx-dodge-slide absolute flex flex-col items-center"
                         style={
                           {
+                            left: to.leftCss,
+                            top: to.topCss,
                             marginLeft: '-24px',
                             marginTop: '-24px',
                             width: '48px',
                             animationDelay: `${Math.round(impactDelayMs * 0.6)}ms`,
-                            '--tx': `${to.x.toFixed(1)}px`,
-                            '--ty': `${to.y.toFixed(1)}px`,
                             '--dodge-dx': isAlly ? '12px' : '-12px',
                             '--vfx-dur': `${impactDurMs}ms`,
                           } as CSSProperties
@@ -735,9 +994,11 @@ export function BattleVfxOverlay({
                       outcome === 'shield_absorbed' && (
                         <div
                           data-testid={`vfx-shield-ripple-${fx.id}-${targetId}`}
-                          className="vfx-ring-expand absolute left-0 top-0 rounded-full flex items-center justify-center"
+                          className="vfx-ring-expand absolute rounded-full flex items-center justify-center"
                           style={
                             {
+                              left: to.leftCss,
+                              top: to.topCss,
                               width: '50px',
                               height: '50px',
                               marginLeft: '-25px',
@@ -746,8 +1007,6 @@ export function BattleVfxOverlay({
                               boxShadow:
                                 'inset 0 0 8px rgba(56, 189, 248, 0.5), 0 0 12px rgba(56, 189, 248, 0.5)',
                               animationDelay: `${impactDelayMs}ms`,
-                              '--tx': `${to.x.toFixed(1)}px`,
-                              '--ty': `${to.y.toFixed(1)}px`,
                               '--vfx-dur': `${impactDurMs}ms`,
                             } as CSSProperties
                           }
@@ -758,9 +1017,11 @@ export function BattleVfxOverlay({
                       <>
                         <div
                           data-testid={`vfx-crit-flash-${fx.id}-${targetId}`}
-                          className="vfx-crit-flash absolute left-0 top-0"
+                          className="vfx-crit-flash absolute"
                           style={
                             {
+                              left: to.leftCss,
+                              top: to.topCss,
                               width: '56px',
                               height: '56px',
                               marginLeft: '-28px',
@@ -770,24 +1031,22 @@ export function BattleVfxOverlay({
                               background: 'rgba(254, 240, 138, 0.28)',
                               boxShadow: '0 0 16px rgba(250, 204, 21, 0.7)',
                               animationDelay: `${impactDelayMs}ms`,
-                              '--tx': `${to.x.toFixed(1)}px`,
-                              '--ty': `${to.y.toFixed(1)}px`,
                               '--vfx-dur': `${impactDurMs}ms`,
                             } as CSSProperties
                           }
                         />
                         <div
-                          className="vfx-ring-expand absolute left-0 top-0 rounded-full"
+                          className="vfx-ring-expand absolute rounded-full"
                           style={
                             {
+                              left: to.leftCss,
+                              top: to.topCss,
                               width: '66px',
                               height: '66px',
                               marginLeft: '-33px',
                               marginTop: '-33px',
                               border: '3px double #facc15',
                               animationDelay: `${impactDelayMs}ms`,
-                              '--tx': `${to.x.toFixed(1)}px`,
-                              '--ty': `${to.y.toFixed(1)}px`,
                               '--vfx-dur': `${impactDurMs}ms`,
                             } as CSSProperties
                           }
@@ -798,9 +1057,11 @@ export function BattleVfxOverlay({
                     {vfxConfig.showMainImpactOrHeal && outcome === 'normal' && (
                       <div
                         data-testid={`vfx-impact-${fx.id}-${targetId}`}
-                        className="vfx-ring-expand absolute left-0 top-0"
+                        className="vfx-ring-expand absolute"
                         style={
                           {
+                            left: to.leftCss,
+                            top: to.topCss,
                             width:
                               weaponStyle === 'area'
                                 ? isSecondaryAreaHit
@@ -846,8 +1107,6 @@ export function BattleVfxOverlay({
                                 ? palette.glow
                                 : 'transparent',
                             animationDelay: `${impactDelayMs}ms`,
-                            '--tx': `${to.x.toFixed(1)}px`,
-                            '--ty': `${to.y.toFixed(1)}px`,
                             '--vfx-dur': `${impactDurMs}ms`,
                           } as CSSProperties
                         }
@@ -872,9 +1131,11 @@ export function BattleVfxOverlay({
             <div
               key={`hit-${unitId}`}
               data-testid={`radar-hit-flash-${unitId}`}
-              className="vfx-hit-flash-html absolute left-0 top-0 rounded-full"
+              className="vfx-hit-flash-html absolute rounded-full"
               style={
                 {
+                  left: pt.leftCss,
+                  top: pt.topCss,
                   width: '44px',
                   height: '44px',
                   marginLeft: '-22px',
@@ -883,8 +1144,6 @@ export function BattleVfxOverlay({
                   backgroundColor: isShielded
                     ? 'rgba(56, 189, 248, 0.25)'
                     : 'rgba(255, 255, 255, 0.35)',
-                  '--tx': `${pt.x.toFixed(1)}px`,
-                  '--ty': `${pt.y.toFixed(1)}px`,
                   '--vfx-dur': `${hitFlashDurationMs}ms`,
                 } as CSSProperties
               }
@@ -901,17 +1160,17 @@ export function BattleVfxOverlay({
             <div
               key={`defeat-${unitId}`}
               data-testid={`radar-defeat-fade-${unitId}`}
-              className="vfx-defeat-html absolute left-0 top-0 rounded-full"
+              className="vfx-defeat-html absolute rounded-full"
               style={
                 {
+                  left: pt.leftCss,
+                  top: pt.topCss,
                   width: '48px',
                   height: '48px',
                   marginLeft: '-24px',
                   marginTop: '-24px',
                   border: '2px solid #f87171',
                   backgroundColor: 'rgba(239, 68, 68, 0.22)',
-                  '--tx': `${pt.x.toFixed(1)}px`,
-                  '--ty': `${pt.y.toFixed(1)}px`,
                   '--vfx-dur': `${defeatFadeDurationMs}ms`,
                 } as CSSProperties
               }
@@ -935,29 +1194,29 @@ export function BattleVfxOverlay({
                 className="absolute inset-0"
               >
                 <div
-                  className="vfx-ring-expand absolute left-0 top-0 rounded-full"
+                  className="vfx-ring-expand absolute rounded-full"
                   style={
                     {
+                      left: pt.leftCss,
+                      top: pt.topCss,
                       width: '48px',
                       height: '48px',
                       marginLeft: '-24px',
                       marginTop: '-24px',
                       border: '2.5px solid #34d399',
                       boxShadow: '0 0 10px rgba(52, 211, 153, 0.45)',
-                      '--tx': `${pt.x.toFixed(1)}px`,
-                      '--ty': `${pt.y.toFixed(1)}px`,
                       '--vfx-dur': dur,
                     } as CSSProperties
                   }
                 />
                 <div
-                  className="vfx-particle-rise absolute left-0 top-0 text-[12px] font-mono-nums font-bold text-emerald-300 drop-shadow-[0_1px_2px_rgba(0,0,0,0.95)] whitespace-nowrap"
+                  className="vfx-particle-rise absolute text-[12px] font-mono-nums font-bold text-emerald-300 drop-shadow-[0_1px_2px_rgba(0,0,0,0.95)] whitespace-nowrap"
                   style={
                     {
+                      left: pt.leftCss,
+                      top: pt.topCss,
                       marginLeft: '-18px',
                       marginTop: '-26px',
-                      '--tx': `${pt.x.toFixed(1)}px`,
-                      '--ty': `${pt.y.toFixed(1)}px`,
                       '--vfx-dur': dur,
                     } as CSSProperties
                   }
@@ -969,14 +1228,14 @@ export function BattleVfxOverlay({
                     <span
                       key={i}
                       data-testid={`vfx-particle-heal-${fx.id}-${i}`}
-                      className="vfx-particle-rise absolute left-0 top-0 text-[12px] font-bold text-emerald-300"
+                      className="vfx-particle-rise absolute text-[12px] font-bold text-emerald-300"
                       style={
                         {
+                          left: pt.leftCss,
+                          top: pt.topCss,
                           marginLeft: `${dx - 4}px`,
                           marginTop: '-8px',
                           animationDelay: `${i * 70}ms`,
-                          '--tx': `${pt.x.toFixed(1)}px`,
-                          '--ty': `${pt.y.toFixed(1)}px`,
                           '--vfx-dur': dur,
                         } as CSSProperties
                       }
@@ -997,29 +1256,29 @@ export function BattleVfxOverlay({
                 className="absolute inset-0"
               >
                 <div
-                  className="vfx-ring-expand absolute left-0 top-0 rounded-full"
+                  className="vfx-ring-expand absolute rounded-full"
                   style={
                     {
+                      left: pt.leftCss,
+                      top: pt.topCss,
                       width: '50px',
                       height: '50px',
                       marginLeft: '-25px',
                       marginTop: '-25px',
                       border: '2.5px solid #38bdf8',
                       boxShadow: '0 0 10px rgba(56, 189, 248, 0.5)',
-                      '--tx': `${pt.x.toFixed(1)}px`,
-                      '--ty': `${pt.y.toFixed(1)}px`,
                       '--vfx-dur': dur,
                     } as CSSProperties
                   }
                 />
                 <div
-                  className="vfx-particle-rise absolute left-0 top-0 text-[11px] font-mono-nums font-bold text-sky-300 whitespace-nowrap"
+                  className="vfx-particle-rise absolute text-[11px] font-mono-nums font-bold text-sky-300 whitespace-nowrap"
                   style={
                     {
+                      left: pt.leftCss,
+                      top: pt.topCss,
                       marginLeft: '-20px',
                       marginTop: '-24px',
-                      '--tx': `${pt.x.toFixed(1)}px`,
-                      '--ty': `${pt.y.toFixed(1)}px`,
                       '--vfx-dur': dur,
                     } as CSSProperties
                   }
@@ -1039,29 +1298,29 @@ export function BattleVfxOverlay({
                 className="absolute inset-0"
               >
                 <div
-                  className="vfx-ring-expand absolute left-0 top-0 rounded-full"
+                  className="vfx-ring-expand absolute rounded-full"
                   style={
                     {
+                      left: pt.leftCss,
+                      top: pt.topCss,
                       width: '44px',
                       height: '44px',
                       marginLeft: '-22px',
                       marginTop: '-22px',
                       border: '2px solid #c084fc',
                       backgroundColor: 'rgba(192, 132, 252, 0.16)',
-                      '--tx': `${pt.x.toFixed(1)}px`,
-                      '--ty': `${pt.y.toFixed(1)}px`,
                       '--vfx-dur': dur,
                     } as CSSProperties
                   }
                 />
                 <div
-                  className="vfx-particle-rise absolute left-0 top-0 text-[11px] font-mono-nums font-bold text-purple-300 whitespace-nowrap"
+                  className="vfx-particle-rise absolute text-[11px] font-mono-nums font-bold text-purple-300 whitespace-nowrap"
                   style={
                     {
+                      left: pt.leftCss,
+                      top: pt.topCss,
                       marginLeft: '-18px',
                       marginTop: '-24px',
-                      '--tx': `${pt.x.toFixed(1)}px`,
-                      '--ty': `${pt.y.toFixed(1)}px`,
                       '--vfx-dur': dur,
                     } as CSSProperties
                   }
@@ -1081,28 +1340,28 @@ export function BattleVfxOverlay({
                 className="absolute inset-0"
               >
                 <div
-                  className="vfx-ring-expand absolute left-0 top-0 rounded-full"
+                  className="vfx-ring-expand absolute rounded-full"
                   style={
                     {
+                      left: pt.leftCss,
+                      top: pt.topCss,
                       width: '46px',
                       height: '46px',
                       marginLeft: '-23px',
                       marginTop: '-23px',
                       border: '2px solid #4ade80',
-                      '--tx': `${pt.x.toFixed(1)}px`,
-                      '--ty': `${pt.y.toFixed(1)}px`,
                       '--vfx-dur': dur,
                     } as CSSProperties
                   }
                 />
                 <div
-                  className="vfx-particle-rise absolute left-0 top-0 px-1 rounded bg-emerald-950/90 border border-emerald-400/70 text-[11px] font-mono-nums font-bold text-emerald-200 whitespace-nowrap"
+                  className="vfx-particle-rise absolute px-1 rounded bg-emerald-950/90 border border-emerald-400/70 text-[11px] font-mono-nums font-bold text-emerald-200 whitespace-nowrap"
                   style={
                     {
+                      left: pt.leftCss,
+                      top: pt.topCss,
                       marginLeft: '-24px',
                       marginTop: '-26px',
-                      '--tx': `${pt.x.toFixed(1)}px`,
-                      '--ty': `${pt.y.toFixed(1)}px`,
                       '--vfx-dur': dur,
                     } as CSSProperties
                   }
@@ -1123,29 +1382,29 @@ export function BattleVfxOverlay({
               >
                 {/* Red outline pulse with short shake */}
                 <div
-                  className="vfx-debuff-shake absolute left-0 top-0 rounded-full"
+                  className="vfx-debuff-shake absolute rounded-full"
                   style={
                     {
+                      left: pt.leftCss,
+                      top: pt.topCss,
                       width: '46px',
                       height: '46px',
                       marginLeft: '-23px',
                       marginTop: '-23px',
                       border: '2px dashed #f87171',
                       boxShadow: '0 0 8px rgba(248, 113, 113, 0.45)',
-                      '--tx': `${pt.x.toFixed(1)}px`,
-                      '--ty': `${pt.y.toFixed(1)}px`,
                       '--vfx-dur': dur,
                     } as CSSProperties
                   }
                 />
                 <div
-                  className="vfx-particle-fall absolute left-0 top-0 px-1 rounded bg-red-950/90 border border-red-400/70 text-[11px] font-mono-nums font-bold text-red-200 whitespace-nowrap"
+                  className="vfx-particle-fall absolute px-1 rounded bg-red-950/90 border border-red-400/70 text-[11px] font-mono-nums font-bold text-red-200 whitespace-nowrap"
                   style={
                     {
+                      left: pt.leftCss,
+                      top: pt.topCss,
                       marginLeft: '-24px',
                       marginTop: '-10px',
-                      '--tx': `${pt.x.toFixed(1)}px`,
-                      '--ty': `${pt.y.toFixed(1)}px`,
                       '--vfx-dur': dur,
                     } as CSSProperties
                   }
@@ -1166,9 +1425,11 @@ export function BattleVfxOverlay({
               >
                 {/* Cracking & dissolving split shield arcs */}
                 <div
-                  className="vfx-shield-shard-left absolute left-0 top-0 rounded-l-full"
+                  className="vfx-shield-shard-left absolute rounded-l-full"
                   style={
                     {
+                      left: pt.leftCss,
+                      top: pt.topCss,
                       width: '22px',
                       height: '44px',
                       marginLeft: '-22px',
@@ -1176,16 +1437,16 @@ export function BattleVfxOverlay({
                       borderLeft: '3px solid #38bdf8',
                       borderTop: '3px solid #38bdf8',
                       borderBottom: '3px solid #38bdf8',
-                      '--tx': `${pt.x.toFixed(1)}px`,
-                      '--ty': `${pt.y.toFixed(1)}px`,
                       '--vfx-dur': dur,
                     } as CSSProperties
                   }
                 />
                 <div
-                  className="vfx-shield-shard-right absolute left-0 top-0 rounded-r-full"
+                  className="vfx-shield-shard-right absolute rounded-r-full"
                   style={
                     {
+                      left: pt.leftCss,
+                      top: pt.topCss,
                       width: '22px',
                       height: '44px',
                       marginLeft: '0px',
@@ -1193,20 +1454,18 @@ export function BattleVfxOverlay({
                       borderRight: '3px solid #f87171',
                       borderTop: '3px solid #f87171',
                       borderBottom: '3px solid #f87171',
-                      '--tx': `${pt.x.toFixed(1)}px`,
-                      '--ty': `${pt.y.toFixed(1)}px`,
                       '--vfx-dur': dur,
                     } as CSSProperties
                   }
                 />
                 <div
-                  className="vfx-particle-rise absolute left-0 top-0 px-1 rounded bg-slate-950/90 border border-sky-400/70 text-[11px] font-mono-nums font-bold text-sky-200 whitespace-nowrap"
+                  className="vfx-particle-rise absolute px-1 rounded bg-slate-950/90 border border-sky-400/70 text-[11px] font-mono-nums font-bold text-sky-200 whitespace-nowrap"
                   style={
                     {
+                      left: pt.leftCss,
+                      top: pt.topCss,
                       marginLeft: '-30px',
                       marginTop: '-26px',
-                      '--tx': `${pt.x.toFixed(1)}px`,
-                      '--ty': `${pt.y.toFixed(1)}px`,
                       '--vfx-dur': dur,
                     } as CSSProperties
                   }
@@ -1226,17 +1485,17 @@ export function BattleVfxOverlay({
                 className="absolute inset-0"
               >
                 <div
-                  className="vfx-stealth-veil absolute left-0 top-0 rounded-full"
+                  className="vfx-stealth-veil absolute rounded-full"
                   style={
                     {
+                      left: pt.leftCss,
+                      top: pt.topCss,
                       width: '46px',
                       height: '46px',
                       marginLeft: '-23px',
                       marginTop: '-23px',
                       border: '2px dashed #94a3b8',
                       backgroundColor: 'rgba(148, 163, 184, 0.18)',
-                      '--tx': `${pt.x.toFixed(1)}px`,
-                      '--ty': `${pt.y.toFixed(1)}px`,
                       '--vfx-dur': dur,
                     } as CSSProperties
                   }
@@ -1254,29 +1513,29 @@ export function BattleVfxOverlay({
               className="absolute inset-0"
             >
               <div
-                className="vfx-ring-expand absolute left-0 top-0 rounded-full"
+                className="vfx-ring-expand absolute rounded-full"
                 style={
                   {
+                    left: pt.leftCss,
+                    top: pt.topCss,
                     width: '56px',
                     height: '56px',
                     marginLeft: '-28px',
                     marginTop: '-28px',
                     border: '2px solid #facc15',
                     boxShadow: '0 0 12px rgba(250, 204, 21, 0.5)',
-                    '--tx': `${pt.x.toFixed(1)}px`,
-                    '--ty': `${pt.y.toFixed(1)}px`,
                     '--vfx-dur': dur,
                   } as CSSProperties
                 }
               />
               <div
-                className="vfx-particle-rise absolute left-0 top-0 px-1 rounded bg-slate-950/90 border border-amber-400/75 text-[11px] font-mono-nums font-bold text-amber-200 whitespace-nowrap"
+                className="vfx-particle-rise absolute px-1 rounded bg-slate-950/90 border border-amber-400/75 text-[11px] font-mono-nums font-bold text-amber-200 whitespace-nowrap"
                 style={
                   {
+                    left: pt.leftCss,
+                    top: pt.topCss,
                     marginLeft: '-30px',
                     marginTop: '-26px',
-                    '--tx': `${pt.x.toFixed(1)}px`,
-                    '--ty': `${pt.y.toFixed(1)}px`,
                     '--vfx-dur': dur,
                   } as CSSProperties
                 }
