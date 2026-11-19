@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Award,
@@ -91,7 +91,7 @@ import { UnitDetailSheet } from './UnitDetailSheet';
 
 const BATTLE_SPEEDS: BattleSpeed[] = [1, 2, 3, 5, 10];
 const PHONE_CYCLE_SPEEDS: BattleSpeed[] = [1, 2, 3];
-const REPEAT_OPTIONS: AutoRepeatLimit[] = [1, 5, 10, 'infinite'];
+const REPEAT_OPTIONS: AutoRepeatLimit[] = [1, 5, 10, 20, 'infinite'];
 const ROWS_ORDER: CombatRow[] = ['front', 'middle', 'back'];
 
 function getTeamAccentVar(unit: CombatUnit): string {
@@ -148,6 +148,11 @@ export function BattleScreen() {
   const [skillsSheetOpen, setSkillsSheetOpen] = useState(false);
   const [suppliesSheetOpen, setSuppliesSheetOpen] = useState(false);
   const [moreActionsOpen, setMoreActionsOpen] = useState(false);
+  const [retreatConfirmOpen, setRetreatConfirmOpen] = useState(false);
+  const [loopPopoverOpen, setLoopPopoverOpen] = useState(false);
+  const [selectedLoopCount, setSelectedLoopCount] =
+    useState<AutoRepeatLimit>(autoRepeatLimit);
+  const loopAnchorRef = useRef<HTMLDivElement | null>(null);
   const [statsModalOpen, setStatsModalOpen] = useState(false);
   const [cardSideTab, setCardSideTab] = useState<'ally' | 'enemy'>('enemy');
   const [speechBubblesEnabled, setSpeechBubblesEnabled] = useState<boolean>(
@@ -157,6 +162,36 @@ export function BattleScreen() {
     readBattleEffectsMode()
   );
   const [cardToast, setCardToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSelectedLoopCount(autoRepeatLimit);
+  }, [autoRepeatLimit]);
+
+  useEffect(() => {
+    if (!loopPopoverOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setLoopPopoverOpen(false);
+    };
+    const onMouseDown = (e: MouseEvent) => {
+      if (
+        loopAnchorRef.current &&
+        !loopAnchorRef.current.contains(e.target as Node)
+      ) {
+        setLoopPopoverOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('mousedown', onMouseDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('mousedown', onMouseDown);
+    };
+  }, [loopPopoverOpen]);
+
+  const closeMoreActions = () => {
+    setMoreActionsOpen(false);
+    setRetreatConfirmOpen(false);
+  };
 
   const toggleSpeechBubbles = () => {
     setSpeechBubblesEnabled((prev) => {
@@ -484,7 +519,141 @@ export function BattleScreen() {
     if (opt === 1) return t('auto.repeat1');
     if (opt === 5) return t('auto.repeat5');
     if (opt === 10) return t('auto.repeat10');
+    if (opt === 20) return t('auto.repeat20');
     return t('auto.repeatInfinite');
+  };
+
+  const repeatShortCount = (opt: AutoRepeatLimit): string =>
+    opt === 'infinite' ? '∞' : String(opt);
+
+  const renderLoopControl = (phoneCompact: boolean) => {
+    if (autoRepeatSession?.active) {
+      const currentRun =
+        autoRepeatSession.limit === 'infinite'
+          ? autoRepeatSession.completedRuns + 1
+          : Math.min(
+              autoRepeatSession.limit,
+              autoRepeatSession.completedRuns + 1
+            );
+      const progressText =
+        autoRepeatSession.limit === 'infinite'
+          ? `${currentRun}/∞`
+          : `${currentRun}/${autoRepeatSession.limit}`;
+
+      return (
+        <button
+          type="button"
+          data-testid="battle-loop-active-chip"
+          onClick={() => stopAutoRepeat('manual_stop')}
+          title={t('battle.loopStopTooltip')}
+          aria-label={`${t('battle.loopStopTooltip')} (${progressText})`}
+          className={`min-h-[44px] rounded-lg border border-emerald-400/70 bg-emerald-500/20 hover:bg-red-500/20 hover:border-red-400/70 text-emerald-100 font-mono-nums font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 transition-colors ${
+            phoneCompact ? 'px-2 text-[12px]' : 'px-2.5 text-[13px]'
+          }`}
+        >
+          <Repeat className="w-3.5 h-3.5 text-emerald-300 shrink-0" aria-hidden="true" />
+          <span data-testid="battle-loop-progress">{progressText}</span>
+          <span
+            data-testid="battle-loop-stop"
+            className="inline-flex items-center justify-center w-5 h-5 rounded bg-red-500/25 border border-red-400/60 text-red-300 shrink-0"
+          >
+            <Square className="w-2.5 h-2.5 fill-current" aria-hidden="true" />
+          </span>
+        </button>
+      );
+    }
+
+    return (
+      <div ref={loopAnchorRef} className="relative shrink-0">
+        <button
+          type="button"
+          data-testid="battle-loop-btn"
+          aria-expanded={loopPopoverOpen}
+          aria-haspopup="dialog"
+          aria-label={t('battle.loopTitle')}
+          title={t('battle.loopTitle')}
+          onClick={() => {
+            setSelectedLoopCount(autoRepeatLimit);
+            setLoopPopoverOpen((v) => !v);
+          }}
+          className={`min-h-[44px] rounded-lg border transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
+            loopPopoverOpen
+              ? 'border-emerald-400 bg-emerald-500/20 text-emerald-100'
+              : 'border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200'
+          } ${
+            phoneCompact
+              ? 'min-w-[44px] px-2 text-[12px] font-mono-nums font-bold'
+              : 'px-2.5 text-[13px] font-semibold'
+          }`}
+        >
+          <Repeat className="w-4 h-4 text-emerald-400 shrink-0" aria-hidden="true" />
+          {phoneCompact ? (
+            <span data-testid="battle-loop-phone-count">
+              {repeatShortCount(autoRepeatLimit)}
+            </span>
+          ) : (
+            <span data-testid="battle-loop-label">{t('battle.loopBtn')}</span>
+          )}
+        </button>
+
+        {loopPopoverOpen && (
+          <div
+            role="dialog"
+            data-testid="battle-loop-popover"
+            aria-label={t('battle.loopTitle')}
+            className="absolute right-0 top-full mt-1.5 z-50 w-[236px] rounded-lg border border-slate-700 bg-[#0B111D] p-3 shadow-2xl space-y-2.5"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[13px] font-bold text-slate-100">
+                {t('battle.loopTitle')}
+              </span>
+              <span className="text-[11px] font-mono-nums text-slate-400">
+                {t('battle.loopCountLabel')}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-5 gap-1">
+              {REPEAT_OPTIONS.map((opt) => {
+                const isSelected = selectedLoopCount === opt;
+                return (
+                  <button
+                    key={String(opt)}
+                    type="button"
+                    data-testid={`battle-loop-opt-${opt}`}
+                    aria-pressed={isSelected}
+                    title={repeatLabelFor(opt)}
+                    onClick={() => {
+                      setSelectedLoopCount(opt);
+                      setAutoRepeatLimit(opt);
+                    }}
+                    className={`min-h-[38px] rounded-md border font-mono-nums text-[12px] font-bold cursor-pointer transition-colors ${
+                      isSelected
+                        ? 'border-emerald-400 bg-emerald-500 text-slate-950'
+                        : 'border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200'
+                    }`}
+                  >
+                    {repeatShortCount(opt)}
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              type="button"
+              data-testid="battle-loop-start"
+              onClick={() => {
+                startAutoRepeat(selectedLoopCount, battle.sectorId);
+                setLoopPopoverOpen(false);
+              }}
+              className="w-full min-h-[40px] px-3 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[13px] inline-flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+            >
+              <Repeat className="w-4 h-4 shrink-0" />
+              <span>{t('battle.loopStartBtn')}</span>
+            </button>
+          </div>
+        )}
+      </div>
+    );
   };
 
   const cyclePhoneSpeed = () => {
@@ -1019,24 +1188,26 @@ export function BattleScreen() {
             }}
           />
 
-          {/* 3) One compact control row (max 48px): Auto, Speed Cycle, View Switch, "..." More */}
+          {/* 3) One compact control row (max 48px): Auto, Speed Cycle, View Switch, Loop (icon+num), "..." More */}
           <div
             data-testid="battle-phone-controls"
-            className="h-12 max-h-[48px] shrink-0 border-b border-slate-800/80 bg-[#080D16] px-2 flex items-center justify-between gap-2"
+            className="h-12 max-h-[48px] shrink-0 border-b border-slate-800/80 bg-[#080D16] px-1.5 flex items-center justify-between gap-1.5"
           >
             <button
               type="button"
               data-testid="battle-auto-toggle"
               onClick={toggleAutoBattle}
               aria-pressed={autoBattleEnabled}
-              className={`min-h-[44px] flex-1 px-2 rounded-lg border text-[13px] font-bold inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+              className={`min-h-[44px] flex-1 min-w-0 px-2 rounded-lg border text-[12px] font-bold inline-flex items-center justify-center gap-1 transition-colors cursor-pointer whitespace-nowrap ${
                 autoBattleEnabled
                   ? 'border-emerald-400 bg-emerald-500 text-slate-950'
                   : 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
               }`}
             >
               <Bot className="w-4 h-4 shrink-0" />
-              <span>{autoBattleEnabled ? t('auto.auto') : t('auto.manual')}</span>
+              <span className="truncate">
+                {autoBattleEnabled ? t('auto.auto') : t('auto.manual')}
+              </span>
             </button>
 
             <button
@@ -1045,7 +1216,7 @@ export function BattleScreen() {
               onClick={cyclePhoneSpeed}
               title={t('battle.speedCycleTooltip')}
               aria-label={t('battle.speedCycleTooltip')}
-              className="min-h-[44px] min-w-[56px] px-2.5 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-sky-300 font-mono-nums text-[13px] font-bold inline-flex items-center justify-center cursor-pointer whitespace-nowrap"
+              className="min-h-[44px] min-w-[44px] px-2 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-sky-300 font-mono-nums text-[12px] font-bold inline-flex items-center justify-center cursor-pointer whitespace-nowrap shrink-0"
             >
               {battleSpeed}x
             </button>
@@ -1060,7 +1231,7 @@ export function BattleScreen() {
               }
               title={t('battle.viewSwitchTooltip')}
               aria-label={t('battle.viewSwitchTooltip')}
-              className="min-h-[44px] px-3 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-[13px] font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+              className="min-h-[44px] px-2 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-[12px] font-semibold inline-flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap shrink-0"
             >
               {effectiveViewMode === 'radar' ? (
                 <>
@@ -1074,6 +1245,9 @@ export function BattleScreen() {
                 </>
               )}
             </button>
+
+            {/* Loop Button / Active Progress Chip (phone: icon + number only) */}
+            {renderLoopControl(true)}
 
             <button
               type="button"
@@ -1319,30 +1493,11 @@ export function BattleScreen() {
                     <span>{t('battle.viewCard')}</span>
                   </button>
                 </div>
+                {/* Loop Button / Active Progress Chip directly next to Radar/Card */}
+                {renderLoopControl(false)}
               </div>
 
               <div className="flex items-center gap-1.5 shrink-0">
-                {autoRepeatSession?.active && (
-                  <button
-                    type="button"
-                    data-testid="battle-repeat-active-stop"
-                    onClick={() => stopAutoRepeat('manual_stop')}
-                    title={t('auto.repeatStop')}
-                    className="min-h-[44px] px-2.5 rounded-lg border border-emerald-500/60 bg-emerald-500/15 hover:bg-red-500/20 text-emerald-200 text-[12px] font-mono-nums font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-                  >
-                    <Repeat className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span>
-                      {autoRepeatSession.limit === 'infinite'
-                        ? `#${autoRepeatSession.completedRuns + 1}`
-                        : `${Math.min(
-                            autoRepeatSession.limit,
-                            autoRepeatSession.completedRuns + 1
-                          )}/${autoRepeatSession.limit}`}
-                    </span>
-                    <Square className="w-3 h-3 text-red-400 fill-current shrink-0" />
-                  </button>
-                )}
-
                 <button
                   type="button"
                   data-testid="battle-more-btn"
@@ -1651,7 +1806,7 @@ export function BattleScreen() {
       {/* ==================== SHARED MORE ACTIONS ("...") MENU ==================== */}
       <BottomSheet
         open={moreActionsOpen}
-        onClose={() => setMoreActionsOpen(false)}
+        onClose={closeMoreActions}
         title={t('battle.moreActions')}
         subtitle={`${sectorLabel} · ${battle.squadSize}v${battle.squadSize}`}
       >
@@ -1710,66 +1865,12 @@ export function BattleScreen() {
             </div>
           </div>
 
-          {/* Number of Battles & Auto-Repeat */}
-          <div className="rounded-lg border border-slate-800 bg-[#080D16] p-3 space-y-2">
-            <div className="text-[12px] font-semibold uppercase tracking-wider text-slate-400">
-              {t('auto.repeatLabel')}
-            </div>
-            {autoRepeatSession?.active ? (
-              <button
-                type="button"
-                data-testid="battle-more-repeat-stop"
-                onClick={() => {
-                  stopAutoRepeat('manual_stop');
-                  setMoreActionsOpen(false);
-                }}
-                className="w-full min-h-[44px] px-3 rounded-lg bg-red-600 hover:bg-red-500 text-white text-[13px] font-bold inline-flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <Square className="w-3.5 h-3.5 fill-current" />
-                <span>{t('auto.repeatStop')}</span>
-              </button>
-            ) : (
-              <div className="flex items-center gap-2">
-                <select
-                  data-testid="battle-more-repeat-select"
-                  value={String(autoRepeatLimit)}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setAutoRepeatLimit(
-                      v === 'infinite' ? 'infinite' : (Number(v) as 1 | 5 | 10)
-                    );
-                  }}
-                  aria-label={t('auto.repeatLabel')}
-                  className="min-h-[44px] flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 text-[13px] font-mono-nums text-slate-100"
-                >
-                  {REPEAT_OPTIONS.map((opt) => (
-                    <option key={String(opt)} value={String(opt)}>
-                      {repeatLabelFor(opt)}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  data-testid="battle-more-repeat-start"
-                  onClick={() => {
-                    startAutoRepeat(autoRepeatLimit, battle.sectorId);
-                    setMoreActionsOpen(false);
-                  }}
-                  className="min-h-[44px] px-4 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[13px] inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Repeat className="w-4 h-4" />
-                  <span>{t('auto.repeatStart')}</span>
-                </button>
-              </div>
-            )}
-          </div>
-
           <div className="grid grid-cols-1 gap-2">
             <button
               type="button"
               data-testid="battle-more-tactics"
               onClick={() => {
-                setMoreActionsOpen(false);
+                closeMoreActions();
                 setTacticsModalOpen(true);
               }}
               className="min-h-[44px] px-3.5 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-100 text-[13px] font-semibold flex items-center gap-2.5 cursor-pointer"
@@ -1822,7 +1923,7 @@ export function BattleScreen() {
               type="button"
               data-testid="battle-more-stats"
               onClick={() => {
-                setMoreActionsOpen(false);
+                closeMoreActions();
                 setStatsModalOpen(true);
               }}
               className="min-h-[44px] px-3.5 rounded-lg border border-sky-500/45 bg-sky-500/12 text-sky-200 text-[13px] font-semibold flex items-center gap-2.5 cursor-pointer"
@@ -1831,20 +1932,49 @@ export function BattleScreen() {
               <span>{t('stats.title')}</span>
             </button>
 
-            {!battle.summary && (
-              <button
-                type="button"
-                data-testid="battle-more-retreat"
-                onClick={() => {
-                  setMoreActionsOpen(false);
-                  retreatBattle();
-                }}
-                className="min-h-[44px] px-3.5 rounded-lg border border-red-500/45 bg-red-500/12 text-red-200 text-[13px] font-semibold flex items-center gap-2.5 cursor-pointer"
-              >
-                <Flag className="w-4 h-4 text-red-400" />
-                <span>{t('battle.retreat')}</span>
-              </button>
-            )}
+            {!battle.summary &&
+              (retreatConfirmOpen ? (
+                <div
+                  data-testid="battle-retreat-confirm-box"
+                  className="rounded-lg border border-red-500/60 bg-red-950/35 p-3 space-y-2.5"
+                >
+                  <div className="flex items-center gap-2 text-[13px] font-semibold text-red-100">
+                    <Flag className="w-4 h-4 text-red-400 shrink-0" />
+                    <span>{t('battle.retreatConfirmTitle')}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      data-testid="battle-retreat-cancel"
+                      onClick={() => setRetreatConfirmOpen(false)}
+                      className="min-h-[40px] px-3 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-[13px] font-semibold cursor-pointer"
+                    >
+                      {t('battle.retreatCancelBtn')}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="battle-retreat-confirm"
+                      onClick={() => {
+                        closeMoreActions();
+                        retreatBattle();
+                      }}
+                      className="min-h-[40px] px-3 rounded-lg bg-red-600 hover:bg-red-500 text-white text-[13px] font-bold cursor-pointer"
+                    >
+                      {t('battle.retreatConfirmBtn')}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  data-testid="battle-more-retreat"
+                  onClick={() => setRetreatConfirmOpen(true)}
+                  className="min-h-[44px] px-3.5 rounded-lg border border-red-500/45 bg-red-500/12 text-red-200 text-[13px] font-semibold flex items-center gap-2.5 cursor-pointer"
+                >
+                  <Flag className="w-4 h-4 text-red-400" />
+                  <span>{t('battle.retreat')}</span>
+                </button>
+              ))}
           </div>
         </div>
       </BottomSheet>

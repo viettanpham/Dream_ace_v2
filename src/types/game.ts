@@ -619,7 +619,7 @@ export interface GearTacticsProfile {
   safety: AutoSafetyConfig;
 }
 
-export type AutoRepeatLimit = 1 | 5 | 10 | 'infinite';
+export type AutoRepeatLimit = 1 | 5 | 10 | 20 | 'infinite';
 
 export type AutoStopReason =
   | 'completed'

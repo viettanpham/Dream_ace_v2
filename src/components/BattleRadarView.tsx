@@ -23,12 +23,16 @@ import {
   computeDefeatFadeDurationMs,
   computeRowExposure,
   computeSpeechBubbleAnchor,
+  computeUnitRingArcs,
   evaluateRadarTargetValidity,
   formatShortUnitName,
   formatSpeechBubbleText,
   getRadarHitAreaSize,
+  getStatusIconMeta,
   isCompactPopupTone,
   layoutStaggeredPopups,
+  layoutUnitStatusIcons,
+  RADAR_STATUS_MAX_VISIBLE,
   readRadarLegendOpen,
   SPEECH_BUBBLE_DURATION_MS,
   SPEECH_BUBBLE_MAX_CHARS,
@@ -123,60 +127,6 @@ function getMarkerShape(unit: CombatUnit): MarkerShapeKind {
     return unit.isPlayer ? 'player-hex' : 'ally-circle';
   }
   return unit.isBoss || unit.isStructure ? 'boss-fortress' : 'enemy-diamond';
-}
-
-function getStatusColor(st: ActiveStatusEffect): string {
-  switch (st.type) {
-    case 'burn':
-      return '#fb923c';
-    case 'shield_break':
-    case 'def_down':
-    case 'vulnerable':
-      return '#f87171';
-    case 'slow':
-      return '#22d3ee';
-    case 'silence':
-      return '#e879f9';
-    case 'stealth':
-      return '#c084fc';
-    case 'siege_mode':
-    case 'siege_defense':
-    case 'charging':
-      return '#fbbf24';
-    case 'invincible':
-    case 'evade_all':
-    case 'regen_hp':
-      return '#34d399';
-    default:
-      return '#38bdf8';
-  }
-}
-
-function getStatusGlyph(st: ActiveStatusEffect): string {
-  switch (st.type) {
-    case 'burn':
-      return 'F';
-    case 'shield_break':
-    case 'def_down':
-    case 'vulnerable':
-      return '!';
-    case 'slow':
-      return 'S';
-    case 'silence':
-      return 'X';
-    case 'stealth':
-      return 'H';
-    case 'siege_mode':
-    case 'siege_defense':
-    case 'charging':
-      return '⚡';
-    case 'invincible':
-    case 'evade_all':
-    case 'regen_hp':
-      return '+';
-    default:
-      return '▲';
-  }
 }
 
 function getPopupColorClass(tone: FloatingPopup['tone']): string {
@@ -532,10 +482,13 @@ interface RadarUnitMarkerProps {
   isTargeted: boolean;
   isBlockedByRow: boolean;
   autoBattleEnabled: boolean;
+  animationsSkipped: boolean;
   hoverTooltip: string;
   autoBadgeText: string;
+  formatStatusTooltip: (st: ActiveStatusEffect) => string;
   onMarkerRef: (unitId: string, el: SVGGElement | null) => void;
   onHoverUnit: (unitId: string | null) => void;
+  onInspectStatus: (unit: CombatUnit, st: ActiveStatusEffect) => void;
   onTap: (unitId: string) => void;
   onLongPressStart: (unitId: string) => void;
   onLongPressCancel: () => void;
@@ -553,10 +506,13 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
   isTargeted,
   isBlockedByRow,
   autoBattleEnabled,
+  animationsSkipped,
   hoverTooltip,
   autoBadgeText,
+  formatStatusTooltip,
   onMarkerRef,
   onHoverUnit,
+  onInspectStatus,
   onTap,
   onLongPressStart,
   onLongPressCancel,
@@ -574,24 +530,14 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
     ? tokenRadius
     : Math.max(9, Math.round(tokenRadius * 0.52));
 
-  const hpRatio = Math.max(
-    0,
-    Math.min(1, unit.hp / Math.max(1, unit.derived.maxHp))
-  );
-  const shdRatio = Math.max(
-    0,
-    Math.min(1, unit.shield / Math.max(1, unit.derived.maxShield))
-  );
-  const hpFillColor = !unit.alive
-    ? '#475569'
-    : hpRatio <= 0.25
-    ? '#ef4444'
-    : hpRatio <= 0.55
-    ? '#fb923c'
-    : '#22c55e';
+  // Concentric 3-ring arcs (Shield outer blue, HP middle green, SP inner purple) or HP-only below min size
+  const ringResult = computeUnitRingArcs(unit, visualRadius);
+  const shapeRadius = unit.alive ? ringResult.innerShapeRadius : visualRadius;
+  const ringOuterRadius = unit.alive ? ringResult.outerRadius : visualRadius;
 
-  const visibleStatuses = unit.alive ? unit.statuses.slice(0, 2) : [];
-  const extraStatuses = unit.alive ? Math.max(0, unit.statuses.length - 2) : 0;
+  const statusLayout = unit.alive
+    ? layoutUnitStatusIcons(unit.statuses, RADAR_STATUS_MAX_VISIBLE)
+    : { visible: [] as ActiveStatusEffect[], overflowCount: 0 };
 
   const markerOpacity = !unit.alive
     ? 0.26
@@ -601,13 +547,20 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
     ? 0.56
     : 1;
 
-  const iconScale = Math.max(0.85, Math.min(1.3, visualRadius / 20));
-  const hexOuter = getPolygonPoints(6, visualRadius + 0.5, -90);
-  const hexInner = getPolygonPoints(6, Math.max(6, visualRadius - 3.2), -90);
-  const diamondOuter = getDiamondPoints(visualRadius);
-  const diamondInner = getDiamondPoints(Math.max(6, visualRadius - 3.5));
-  const fortressOuter = getFortressPoints(visualRadius);
-  const fortressInner = getFortressPoints(Math.max(6, visualRadius - 3.6));
+  const iconScale = Math.max(0.74, Math.min(1.15, shapeRadius / 16));
+  const hexOuter = getPolygonPoints(6, shapeRadius, -90);
+  const hexInner = getPolygonPoints(6, Math.max(5, shapeRadius - 2.6), -90);
+  const diamondOuter = getDiamondPoints(shapeRadius);
+  const diamondInner = getDiamondPoints(Math.max(5, shapeRadius - 2.8));
+  const fortressOuter = getFortressPoints(shapeRadius);
+  const fortressInner = getFortressPoints(Math.max(5, shapeRadius - 2.8));
+
+  // Status row horizontal centering under the name plate
+  const statusStep = 13.5;
+  const statusTotalCount =
+    statusLayout.visible.length + (statusLayout.overflowCount > 0 ? 1 : 0);
+  const statusStartX =
+    statusTotalCount > 0 ? -((statusTotalCount - 1) * statusStep) / 2 : 0;
 
   return (
     <g
@@ -617,6 +570,14 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
       data-unit-side={unit.side}
       data-marker-shape={shape}
       data-visual-radius={visualRadius}
+      data-ring-mode={
+        !unit.alive
+          ? 'none'
+          : ringResult.hpOnlyMode
+          ? 'hp-only'
+          : 'three-rings'
+      }
+      data-low-hp={ringResult.isLowHp ? 'true' : 'false'}
       data-acting={isActive ? 'true' : 'false'}
       data-targeted={isTargeted ? 'true' : 'false'}
       data-blocked-by-row={isBlockedByRow ? 'true' : 'false'}
@@ -664,16 +625,16 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
       {/* Core visual body with dimmed/down opacity (static SVG — zero animated SVG transforms) */}
       <g opacity={markerOpacity}>
         <g>
-          {/* Acting Unit Ring (distinct gold-white halo) */}
+          {/* Acting Unit Ring (distinct gold-white halo around concentric rings) */}
           {isActive && unit.alive && (
             <circle
               data-testid={`radar-acting-ring-${unit.id}`}
               cx="0"
               cy="0"
-              r={visualRadius + 7}
-              fill="rgba(254, 240, 138, 0.14)"
+              r={ringOuterRadius + 4.5}
+              fill="rgba(254, 240, 138, 0.12)"
               stroke="#fef08a"
-              strokeWidth="2.4"
+              strokeWidth="2.2"
             />
           )}
 
@@ -683,20 +644,20 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
               <circle
                 cx="0"
                 cy="0"
-                r={visualRadius + 6}
+                r={ringOuterRadius + 3.5}
                 fill="none"
                 stroke={isEnemy ? '#f87171' : '#34d399'}
                 strokeWidth="1.6"
                 strokeDasharray="4 3"
               />
               <path
-                d={`M ${-visualRadius - 7} ${-visualRadius + 2} V ${-visualRadius - 7} H ${-visualRadius + 2}
-                    M ${visualRadius - 2} ${-visualRadius - 7} H ${visualRadius + 7} V ${-visualRadius + 2}
-                    M ${visualRadius + 7} ${visualRadius - 2} V ${visualRadius + 7} H ${visualRadius - 2}
-                    M ${-visualRadius + 2} ${visualRadius + 7} H ${-visualRadius - 7} V ${visualRadius - 2}`}
+                d={`M ${-ringOuterRadius - 5} ${-ringOuterRadius + 2} V ${-ringOuterRadius - 5} H ${-ringOuterRadius + 2}
+                    M ${ringOuterRadius - 2} ${-ringOuterRadius - 5} H ${ringOuterRadius + 5} V ${-ringOuterRadius + 2}
+                    M ${ringOuterRadius + 5} ${ringOuterRadius - 2} V ${ringOuterRadius + 5} H ${ringOuterRadius - 2}
+                    M ${-ringOuterRadius + 2} ${ringOuterRadius + 5} H ${-ringOuterRadius - 5} V ${ringOuterRadius - 2}`}
                 fill="none"
                 stroke={isEnemy ? '#ef4444' : '#22c55e'}
-                strokeWidth="2.2"
+                strokeWidth="2.1"
                 strokeLinecap="round"
               />
             </g>
@@ -708,13 +669,66 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
               <circle
                 cx="0"
                 cy="0"
-                r={visualRadius + 4}
-                fill="rgba(56, 189, 248, 0.14)"
+                r={ringOuterRadius + 2.5}
+                fill="rgba(56, 189, 248, 0.10)"
                 stroke="#38bdf8"
                 strokeWidth="1.4"
                 strokeDasharray="3 3"
               />
             )}
+
+          {/* 3 Concentric Ring Arcs (Shield outer blue, HP middle green/orange-red, SP inner purple) */}
+          {unit.alive && (
+            <g data-testid={`radar-rings-${unit.id}`}>
+              {ringResult.arcs.map((arc) => (
+                <g key={arc.kind}>
+                  {/* Subtle full-circle track */}
+                  <circle
+                    cx="0"
+                    cy="0"
+                    r={arc.radius}
+                    fill="none"
+                    stroke={arc.trackColor}
+                    strokeWidth={arc.strokeWidth}
+                  />
+                  {/* Filled arc clockwise from 12 o'clock using stroke-dasharray / stroke-dashoffset (Firefox-safe) */}
+                  <circle
+                    data-testid={`radar-ring-${arc.kind}-${unit.id}`}
+                    data-ring-kind={arc.kind}
+                    data-ratio={arc.ratio}
+                    data-stroke-width={arc.strokeWidth}
+                    data-low-hp={arc.isLowHp ? 'true' : 'false'}
+                    cx="0"
+                    cy="0"
+                    r={arc.radius}
+                    fill="none"
+                    stroke={arc.color}
+                    strokeWidth={arc.strokeWidth}
+                    strokeDasharray={arc.strokeDasharray}
+                    strokeDashoffset={arc.strokeDashoffset}
+                    strokeLinecap="butt"
+                    transform="rotate(-90)"
+                    className={
+                      arc.kind === 'hp' && arc.isLowHp && !animationsSkipped
+                        ? 'vfx-low-hp-pulse'
+                        : undefined
+                    }
+                  />
+                  {/* Tiny start tick mark at top 12 o'clock for color-blind ring order clarity */}
+                  <line
+                    data-testid={`radar-ring-tick-${arc.kind}-${unit.id}`}
+                    x1="0"
+                    y1={arc.tickY - 1.4}
+                    x2="0"
+                    y2={arc.tickY + 1.4}
+                    stroke="#f8fafc"
+                    strokeOpacity="0.85"
+                    strokeWidth="1.1"
+                  />
+                </g>
+              ))}
+            </g>
+          )}
 
           {/* Color-blind readable team shape + outline */}
           {shape === 'player-hex' && (
@@ -723,7 +737,7 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
                 points={hexOuter}
                 fill={unit.alive ? '#0a1622' : '#0b1019'}
                 stroke={isActive ? '#fef08a' : teamHex}
-                strokeWidth={isActive ? '2.4' : unit.alive ? '2' : '1.2'}
+                strokeWidth={isActive ? '2.1' : unit.alive ? '1.8' : '1.2'}
                 strokeLinejoin="round"
               />
               {unit.alive && (
@@ -732,7 +746,7 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
                   fill="none"
                   stroke={teamHex}
                   strokeOpacity="0.55"
-                  strokeWidth="1"
+                  strokeWidth="0.9"
                   strokeLinejoin="round"
                 />
               )}
@@ -743,10 +757,10 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
             <circle
               cx="0"
               cy="0"
-              r={visualRadius}
+              r={shapeRadius}
               fill={unit.alive ? '#0b1320' : '#0b1019'}
               stroke={isActive ? '#fef08a' : teamHex}
-              strokeWidth={isActive ? '2.2' : unit.alive ? '1.8' : '1.2'}
+              strokeWidth={isActive ? '2' : unit.alive ? '1.6' : '1.2'}
               strokeDasharray={isStealthed ? '3 2' : undefined}
             />
           )}
@@ -757,7 +771,7 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
                 points={diamondOuter}
                 fill={unit.alive ? '#140b12' : '#0b1019'}
                 stroke={isActive ? '#fef08a' : teamHex}
-                strokeWidth={isActive ? '2.2' : unit.alive ? '1.9' : '1.2'}
+                strokeWidth={isActive ? '2' : unit.alive ? '1.7' : '1.2'}
                 strokeDasharray={isStealthed ? '3 2' : undefined}
                 strokeLinejoin="miter"
               />
@@ -780,7 +794,7 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
                 points={fortressOuter}
                 fill={unit.alive ? '#170f0c' : '#0b1019'}
                 stroke={isActive ? '#fef08a' : teamHex}
-                strokeWidth={isActive ? '2.4' : unit.alive ? '2.1' : '1.2'}
+                strokeWidth={isActive ? '2.1' : unit.alive ? '1.9' : '1.2'}
                 strokeLinejoin="miter"
               />
               {unit.alive && (
@@ -789,7 +803,7 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
                   fill="none"
                   stroke={teamHex}
                   strokeOpacity="0.6"
-                  strokeWidth="1.1"
+                  strokeWidth="1"
                 />
               )}
             </g>
@@ -814,58 +828,9 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
             />
           )}
 
-          {/* Up to 2 Status Icons (+N when more) */}
-          {visibleStatuses.length > 0 && (
-            <g
-              data-testid={`radar-status-${unit.id}`}
-              transform={`translate(${visualRadius - 4}, ${-visualRadius + 1})`}
-            >
-              {visibleStatuses.map((st, sIdx) => (
-                <g
-                  key={`${st.type}-${sIdx}`}
-                  data-testid={`radar-status-icon-${unit.id}-${sIdx}`}
-                  transform={`translate(${sIdx * 12}, 0)`}
-                >
-                  <circle
-                    cx="0"
-                    cy="0"
-                    r="5.8"
-                    fill="#050a12"
-                    stroke={getStatusColor(st)}
-                    strokeWidth="1.4"
-                  />
-                  <text
-                    x="0"
-                    y="2.7"
-                    textAnchor="middle"
-                    fontSize="7.4"
-                    fontFamily="monospace"
-                    fontWeight="800"
-                    fill={getStatusColor(st)}
-                  >
-                    {getStatusGlyph(st)}
-                  </text>
-                </g>
-              ))}
-              {extraStatuses > 0 && (
-                <text
-                  data-testid={`radar-status-overflow-${unit.id}`}
-                  x={visibleStatuses.length * 12 + 1}
-                  y="2.8"
-                  fontSize="7.5"
-                  fontFamily="monospace"
-                  fontWeight="800"
-                  fill="#e2e8f0"
-                >
-                  +{extraStatuses}
-                </text>
-              )}
-            </g>
-          )}
-
           {/* AUTO Badge on Player Token */}
           {unit.isPlayer && autoBattleEnabled && unit.alive && (
-            <g transform={`translate(0, ${-visualRadius - 10})`}>
+            <g transform={`translate(0, ${-ringOuterRadius - 8})`}>
               <rect
                 x="-15"
                 y="-6"
@@ -889,48 +854,12 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
           )}
         </g>
 
-        {/* Alive: HP + Shield Bars + Name Plate | Down: Compact dim name only */}
+        {/* Under the marker: Name Plate + Status Icons Row (max 3 + "+N" overflow; no horizontal HP/Shield bars) */}
         {unit.alive ? (
-          <g transform={`translate(0, ${visualRadius + 5})`}>
-            <rect
-              x={-barW / 2}
-              y="0"
-              width={barW}
-              height="3.8"
-              rx="1.5"
-              fill="#1e293b"
-            />
-            <rect
-              x={-barW / 2}
-              y="0"
-              width={Math.max(0, barW * hpRatio)}
-              height="3.8"
-              rx="1.5"
-              fill={hpFillColor}
-            />
-
-            <rect
-              x={-barW / 2}
-              y="4.8"
-              width={barW}
-              height="2.4"
-              rx="1"
-              fill="#1e293b"
-            />
-            {unit.derived.maxShield > 0 && (
-              <rect
-                x={-barW / 2}
-                y="4.8"
-                width={Math.max(0, barW * shdRatio)}
-                height="2.4"
-                rx="1"
-                fill={hasStatus(unit, 'shield_break') ? '#ef4444' : '#38bdf8'}
-              />
-            )}
-
+          <g transform={`translate(0, ${ringOuterRadius + 4})`}>
             <rect
               x={-barW / 2 - 4}
-              y="8.6"
+              y="0"
               width={barW + 8}
               height="12.5"
               rx="3"
@@ -939,7 +868,7 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
             <text
               data-testid="radar-unit-name"
               x="0"
-              y="17.8"
+              y="9.2"
               textAnchor="middle"
               fontSize="9.5"
               fontWeight="700"
@@ -947,6 +876,89 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
             >
               {shortName}
             </text>
+
+            {/* Up to 3 Status Icons (+N when more) with green buff / red debuff outline & distinct symbols */}
+            {statusLayout.visible.length > 0 && (
+              <g
+                data-testid={`radar-status-${unit.id}`}
+                transform="translate(0, 20)"
+              >
+                {statusLayout.visible.map((st, sIdx) => {
+                  const meta = getStatusIconMeta(st);
+                  const stTip = formatStatusTooltip(st);
+                  const cxIcon = statusStartX + sIdx * statusStep;
+                  return (
+                    <g
+                      key={`${st.type}-${sIdx}`}
+                      data-testid={`radar-status-icon-${unit.id}-${sIdx}`}
+                      data-status-type={st.type}
+                      data-status-kind={meta.isDebuff ? 'debuff' : 'buff'}
+                      data-status-symbol={meta.symbol}
+                      transform={`translate(${cxIcon}, 0)`}
+                      role="button"
+                      tabIndex={-1}
+                      aria-label={stTip}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onInspectStatus(unit, st);
+                      }}
+                      className="cursor-pointer"
+                    >
+                      <title>{stTip}</title>
+                      <circle
+                        cx="0"
+                        cy="0"
+                        r="5.8"
+                        fill={meta.bgColor}
+                        stroke={meta.outlineColor}
+                        strokeWidth="1.5"
+                      />
+                      <text
+                        x="0"
+                        y="2.7"
+                        textAnchor="middle"
+                        fontSize="7.4"
+                        fontFamily="monospace"
+                        fontWeight="800"
+                        fill={meta.textColor}
+                      >
+                        {meta.symbol}
+                      </text>
+                    </g>
+                  );
+                })}
+                {statusLayout.overflowCount > 0 && (
+                  <g
+                    transform={`translate(${
+                      statusStartX + statusLayout.visible.length * statusStep
+                    }, 0)`}
+                  >
+                    <rect
+                      x="-6.5"
+                      y="-5.5"
+                      width="13"
+                      height="11"
+                      rx="3"
+                      fill="#0f172a"
+                      stroke="#64748b"
+                      strokeWidth="1"
+                    />
+                    <text
+                      data-testid={`radar-status-overflow-${unit.id}`}
+                      x="0"
+                      y="2.7"
+                      textAnchor="middle"
+                      fontSize="7.2"
+                      fontFamily="monospace"
+                      fontWeight="800"
+                      fill="#e2e8f0"
+                    >
+                      +{statusLayout.overflowCount}
+                    </text>
+                  </g>
+                )}
+              </g>
+            )}
           </g>
         ) : (
           <text
@@ -967,7 +979,7 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
       {isBlockedByRow && unit.alive && (
         <g
           data-testid={`radar-lock-${unit.id}`}
-          transform={`translate(${visualRadius - 1}, ${visualRadius - 2})`}
+          transform={`translate(${ringOuterRadius - 2}, ${ringOuterRadius - 3})`}
         >
           <circle
             cx="0"
@@ -994,7 +1006,6 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
           />
         </g>
       )}
-
     </g>
   );
 });
@@ -1037,6 +1048,13 @@ export function BattleRadarView({
     readRadarLegendOpen()
   );
   const [invalidToast, setInvalidToast] = useState<string | null>(null);
+  const [inspectedStatusInfo, setInspectedStatusInfo] = useState<{
+    unitName: string;
+    label: string;
+    strengthText: string | null;
+    roundsText: string | null;
+    isDebuff: boolean;
+  } | null>(null);
   const [fadingDefeatIds, setFadingDefeatIds] = useState<string[]>([]);
   const [hoveredTargetId, setHoveredTargetId] = useState<string | null>(null);
   const [visibleBubbleId, setVisibleBubbleId] = useState<string | null>(
@@ -1046,6 +1064,7 @@ export function BattleRadarView({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const markerElementsRef = useRef<Map<string, SVGGElement>>(new Map());
   const toastTimerRef = useRef<number | null>(null);
+  const statusTooltipTimerRef = useRef<number | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const longPressFiredRef = useRef(false);
   const prevAliveMapRef = useRef<Map<string, boolean>>(new Map());
@@ -1083,6 +1102,49 @@ export function BattleRadarView({
     }, 2200);
   }, []);
 
+  const formatStatusTooltip = useCallback(
+    (st: ActiveStatusEffect): string => {
+      const label = getStatusLabel(lang, st.type);
+      const meta = getStatusIconMeta(st);
+      const parts: string[] = [label];
+      if (meta.strengthPct !== null) {
+        parts.push(t('radar.statusStrength', { value: meta.strengthPct }));
+      }
+      if (st.turnsRemaining > 0 && st.turnsRemaining < 90) {
+        parts.push(t('radar.statusRounds', { turns: st.turnsRemaining }));
+      }
+      return parts.join(' · ');
+    },
+    [lang, t]
+  );
+
+  const handleInspectStatus = useCallback(
+    (unit: CombatUnit, st: ActiveStatusEffect) => {
+      const meta = getStatusIconMeta(st);
+      setInspectedStatusInfo({
+        unitName: formatShortUnitName(unit.name, 10),
+        label: getStatusLabel(lang, st.type),
+        strengthText:
+          meta.strengthPct !== null
+            ? t('radar.statusStrength', { value: meta.strengthPct })
+            : null,
+        roundsText:
+          st.turnsRemaining > 0 && st.turnsRemaining < 90
+            ? t('radar.statusRounds', { turns: st.turnsRemaining })
+            : null,
+        isDebuff: meta.isDebuff,
+      });
+      if (statusTooltipTimerRef.current !== null) {
+        window.clearTimeout(statusTooltipTimerRef.current);
+      }
+      statusTooltipTimerRef.current = window.setTimeout(() => {
+        setInspectedStatusInfo(null);
+        statusTooltipTimerRef.current = null;
+      }, 3200);
+    },
+    [lang, t]
+  );
+
   // Auto-hide speech bubble after 1.5s cleanly even when rendered standalone
   useEffect(() => {
     const chatId = battle.wingmanChat?.id ?? null;
@@ -1101,6 +1163,9 @@ export function BattleRadarView({
     return () => {
       if (toastTimerRef.current !== null) {
         window.clearTimeout(toastTimerRef.current);
+      }
+      if (statusTooltipTimerRef.current !== null) {
+        window.clearTimeout(statusTooltipTimerRef.current);
       }
       if (longPressTimerRef.current !== null) {
         window.clearTimeout(longPressTimerRef.current);
@@ -1725,10 +1790,12 @@ export function BattleRadarView({
             unit.classId
           )}) · ${getRowLabel(unit.row)} · HP ${unit.hp}/${
             unit.derived.maxHp
-          } · SHD ${unit.shield}/${unit.derived.maxShield}${
+          } · SHD ${unit.shield}/${unit.derived.maxShield} · SP ${unit.sp}/${
+            unit.derived.maxSp
+          }${
             unit.statuses.length > 0
               ? ` · ${unit.statuses
-                  .map((s) => getStatusLabel(lang, s.type))
+                  .map((s) => formatStatusTooltip(s))
                   .join(', ')}`
               : ''
           }`;
@@ -1747,10 +1814,13 @@ export function BattleRadarView({
               isTargeted={isTargeted}
               isBlockedByRow={isBlockedByRow}
               autoBattleEnabled={autoBattleEnabled}
+              animationsSkipped={animationsSkipped}
               hoverTooltip={hoverTooltip}
               autoBadgeText={autoBadgeText}
+              formatStatusTooltip={formatStatusTooltip}
               onMarkerRef={registerMarkerRef}
               onHoverUnit={setHoveredTargetId}
+              onInspectStatus={handleInspectStatus}
               onTap={handleTokenTap}
               onLongPressStart={handleLongPressStart}
               onLongPressCancel={handleLongPressCancel}
@@ -1843,6 +1913,34 @@ export function BattleRadarView({
               </div>
 
               <div className="flex items-center gap-2 pt-0.5 border-t border-slate-800/90">
+                <svg width="20" height="20" viewBox="0 0 20 20" className="shrink-0">
+                  <circle cx="10" cy="10" r="8.2" fill="none" stroke="#38bdf8" strokeWidth="1.6" strokeDasharray="38 52" transform="rotate(-90 10 10)" />
+                  <circle cx="10" cy="10" r="5.8" fill="none" stroke="#22c55e" strokeWidth="1.6" strokeDasharray="28 37" transform="rotate(-90 10 10)" />
+                  <circle cx="10" cy="10" r="3.4" fill="none" stroke="#c084fc" strokeWidth="1.6" strokeDasharray="16 22" transform="rotate(-90 10 10)" />
+                  <line x1="10" y1="0.8" x2="10" y2="7.5" stroke="#f8fafc" strokeWidth="0.9" />
+                </svg>
+                <span>{t('radar.legendRings')}</span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <svg width="20" height="20" viewBox="0 0 20 20" className="shrink-0">
+                  <circle cx="10" cy="10" r="6.5" fill="none" stroke="rgba(249,115,22,0.28)" strokeWidth="2.2" />
+                  <circle cx="10" cy="10" r="6.5" fill="none" stroke="#f97316" strokeWidth="2.2" strokeDasharray="10 41" transform="rotate(-90 10 10)" />
+                </svg>
+                <span>{t('radar.legendLowHp')}</span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <svg width="20" height="18" viewBox="0 0 20 18" className="shrink-0">
+                  <circle cx="5.5" cy="9" r="4.5" fill="#052615" stroke="#22c55e" strokeWidth="1.3" />
+                  <text x="5.5" y="11.2" textAnchor="middle" fontSize="6.5" fontWeight="800" fill="#86efac">↑</text>
+                  <circle cx="14.5" cy="9" r="4.5" fill="#26090d" stroke="#ef4444" strokeWidth="1.3" />
+                  <text x="14.5" y="11.2" textAnchor="middle" fontSize="6.5" fontWeight="800" fill="#fca5a5">↓</text>
+                </svg>
+                <span>{t('radar.legendStatusIcons')}</span>
+              </div>
+
+              <div className="flex items-center gap-2 pt-0.5 border-t border-slate-800/90">
                 <svg width="18" height="14" viewBox="0 0 18 14" className="shrink-0">
                   <rect x="1" y="2" width="16" height="10" rx="2" fill="rgba(239,68,68,0.16)" stroke="#f87171" strokeWidth="1.5" />
                 </svg>
@@ -1870,6 +1968,30 @@ export function BattleRadarView({
           </div>
         )}
       </div>
+
+      {/* Status Icon Tap Tooltip (shows name, strength, remaining rounds) */}
+      {inspectedStatusInfo && (
+        <div
+          role="status"
+          aria-live="polite"
+          data-testid="radar-status-tooltip"
+          onClick={() => setInspectedStatusInfo(null)}
+          className={`absolute bottom-2.5 left-1/2 -translate-x-1/2 z-30 max-w-[92%] rounded-lg border px-3 py-1.5 text-[12px] font-semibold shadow-lg whitespace-nowrap truncate cursor-pointer ${
+            inspectedStatusInfo.isDebuff
+              ? 'border-red-500/70 bg-[#1a0a0d]/95 text-red-100'
+              : 'border-emerald-500/70 bg-[#071a10]/95 text-emerald-100'
+          }`}
+        >
+          <span>{inspectedStatusInfo.unitName}: </span>
+          <span>{inspectedStatusInfo.label}</span>
+          {inspectedStatusInfo.strengthText && (
+            <span> · {inspectedStatusInfo.strengthText}</span>
+          )}
+          {inspectedStatusInfo.roundsText && (
+            <span> · {inspectedStatusInfo.roundsText}</span>
+          )}
+        </div>
+      )}
 
       {/* Invalid Target Reason One-Line Toast (non-blocking) */}
       {invalidToast && (

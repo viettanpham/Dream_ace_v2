@@ -228,10 +228,11 @@ describe('1) Merged desktop top control bar & "..." overflow menu', () => {
     expect(controls).not.toBeNull();
     expect(controls!.className).toContain('flex-nowrap');
 
-    // Primary controls stay visible in top bar
+    // Primary controls stay visible in top bar (including G3b Loop button next to Radar/Card)
     expect(controls!.querySelector('[data-testid="battle-auto-toggle"]')).not.toBeNull();
     expect(controls!.querySelector('[data-testid="battle-speed-selector"]')).not.toBeNull();
     expect(controls!.querySelector('[data-testid="battle-view-switch"]')).not.toBeNull();
+    expect(controls!.querySelector('[data-testid="battle-loop-btn"]')).not.toBeNull();
     expect(controls!.querySelector('[data-testid="battle-more-btn"]')).not.toBeNull();
 
     // Secondary actions are NOT directly cluttering the top control bar
@@ -240,7 +241,7 @@ describe('1) Merged desktop top control bar & "..." overflow menu', () => {
     expect(controls!.querySelector('[data-testid="battle-more-retreat"]')).toBeNull();
     expect(controls!.querySelector('select')).toBeNull();
 
-    // Open "..." menu -> all secondary controls appear with labels
+    // Open "..." menu -> secondary controls appear with labels, and loop controls are moved out
     const moreBtn = controls!.querySelector(
       '[data-testid="battle-more-btn"]'
     ) as HTMLButtonElement;
@@ -251,8 +252,8 @@ describe('1) Merged desktop top control bar & "..." overflow menu', () => {
     const moreMenu = container!.querySelector('[data-testid="battle-more-menu"]');
     expect(moreMenu).not.toBeNull();
     expect(moreMenu!.querySelector('[data-testid="battle-more-tactics"]')).not.toBeNull();
-    expect(moreMenu!.querySelector('[data-testid="battle-more-repeat-select"]')).not.toBeNull();
-    expect(moreMenu!.querySelector('[data-testid="battle-more-repeat-start"]')).not.toBeNull();
+    expect(moreMenu!.querySelector('[data-testid="battle-more-repeat-select"]')).toBeNull();
+    expect(moreMenu!.querySelector('[data-testid="battle-more-repeat-start"]')).toBeNull();
     expect(moreMenu!.querySelector('[data-testid="battle-toggle-bubbles"]')).not.toBeNull();
     expect(moreMenu!.querySelector('[data-testid="battle-toggle-skip-anim"]')).not.toBeNull();
     expect(moreMenu!.querySelector('[data-testid="battle-more-stats"]')).not.toBeNull();

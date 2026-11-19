@@ -1287,6 +1287,23 @@ export const EN_TRANSLATIONS = {
   'battle.vfxStealth': 'STEALTH',
   'battle.vfxReveal': 'REVEALED',
   'battle.vfxSpRestore': '+SP',
+
+  // Battle Readability, Turn Queue & Loop Button (G3b)
+  'auto.repeat20': '20x',
+  'battle.loopBtn': 'Loop',
+  'battle.loopTitle': 'Repeat Battle',
+  'battle.loopCountLabel': 'Number of battles',
+  'battle.loopStartBtn': 'Start',
+  'battle.loopStopTooltip': 'Stop battle loop',
+  'battle.retreatConfirmTitle': 'Surrender this battle?',
+  'battle.retreatConfirmBtn': 'Confirm Surrender',
+  'battle.retreatCancelBtn': 'Cancel',
+  'queue.nextSectionLabel': 'Next',
+  'radar.legendRings': 'Rings (out→in): Shield (blue) · HP (green) · SP (purple)',
+  'radar.legendLowHp': 'Pulsing red-orange HP ring: below 25% HP',
+  'radar.legendStatusIcons': 'Status icons: green buff / red debuff (up to 3, +N)',
+  'radar.statusRounds': '{turns} round(s) left',
+  'radar.statusStrength': '{value}%',
 } as const;
 
 export type TranslationKey = keyof typeof EN_TRANSLATIONS;

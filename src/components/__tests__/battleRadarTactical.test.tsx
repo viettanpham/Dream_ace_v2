@@ -347,7 +347,7 @@ describe('2) Invalid-target toast reason, lock icons, target rings/arrow, shapes
         ?.getAttribute('data-marker-shape')
     ).toBe('boss-fortress');
 
-    // Up to 2 status icons + "+2" overflow for 4 statuses
+    // Up to 3 status icons + "+1" overflow for 4 statuses (G3b)
     expect(
       container!.querySelector(
         '[data-testid="radar-status-icon-enemy_front-0"]'
@@ -362,12 +362,17 @@ describe('2) Invalid-target toast reason, lock icons, target rings/arrow, shapes
       container!.querySelector(
         '[data-testid="radar-status-icon-enemy_front-2"]'
       )
+    ).not.toBeNull();
+    expect(
+      container!.querySelector(
+        '[data-testid="radar-status-icon-enemy_front-3"]'
+      )
     ).toBeNull();
     expect(
       container!.querySelector(
         '[data-testid="radar-status-overflow-enemy_front"]'
       )?.textContent
-    ).toBe('+2');
+    ).toBe('+1');
 
     // Front enemy has no lock; Middle & Back enemies show lock icon
     expect(

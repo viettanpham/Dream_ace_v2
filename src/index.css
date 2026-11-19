@@ -937,7 +937,8 @@
   .vfx-debuff-shake,
   .vfx-dodge-slide,
   .vfx-stealth-veil,
-  .vfx-html-sweep {
+  .vfx-html-sweep,
+  .vfx-low-hp-pulse {
     animation: none;
   }
   .meter-fill,
@@ -948,6 +949,21 @@
   .anim-popup-tight {
     animation: float-popup-reduced 800ms linear both;
   }
+}
+
+/* Firefox-safe opacity-only gentle pulse for low-HP (<25%) radar ring arc (zero SVG transform) */
+@keyframes vfx-low-hp-opacity {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.42;
+  }
+}
+
+.vfx-low-hp-pulse {
+  animation: vfx-low-hp-opacity 1.15s ease-in-out infinite;
 }
 
 /* Horizontal strip scrollbar (phone turn queue inner scroll only) */

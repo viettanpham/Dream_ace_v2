@@ -1,13 +1,22 @@
 import { useEffect, useState } from 'react';
 import { FORMATION_ROWS } from '../data/formationConfig';
-import { getValidEnemyTargets, hasStatus, isLongRangeAction } from '../engine/combat';
+import {
+  buildTurnQueue,
+  getValidEnemyTargets,
+  hasStatus,
+  isLongRangeAction,
+} from '../engine/combat';
 import type {
   ActionType,
+  ActiveStatusEffect,
   BattleSpeed,
+  BattleState,
   CombatFxKind,
   CombatRow,
   CombatUnit,
   FloatingPopup,
+  StatusEffectType,
+  TurnQueueEntry,
 } from '../types/game';
 
 export type BattleLayoutMode = 'phone-portrait' | 'tablet' | 'pc';
@@ -57,6 +66,11 @@ export const RADAR_BUBBLES_STORAGE_KEY = 'starfront_speech_bubbles_enabled_v1';
 export const RADAR_MIN_HIT_AREA_PX = 44;
 export const SPEECH_BUBBLE_MAX_CHARS = 28;
 export const SPEECH_BUBBLE_DURATION_MS = 1500;
+export const RADAR_RING_MIN_MARKER_RADIUS = 17;
+export const RADAR_RING_DEFAULT_STROKE_WIDTH = 3;
+export const RADAR_LOW_HP_THRESHOLD = 0.25;
+export const RADAR_STATUS_MAX_VISIBLE = 3;
+export const TURN_QUEUE_UPCOMING_MAX = 5;
 
 /**
  * Pure responsive layout classifier for the Battle Screen.
@@ -567,3 +581,334 @@ export function layoutStaggeredPopups(
 
   return placed;
 }
+
+export type RadarRingKind = 'shield' | 'hp' | 'sp';
+
+export interface RadarRingArcSpec {
+  kind: RadarRingKind;
+  radius: number;
+  strokeWidth: number;
+  current: number;
+  max: number;
+  ratio: number;
+  circumference: number;
+  filledLength: number;
+  strokeDasharray: string;
+  strokeDashoffset: string;
+  color: string;
+  trackColor: string;
+  isLowHp: boolean;
+  tickY: number;
+}
+
+export interface UnitRingArcsResult {
+  hpOnlyMode: boolean;
+  isLowHp: boolean;
+  outerRadius: number;
+  innerShapeRadius: number;
+  arcs: RadarRingArcSpec[];
+}
+
+export interface StatusIconLayoutResult {
+  visible: ActiveStatusEffect[];
+  overflowCount: number;
+}
+
+export interface StatusIconMeta {
+  symbol: string;
+  isDebuff: boolean;
+  outlineColor: string;
+  textColor: string;
+  bgColor: string;
+  strengthPct: number | null;
+}
+
+export interface UpcomingTurnItem {
+  order: number;
+  entry: TurnQueueEntry;
+  shortName: string;
+}
+
+export interface UpcomingTurnListResult {
+  round: number;
+  actingEntry: TurnQueueEntry | null;
+  upcoming: UpcomingTurnItem[];
+}
+
+const DEFAULT_DEBUFF_TYPES: ReadonlySet<StatusEffectType> = new Set([
+  'burn',
+  'shield_break',
+  'slow',
+  'silence',
+  'vulnerable',
+  'def_down',
+]);
+
+/**
+ * Pure concentric ring arc computation for radar unit markers.
+ * Uses stroke-dasharray / stroke-dashoffset attributes (zero animated SVG transforms)
+ * starting at 12 o'clock (top) and progressing clockwise.
+ */
+export function computeRingArcSpec(
+  kind: RadarRingKind,
+  radius: number,
+  strokeWidth: number,
+  current: number,
+  max: number,
+  color: string,
+  trackColor: string,
+  isLowHp = false
+): RadarRingArcSpec {
+  const safeRadius = Math.max(1, radius);
+  const safeStroke = Math.max(RADAR_RING_DEFAULT_STROKE_WIDTH, strokeWidth);
+  const safeMax = Number.isFinite(max) && max > 0 ? max : 0;
+  const safeCur = Number.isFinite(current) ? Math.max(0, current) : 0;
+  const ratio = safeMax > 0 ? Math.max(0, Math.min(1, safeCur / safeMax)) : 0;
+  const circumference = 2 * Math.PI * safeRadius;
+  const filledLength = circumference * ratio;
+
+  return {
+    kind,
+    radius: Number(safeRadius.toFixed(2)),
+    strokeWidth: safeStroke,
+    current: safeCur,
+    max: safeMax,
+    ratio: Number(ratio.toFixed(4)),
+    circumference: Number(circumference.toFixed(2)),
+    filledLength: Number(filledLength.toFixed(2)),
+    strokeDasharray: `${filledLength.toFixed(2)} ${circumference.toFixed(2)}`,
+    strokeDashoffset: '0',
+    color,
+    trackColor,
+    isLowHp,
+    tickY: Number((-safeRadius).toFixed(2)),
+  };
+}
+
+/**
+ * Computes the 3 concentric ring arcs (Shield outer blue, HP middle green, SP inner purple)
+ * for a radar unit marker. Falls back to HP-only when markerRadius < RADAR_RING_MIN_MARKER_RADIUS.
+ * Marks low HP strictly below 25% (hp / maxHp < 0.25) with red-orange color & pulse flag.
+ */
+export function computeUnitRingArcs(
+  unit: CombatUnit,
+  markerRadius: number
+): UnitRingArcsResult {
+  const safeMarkerRadius = Math.max(8, markerRadius);
+  const hpRatio =
+    unit.derived.maxHp > 0
+      ? Math.max(0, Math.min(1, unit.hp / unit.derived.maxHp))
+      : 0;
+  const isLowHp =
+    unit.alive && hpRatio > 0 && hpRatio < RADAR_LOW_HP_THRESHOLD;
+  const hpOnlyMode = safeMarkerRadius < RADAR_RING_MIN_MARKER_RADIUS;
+  const strokeWidth = RADAR_RING_DEFAULT_STROKE_WIDTH;
+  const hpColor = isLowHp ? '#f97316' : '#22c55e';
+  const hpTrack = isLowHp
+    ? 'rgba(249, 115, 22, 0.24)'
+    : 'rgba(34, 197, 94, 0.20)';
+
+  if (hpOnlyMode) {
+    const innerShapeRadius = Math.max(8, safeMarkerRadius - 3);
+    const hpR = innerShapeRadius + 3;
+    const hpArc = computeRingArcSpec(
+      'hp',
+      hpR,
+      strokeWidth,
+      unit.hp,
+      unit.derived.maxHp,
+      hpColor,
+      hpTrack,
+      isLowHp
+    );
+    return {
+      hpOnlyMode: true,
+      isLowHp,
+      outerRadius: Number((hpR + strokeWidth / 2).toFixed(2)),
+      innerShapeRadius,
+      arcs: [hpArc],
+    };
+  }
+
+  const innerShapeRadius = Math.max(10, Math.round(safeMarkerRadius * 0.68));
+  const spR = innerShapeRadius + 2.5;
+  const hpR = spR + 4;
+  const shieldR = hpR + 4;
+
+  const shieldArc = computeRingArcSpec(
+    'shield',
+    shieldR,
+    strokeWidth,
+    unit.shield,
+    unit.derived.maxShield,
+    '#38bdf8',
+    'rgba(56, 189, 248, 0.18)',
+    false
+  );
+  const hpArc = computeRingArcSpec(
+    'hp',
+    hpR,
+    strokeWidth,
+    unit.hp,
+    unit.derived.maxHp,
+    hpColor,
+    hpTrack,
+    isLowHp
+  );
+  const spArc = computeRingArcSpec(
+    'sp',
+    spR,
+    strokeWidth,
+    unit.sp,
+    unit.derived.maxSp,
+    '#c084fc',
+    'rgba(192, 132, 252, 0.20)',
+    false
+  );
+
+  return {
+    hpOnlyMode: false,
+    isLowHp,
+    outerRadius: Number((shieldR + strokeWidth / 2).toFixed(2)),
+    innerShapeRadius,
+    arcs: [shieldArc, hpArc, spArc],
+  };
+}
+
+/**
+ * Caps visible status icons under a radar unit marker (default 3) and returns overflow count (+N).
+ */
+export function layoutUnitStatusIcons(
+  statuses: ActiveStatusEffect[],
+  maxVisible = RADAR_STATUS_MAX_VISIBLE
+): StatusIconLayoutResult {
+  const limit = Math.max(0, Math.floor(maxVisible));
+  const visible = statuses.slice(0, limit);
+  const overflowCount = Math.max(0, statuses.length - visible.length);
+  return { visible, overflowCount };
+}
+
+/**
+ * Returns color-blind-safe icon metadata for a status effect:
+ * - Buffs use green outline; debuffs use red outline.
+ * - Every status has a distinct, self-explanatory symbol (never an unexplained "!").
+ */
+export function getStatusIconMeta(status: ActiveStatusEffect): StatusIconMeta {
+  const isDebuff =
+    status.isDebuff !== undefined
+      ? Boolean(status.isDebuff)
+      : DEFAULT_DEBUFF_TYPES.has(status.type);
+
+  let symbol = '▲';
+  switch (status.type) {
+    case 'burn':
+      symbol = '✹';
+      break;
+    case 'shield_break':
+      symbol = '✕';
+      break;
+    case 'def_down':
+      symbol = '↓';
+      break;
+    case 'vulnerable':
+      symbol = '▽';
+      break;
+    case 'slow':
+      symbol = '❄';
+      break;
+    case 'silence':
+      symbol = '⊘';
+      break;
+    case 'stealth':
+      symbol = '◌';
+      break;
+    case 'def_up':
+      symbol = '◈';
+      break;
+    case 'atk_up':
+      symbol = '↑';
+      break;
+    case 'spd_up':
+      symbol = '»';
+      break;
+    case 'eva_up':
+      symbol = '◇';
+      break;
+    case 'primary_dmg_up':
+      symbol = '✦';
+      break;
+    case 'skill_dmg_up':
+      symbol = '★';
+      break;
+    case 'sure_hit':
+      symbol = '◎';
+      break;
+    case 'counter':
+      symbol = '↺';
+      break;
+    case 'evade_all':
+      symbol = '✧';
+      break;
+    case 'invincible':
+      symbol = '⬡';
+      break;
+    case 'regen_hp':
+      symbol = '+';
+      break;
+    case 'siege_mode':
+      symbol = '⌖';
+      break;
+    case 'siege_defense':
+      symbol = '▣';
+      break;
+    case 'charging':
+      symbol = '⚡';
+      break;
+  }
+
+  const strengthPct =
+    typeof status.magnitude === 'number' && status.magnitude !== 0
+      ? Math.round(Math.abs(status.magnitude) * 100)
+      : null;
+
+  return {
+    symbol,
+    isDebuff,
+    outlineColor: isDebuff ? '#ef4444' : '#22c55e',
+    textColor: isDebuff ? '#fca5a5' : '#86efac',
+    bgColor: isDebuff ? '#26090d' : '#052615',
+    strengthPct,
+  };
+}
+
+/**
+ * Pure upcoming turn-list builder using the existing combat engine turn order.
+ * Returns the acting unit separately and up to `maxVisible` (default 5) numbered upcoming units.
+ */
+export function buildUpcomingTurnList(
+  battle: BattleState,
+  maxVisible = TURN_QUEUE_UPCOMING_MAX
+): UpcomingTurnListResult {
+  const queue = buildTurnQueue(battle);
+  const actingEntry = !battle.summary ? queue.current[0] ?? null : null;
+  const combined = [
+    ...queue.current.slice(actingEntry ? 1 : 0),
+    ...queue.next,
+  ];
+  const limit = Math.max(0, Math.floor(maxVisible));
+
+  const upcoming: UpcomingTurnItem[] = combined
+    .slice(0, limit)
+    .map((entry, idx) => ({
+      order: idx + 1,
+      entry,
+      shortName: formatShortUnitName(entry.name, 10),
+    }));
+
+  return {
+    round: queue.round,
+    actingEntry,
+    upcoming,
+  };
+}
+

@@ -1289,5 +1289,22 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'battle.vfxStealth': 'TÀNG HÌNH',
   'battle.vfxReveal': 'LỘ DIỆN',
   'battle.vfxSpRestore': '+SP',
+
+  // Battle Readability, Turn Queue & Loop Button (G3b)
+  'auto.repeat20': '20 trận',
+  'battle.loopBtn': 'Lặp',
+  'battle.loopTitle': 'Lặp trận chiến',
+  'battle.loopCountLabel': 'Số trận lặp',
+  'battle.loopStartBtn': 'Bắt đầu',
+  'battle.loopStopTooltip': 'Dừng lặp trận',
+  'battle.retreatConfirmTitle': 'Xác nhận đầu hàng trận này?',
+  'battle.retreatConfirmBtn': 'Xác nhận đầu hàng',
+  'battle.retreatCancelBtn': 'Hủy',
+  'queue.nextSectionLabel': 'Tiếp theo',
+  'radar.legendRings': 'Vòng (ngoài→trong): Khiên (lam) · HP (lục) · SP (tím)',
+  'radar.legendLowHp': 'Vòng HP đỏ-cam nhấp nháy: HP dưới 25%',
+  'radar.legendStatusIcons': 'Hiệu ứng: viền lục buff / đỏ debuff (tối đa 3, +N)',
+  'radar.statusRounds': 'Còn {turns} vòng',
+  'radar.statusStrength': '{value}%',
 };
 
