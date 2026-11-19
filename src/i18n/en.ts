@@ -1,6 +1,6 @@
 export const EN_TRANSLATIONS = {
   // Brand & Common
-  'app.title': 'STARFRONT',
+  'app.title': 'DREAM ACE',
   'app.subtitle': 'Tactical Space Fighter RPG',
   'app.tagline':
     'Tune your Gear across six core stats, switch between four specialized starfighter classes, and command a 4-ship wing in speed-ordered turn-based combat.',
@@ -29,11 +29,56 @@ export const EN_TRANSLATIONS = {
   'common.reqLevel': 'Requires Lv.{level}',
   'common.reqClass': '{className} class only',
 
-  // Navigation / TopHud
+  // Navigation / TopHud / Sidebar
   'nav.hangar': 'Hangar',
   'nav.shop': 'Shop',
-  'nav.deploy': 'Deploy to Battle',
-  'nav.returnHangar': 'Return to Hangar',
+  'nav.deploy': 'Launch Sortie',
+  'nav.returnHangar': 'Return to Base',
+  'sidebar.gear': 'Gear',
+  'sidebar.pilot': 'Pilot',
+  'sidebar.skill': 'Skills',
+  'sidebar.shop': 'Shop',
+  'sidebar.map': 'Map',
+
+  // Gear Wireframe View
+  'gear.slotsHeading': 'Equipment Slots',
+  'gear.statsHeading': 'Combat Stats',
+  'gear.gridHeading': 'Cargo Grid',
+  'gear.detailHeading': 'Part Details & Comparison',
+  'gear.emptyDetailTitle': 'Select a Ship Part',
+  'gear.emptyDetailDesc':
+    'Click any equipped slot above to Enchant or Unequip, or click an item tile in the Cargo Grid to compare +/- stat changes.',
+  'gear.currentlyEquipped': 'Currently Equipped',
+  'gear.inCargo': 'In Cargo Hold',
+  'gear.comparisonHeading': 'Stat Comparison (+/-)',
+  'gear.confirmEquip': 'Equip Part',
+  'gear.confirmUnequip': 'Confirm Unequip',
+  'gear.previewUnequip': 'Unequip',
+  'gear.noStatDiff': 'No change to stats',
+  'gear.classSwitchLabel': 'Switch Gear Class',
+  'gear.allocateHint': '+{count} pts ready → Pilot',
+
+  // Skill View
+  'skill.pageTitle': 'Gear Combat Skills',
+  'skill.pageSubtitle':
+    'Each Gear class carries a signature tactical weapon system powered by SP from Spirit.',
+  'skill.activeBadge': 'Active Gear Skill',
+  'skill.allClassesTitle': 'All Gear Class Skills',
+  'skill.spCost': 'SP Cost',
+  'skill.targeting': 'Targeting',
+  'skill.power': 'Power Scale',
+  'skill.pierce': 'Defense Pierce',
+  'skill.bonusCrit': 'Bonus Crit',
+  'skill.restore': 'Squad Restore',
+
+  // Map View
+  'map.pageTitle': 'Orbital Sector Map',
+  'map.pageSubtitle':
+    'Select a star sector for your 4-ship wing. Higher threat sectors yield more EXP, Credits, and rare ship part drops.',
+  'map.selectedSector': 'Selected Drop Zone',
+  'map.enemyEstimate': 'Estimated Hostiles',
+  'map.rewardRate': 'Reward Multiplier',
+  'map.dropOdds': 'Epic Drop Odds',
 
   // Title Screen
   'title.savedPilot': 'Saved Pilot:',

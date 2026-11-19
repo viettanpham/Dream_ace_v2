@@ -255,4 +255,6 @@ export interface BattleState {
   summary: BattleSummary | null;
 }
 
+export type BaseTab = 'gear' | 'pilot' | 'skill' | 'shop' | 'map';
+
 export type ScreenState = 'TITLE' | 'HANGAR' | 'SHOP' | 'BATTLE';

@@ -41,7 +41,7 @@ export function ShopScreen() {
   const player = useGameStore((s) => s.player);
   const buyItem = useGameStore((s) => s.buyItem);
   const sellItem = useGameStore((s) => s.sellItem);
-  const setScreen = useGameStore((s) => s.setScreen);
+  const setActiveTab = useGameStore((s) => s.setActiveTab);
 
   const [tab, setTab] = useState<ShopTab>('buy');
   const [slotFilter, setSlotFilter] = useState<EquipmentSlot | 'all'>('all');
@@ -134,8 +134,8 @@ export function ShopScreen() {
     : null;
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto bg-tactical-grid">
-      <div className="mx-auto max-w-[1400px] px-4 sm:px-6 py-5 space-y-5">
+    <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className="mx-auto max-w-[1400px] p-4 sm:p-5 space-y-4">
         {/* Header Bar */}
         <div className="rounded-lg border border-slate-800/90 bg-[#0D131D]/95 p-4 flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -200,7 +200,7 @@ export function ShopScreen() {
             <span>{noticeText}</span>
             <button
               type="button"
-              onClick={() => setScreen('HANGAR')}
+              onClick={() => setActiveTab('gear')}
               className="font-semibold text-amber-300 hover:text-amber-200 cursor-pointer whitespace-nowrap"
             >
               {t('shop.equipInHangar')}

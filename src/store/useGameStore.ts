@@ -29,6 +29,7 @@ import {
 } from '../engine/stats';
 import type {
   ActionType,
+  BaseTab,
   BattleState,
   EnchantAttemptResult,
   EquipmentSlot,
@@ -114,6 +115,7 @@ interface GameStoreState {
 
   // Session UI / Battle state (transient)
   screen: ScreenState;
+  activeTab: BaseTab;
   battle: BattleState | null;
   unequippedNoticeItems: Array<{ itemId: string; enchantLevel: number }>;
 
@@ -122,6 +124,7 @@ interface GameStoreState {
 
   // Navigation & Save actions
   setScreen: (screen: ScreenState) => void;
+  setActiveTab: (tab: BaseTab) => void;
   startCampaign: () => void;
   resetCampaign: () => void;
   clearHangarNotice: () => void;
@@ -210,6 +213,7 @@ export const useGameStore = create<GameStoreState>()(
       battleSpeed: 1,
       language: 'vi',
       screen: 'TITLE',
+      activeTab: 'gear',
       battle: null,
       unequippedNoticeItems: [],
 
@@ -220,12 +224,25 @@ export const useGameStore = create<GameStoreState>()(
 
       setScreen: (screen) => {
         soundFx.playClick();
+        if (screen === 'SHOP') {
+          set({
+            screen: 'HANGAR',
+            activeTab: 'shop',
+            unequippedNoticeItems: [],
+          });
+          return;
+        }
         set({ screen, unequippedNoticeItems: [] });
+      },
+
+      setActiveTab: (activeTab) => {
+        soundFx.playClick();
+        set({ screen: 'HANGAR', activeTab, unequippedNoticeItems: [] });
       },
 
       startCampaign: () => {
         soundFx.playConfirm();
-        set({ hasSaveData: true, screen: 'HANGAR' });
+        set({ hasSaveData: true, screen: 'HANGAR', activeTab: 'gear' });
       },
 
       resetCampaign: () => {
@@ -237,6 +254,7 @@ export const useGameStore = create<GameStoreState>()(
           battle: null,
           unequippedNoticeItems: [],
           screen: 'HANGAR',
+          activeTab: 'gear',
         });
       },
 

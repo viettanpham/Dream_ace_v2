@@ -2,7 +2,7 @@ import type { TranslationKey } from './en';
 
 export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   // Brand & Common
-  'app.title': 'STARFRONT',
+  'app.title': 'DREAM ACE',
   'app.subtitle': 'RPG Chiến Thuật Phi Cơ Không Gian',
   'app.tagline':
     'Tinh chỉnh chiến cơ Gear qua 6 chỉ số cốt lõi, chuyển đổi linh hoạt 4 lớp phi cơ chuyên biệt và chỉ huy phi đội 4 chiếc trong trận không chiến theo lượt.',
@@ -31,11 +31,56 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'common.reqLevel': 'Cần Cấp {level}',
   'common.reqClass': 'Chỉ dành cho lớp {className}',
 
-  // Navigation / TopHud
+  // Navigation / TopHud / Sidebar
   'nav.hangar': 'Nhà chứa',
-  'nav.shop': 'Cửa hàng',
+  'nav.shop': 'Chợ',
   'nav.deploy': 'Xuất kích',
-  'nav.returnHangar': 'Về Nhà chứa',
+  'nav.returnHangar': 'Về căn cứ',
+  'sidebar.gear': 'Gear',
+  'sidebar.pilot': 'Phi công',
+  'sidebar.skill': 'Skill',
+  'sidebar.shop': 'Chợ',
+  'sidebar.map': 'Bản đồ',
+
+  // Gear Wireframe View
+  'gear.slotsHeading': 'Slot trang bị',
+  'gear.statsHeading': 'Chỉ số',
+  'gear.gridHeading': 'Kho đồ',
+  'gear.detailHeading': 'Chi tiết & So sánh chỉ số',
+  'gear.emptyDetailTitle': 'Chọn linh kiện để xem',
+  'gear.emptyDetailDesc':
+    'Nhấn vào một ô trang bị phía trên để Cường hóa hoặc Tháo đồ, hoặc chọn một ô trong Kho đồ để so sánh +/- chỉ số trực tiếp.',
+  'gear.currentlyEquipped': 'Đang trang bị',
+  'gear.inCargo': 'Trong kho đồ',
+  'gear.comparisonHeading': 'So sánh chỉ số (+/-)',
+  'gear.confirmEquip': 'Trang bị ngay',
+  'gear.confirmUnequip': 'Xác nhận tháo',
+  'gear.previewUnequip': 'Tháo đồ',
+  'gear.noStatDiff': 'Không thay đổi chỉ số',
+  'gear.classSwitchLabel': 'Đổi lớp Gear',
+  'gear.allocateHint': 'Có +{count} điểm → Phi công',
+
+  // Skill View
+  'skill.pageTitle': 'Kỹ năng Chiến cơ (Skill)',
+  'skill.pageSubtitle':
+    'Mỗi lớp Gear sở hữu hệ thống vũ khí chiến thuật đặc trưng, tiêu tốn SP từ chỉ số Tinh thần.',
+  'skill.activeBadge': 'Kỹ năng Gear hiện tại',
+  'skill.allClassesTitle': 'Toàn bộ Kỹ năng 4 lớp Gear',
+  'skill.spCost': 'Tiêu hao SP',
+  'skill.targeting': 'Mục tiêu',
+  'skill.power': 'Hệ số sát thương',
+  'skill.pierce': 'Xuyên giáp',
+  'skill.bonusCrit': 'Tăng chí mạng',
+  'skill.restore': 'Hồi phục đội hình',
+
+  // Map View
+  'map.pageTitle': 'Bản đồ Khu vực Quỹ đạo',
+  'map.pageSubtitle':
+    'Chọn khu vực xuất kích cho phi đội 4 phi cơ. Khu vực càng nguy hiểm, thưởng EXP, Credits và tỉ lệ rơi đồ Sử thi càng cao.',
+  'map.selectedSector': 'Khu vực đã chọn',
+  'map.enemyEstimate': 'Lực lượng địch dự kiến',
+  'map.rewardRate': 'Hệ số phần thưởng',
+  'map.dropOdds': 'Tỉ lệ rơi Sử thi',
 
   // Title Screen
   'title.savedPilot': 'Hồ sơ đã lưu:',
