@@ -390,6 +390,97 @@ export interface ItemInstance {
   price: number;
   enchantLevel: number; // 0 to 10
   specialTraits?: ItemSpecialTraits;
+  locked?: boolean;
+  favorited?: boolean;
+  isNew?: boolean;
+  obtainedAt?: number;
+}
+
+export interface ShopItemListing extends ItemInstance {
+  soldOut?: boolean;
+}
+
+export type ConsumableKind =
+  | 'equipment_crate'
+  | 'enchant_stone'
+  | 'respec_token'
+  | 'exp_boost';
+
+export interface ConsumableItem {
+  id: string;
+  kind: ConsumableKind;
+  quantity: number;
+  slot?: EquipmentSlot;
+  minRarity?: ItemRarity;
+  bonusPct?: number;
+  battlesCount?: number;
+}
+
+export interface WpMarketOffer {
+  id: string;
+  kind: ConsumableKind;
+  wpCost: number;
+  soldOut: boolean;
+  slot?: EquipmentSlot;
+  minRarity?: ItemRarity;
+  bonusPct?: number;
+  battlesCount?: number;
+}
+
+export type InventorySlotFilter = EquipmentSlot | 'all' | 'consumables';
+
+export type InventoryUsabilityFilter = 'all' | 'selected_gear' | 'any_gear';
+
+export type InventorySortKey =
+  | 'newest'
+  | 'level'
+  | 'rarity'
+  | 'tier'
+  | 'rollQuality'
+  | 'sellValue'
+  | 'powerScore'
+  | 'name';
+
+export type InventorySortDirection = 'asc' | 'desc';
+
+export interface InventoryFilterState {
+  search: string;
+  slot: InventorySlotFilter;
+  rarities: ItemRarity[];
+  tiers: number[];
+  minLevel: number | null;
+  maxLevel: number | null;
+  usability: InventoryUsabilityFilter;
+  minQuality: number;
+  maxQuality: number;
+  onlyUpgrades: boolean;
+  lockedOnly: boolean;
+  newOnly: boolean;
+  sortBy: InventorySortKey;
+  sortDir: InventorySortDirection;
+  pinEquippedFirst: boolean;
+}
+
+export type QuickSellPresetId =
+  | 'sell_common'
+  | 'sell_below_level'
+  | 'sell_worse_than_equipped';
+
+export interface QuickSellFilterConfig {
+  maxRarity: ItemRarity | null;
+  maxTier: number | null;
+  maxRequiredLevel: number | null;
+  belowEquippedLevel: boolean;
+  maxSellValue: number | null;
+  maxRollQuality: number | null;
+  worseThanEquipped: boolean;
+  worseThanEquippedScope: 'selected' | 'any_owned';
+}
+
+export interface QuickSellUndoState {
+  soldItems: ItemInstance[];
+  totalCredits: number;
+  soldAt: number;
 }
 
 export type EquippedSlotIds = Record<EquipmentSlot, string | null>;
@@ -606,6 +697,9 @@ export interface PilotAccount {
   hiredWingman: HiredWingmanBuff | null;
   engineerShieldBoost: boolean;
   activeBonusMission: BonusMissionState | null;
+  consumables?: ConsumableItem[];
+  activeExpBoostBattles?: number;
+  activeEnchantBonusPct?: number;
 }
 
 export type EnemyArchetype = 'drone' | 'gunship' | 'sniper' | 'repair_ship';
@@ -941,6 +1035,18 @@ export interface AdminConfig {
   rewardMultiplier: number;
   battleSizeOverride: BattleSize | null;
   softEnrageEnabled: boolean;
+  enrageStartRound: number;
+  enrageStepPct: number;
+  forceBoss: boolean;
+  battleLevelOffsetOverride: number | null;
+  shopMinStock: number;
+  shopMaxStock: number;
+  shopRarityWeights: Record<ItemRarity, number>;
+  shopPriceMultiplier: number;
+  formationFrontCapacity: number;
+  formationBackCapacity: number;
+  backRowDamageReduction: number;
+  showRawI18nKeys: boolean;
 }
 
 export type BaseTab = 'gear' | 'garage' | 'skill' | 'shop' | 'map';

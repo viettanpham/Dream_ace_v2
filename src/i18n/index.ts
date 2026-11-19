@@ -39,6 +39,13 @@ export function translate(
   key: TranslationKey,
   params?: Record<string, string | number>
 ): string {
+  try {
+    if (useGameStore.getState()?.adminConfig?.showRawI18nKeys) {
+      return key;
+    }
+  } catch {
+    // Store may not be initialized during static module evaluation
+  }
   const dict = DICTIONARIES[lang] ?? VI_TRANSLATIONS;
   let text = dict[key] ?? EN_TRANSLATIONS[key] ?? key;
 
@@ -639,12 +646,13 @@ function formatActionParam(
 
 export function useI18n() {
   const lang = useGameStore((s) => s.language);
+  const showRawKeys = useGameStore((s) => s.adminConfig.showRawI18nKeys);
   const setLanguage = useGameStore((s) => s.setLanguage);
 
   const t = useCallback(
     (key: TranslationKey, params?: Record<string, string | number>) =>
-      translate(lang, key, params),
-    [lang]
+      showRawKeys ? key : translate(lang, key, params),
+    [lang, showRawKeys]
   );
 
   return { lang, t, setLanguage };

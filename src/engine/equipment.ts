@@ -49,6 +49,9 @@ export interface GenerateItemOptions {
   requiredLevel?: number;
   classRestriction?: MechClassId | null;
   enchantLevel?: number;
+  rollQuality?: number; // optional fixed 1..100% quality roll
+  isNew?: boolean;
+  obtainedAt?: number;
 }
 
 /**
@@ -106,9 +109,18 @@ export function generateItemInstance(
   const qualitySamples: number[] = [];
   const rolledBaseStats: Partial<StatBlock> = {};
 
+  const forcedPct =
+    options.rollQuality !== undefined
+      ? Math.max(0.01, Math.min(1, options.rollQuality / 100))
+      : null;
+  const rollWithOverride = (min: number, max: number) =>
+    forcedPct !== null
+      ? { value: Math.round(min + forcedPct * (max - min)), pct: forcedPct }
+      : rollRange(min, max, rng);
+
   const pMin = Math.max(1, Math.round(template.primaryRange[0] * totalBaseMult));
   const pMax = Math.max(pMin + 1, Math.round(template.primaryRange[1] * totalBaseMult));
-  const primaryRoll = rollRange(pMin, pMax, rng);
+  const primaryRoll = rollWithOverride(pMin, pMax);
   rolledBaseStats[template.primaryStat] = primaryRoll.value;
   qualitySamples.push(primaryRoll.pct);
 
@@ -118,7 +130,7 @@ export function generateItemInstance(
       sMin + 1,
       Math.round(template.secondaryRange[1] * totalBaseMult)
     );
-    const secondaryRoll = rollRange(sMin, sMax, rng);
+    const secondaryRoll = rollWithOverride(sMin, sMax);
     rolledBaseStats[template.secondaryStat] =
       (rolledBaseStats[template.secondaryStat] ?? 0) + secondaryRoll.value;
     qualitySamples.push(secondaryRoll.pct);
@@ -143,7 +155,7 @@ export function generateItemInstance(
       affixMin + 2,
       Math.round((4 + tier * 3.5) * (1.0 + requiredLevel * 0.04))
     );
-    const affixRoll = rollRange(affixMin, affixMax, rng);
+    const affixRoll = rollWithOverride(affixMin, affixMax);
     qualitySamples.push(affixRoll.pct);
 
     const suffixPool = AFFIX_SUFFIX_BY_STAT[chosenStat];
@@ -157,7 +169,10 @@ export function generateItemInstance(
 
   const avgQuality =
     qualitySamples.reduce((sum, q) => sum + q, 0) / Math.max(1, qualitySamples.length);
-  const rollQuality = Math.max(1, Math.min(100, Math.round(avgQuality * 100)));
+  const rollQuality =
+    options.rollQuality !== undefined
+      ? Math.max(1, Math.min(100, Math.round(options.rollQuality)))
+      : Math.max(1, Math.min(100, Math.round(avgQuality * 100)));
 
   // Pick suffix from the highest-rolled affix (null for Common)
   let suffixId: string | null = null;
@@ -199,6 +214,8 @@ export function generateItemInstance(
       Math.min(ENCHANT_CONFIG.maxLevel, options.enchantLevel ?? 0)
     ),
     specialTraits: template.specialTraits ? { ...template.specialTraits } : undefined,
+    isNew: options.isNew ?? false,
+    obtainedAt: options.obtainedAt ?? Date.now(),
   };
 }
 
@@ -554,13 +571,17 @@ export function getEnchantMetadata(instance: ItemInstance): {
 export function resolveEnchantAttempt(
   instance: ItemInstance,
   pilotCredits: number,
-  rng: () => number = Math.random
+  rng: () => number = Math.random,
+  bonusSuccessPct = 0
 ): {
   result: EnchantAttemptResult;
   updatedInstance: ItemInstance;
   remainingCredits: number;
 } {
   const meta = getEnchantMetadata(instance);
+  const effectiveSuccessRate = meta.isMax
+    ? 0
+    : Math.min(100, meta.successRate + Math.max(0, bonusSuccessPct));
 
   if (meta.isMax) {
     return {
@@ -591,7 +612,7 @@ export function resolveEnchantAttempt(
         previousLevel: meta.currentLevel,
         newLevel: meta.currentLevel,
         creditsSpent: meta.cost,
-        successRate: meta.successRate,
+        successRate: effectiveSuccessRate,
       },
       updatedInstance: instance,
       remainingCredits: pilotCredits,
@@ -599,7 +620,7 @@ export function resolveEnchantAttempt(
   }
 
   const roll = rng() * 100;
-  const succeeded = roll < meta.successRate;
+  const succeeded = roll < effectiveSuccessRate;
   const nextCredits = pilotCredits - meta.cost;
 
   if (succeeded) {
@@ -617,7 +638,7 @@ export function resolveEnchantAttempt(
         previousLevel: meta.currentLevel,
         newLevel: meta.nextLevel,
         creditsSpent: meta.cost,
-        successRate: meta.successRate,
+        successRate: effectiveSuccessRate,
       },
       updatedInstance: upgraded,
       remainingCredits: nextCredits,
@@ -634,7 +655,7 @@ export function resolveEnchantAttempt(
       previousLevel: meta.currentLevel,
       newLevel: meta.currentLevel,
       creditsSpent: meta.cost,
-      successRate: meta.successRate,
+      successRate: effectiveSuccessRate,
     },
     updatedInstance: instance,
     remainingCredits: nextCredits,
@@ -705,6 +726,7 @@ export function rollBattleItemDrops(
           templateId: tpl.id,
           tier: Math.min(maxTier, tpl.tier),
           rarity,
+          isNew: true,
         },
         rng
       )
@@ -728,6 +750,7 @@ export function rollBattleItemDrops(
             templateId: tpl.id,
             tier: Math.min(maxTier, tpl.tier),
             rarity,
+            isNew: true,
           },
           rng
         )

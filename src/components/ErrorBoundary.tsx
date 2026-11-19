@@ -2,6 +2,7 @@ import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { AlertTriangle, Check, Copy, RotateCcw, X } from 'lucide-react';
 import { translate } from '../i18n';
 import { useGameStore } from '../store/useGameStore';
+import { recordAppError } from '../utils/errorLog';
 
 export interface ErrorBoundaryProps {
   children: ReactNode;
@@ -87,6 +88,7 @@ export class ErrorBoundary extends Component<
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
     const label = this.props.title || this.props.variant || 'panel';
     console.error(`[ErrorBoundary:${label}] Caught render error:`, error, errorInfo);
+    recordAppError(`ErrorBoundary:${label}`, error, errorInfo.componentStack ?? undefined);
     this.setState({
       componentStack: errorInfo.componentStack ?? '',
     });

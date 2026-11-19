@@ -33,6 +33,7 @@ import { useGameStore } from '../store/useGameStore';
 import type { MechClassId, StatBlock, StatKey } from '../types/game';
 import { soundFx } from '../utils/sound';
 import { FighterSvg } from './FighterSvg';
+import { ClassIcon } from './GameIcons';
 import { StatBar } from './StatBar';
 
 export function GarageView() {
@@ -279,10 +280,7 @@ export function GarageView() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <span
-                          className="w-2.5 h-2.5 rounded-full shrink-0"
-                          style={{ backgroundColor: cls.accentHex }}
-                        />
+                        <ClassIcon classId={cls.id} className="w-4 h-4 shrink-0" />
                         <h3 className="font-display text-xl font-bold text-slate-100 leading-none truncate">
                           {getClassName(lang, cls.id)}
                         </h3>

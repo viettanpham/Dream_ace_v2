@@ -1,19 +1,73 @@
-import { useState } from 'react';
-import { ShieldAlert, Terminal, X } from 'lucide-react';
-import { EQUIPMENT_SLOTS, RARITY_LIST } from '../data/items';
-import { getClassName, getRarityLabel, getSlotLabel, useI18n } from '../i18n';
-import { useGameStore } from '../store/useGameStore';
-import type { BattleSize, EquipmentSlot, ItemRarity } from '../types/game';
+import { useEffect, useState } from 'react';
+import {
+  AlertTriangle,
+  Check,
+  Copy,
+  Download,
+  Flag,
+  LayoutGrid,
+  Package,
+  RefreshCw,
+  RotateCcw,
+  Shield,
+  ShoppingBag,
+  Sliders,
+  Sparkles,
+  Swords,
+  Trash2,
+  Upload,
+  User,
+  Wrench,
+  X,
+} from 'lucide-react';
+import { BALANCE_CONFIG } from '../data/balance';
+import { MECH_CLASS_LIST } from '../data/classes';
+import { EQUIPMENT_SLOTS, ITEM_TEMPLATES } from '../data/items';
+import { SECTORS_CATALOG } from '../data/maps';
+import {
+  getClassName,
+  getRarityLabel,
+  getSectorName,
+  getSlotLabel,
+  useI18n,
+} from '../i18n';
+import { ENABLE_ADMIN_CP, useGameStore } from '../store/useGameStore';
+import type {
+  BattleSize,
+  EquipmentSlot,
+  ItemRarity,
+  MechClassId,
+} from '../types/game';
+import {
+  clearErrorLogs,
+  getErrorLogs,
+  subscribeErrorLogs,
+  type AppErrorLogEntry,
+} from '../utils/errorLog';
+import { ClassIcon, SlotIcon } from './GameIcons';
+
+type AdminTab =
+  | 'pilot'
+  | 'items'
+  | 'shop'
+  | 'skills'
+  | 'battle'
+  | 'campaign'
+  | 'formation'
+  | 'system';
+
+const RARITY_LIST: ItemRarity[] = ['common', 'rare', 'epic', 'legendary'];
 
 export function AdminPanel() {
   const { lang, t } = useI18n();
   const open = useGameStore((s) => s.adminPanelOpen);
-  const setOpen = useGameStore((s) => s.setAdminPanelOpen);
   const pilot = useGameStore((s) => s.pilot);
-  const screen = useGameStore((s) => s.screen);
   const battle = useGameStore((s) => s.battle);
+  const shopStock = useGameStore((s) => s.shopStock);
+  const wpMarketOffers = useGameStore((s) => s.wpMarketOffers);
   const adminConfig = useGameStore((s) => s.adminConfig);
 
+  const setAdminPanelOpen = useGameStore((s) => s.setAdminPanelOpen);
   const adminSetGearLevel = useGameStore((s) => s.adminSetGearLevel);
   const adminAddGearExp = useGameStore((s) => s.adminAddGearExp);
   const adminSetGearUnspentPoints = useGameStore(
@@ -30,547 +84,1484 @@ export function AdminPanel() {
   const adminSetWarPoints = useGameStore((s) => s.adminSetWarPoints);
   const adminAddWarPoints = useGameStore((s) => s.adminAddWarPoints);
   const adminGenerateItems = useGameStore((s) => s.adminGenerateItems);
+  const adminDeleteItems = useGameStore((s) => s.adminDeleteItems);
+  const adminFillInventory = useGameStore((s) => s.adminFillInventory);
+  const adminRestockShopNow = useGameStore((s) => s.adminRestockShopNow);
+  const adminForceAddShopItem = useGameStore((s) => s.adminForceAddShopItem);
+  const adminUnlockAllSkillsForGear = useGameStore(
+    (s) => s.adminUnlockAllSkillsForGear
+  );
+  const adminGrantAllOpeningCards = useGameStore(
+    (s) => s.adminGrantAllOpeningCards
+  );
+  const adminResetBattleCooldowns = useGameStore(
+    (s) => s.adminResetBattleCooldowns
+  );
+  const adminSkipBattleToRound = useGameStore((s) => s.adminSkipBattleToRound);
+  const adminSetCampaignMonth = useGameStore((s) => s.adminSetCampaignMonth);
+  const adminSetBaseFaction = useGameStore((s) => s.adminSetBaseFaction);
+  const adminTriggerEnemyAttack = useGameStore(
+    (s) => s.adminTriggerEnemyAttack
+  );
   const adminUnlockAllGears = useGameStore((s) => s.adminUnlockAllGears);
   const adminUnlockAllSectors = useGameStore((s) => s.adminUnlockAllSectors);
   const adminUpdateConfig = useGameStore((s) => s.adminUpdateConfig);
+  const adminExportSaveJson = useGameStore((s) => s.adminExportSaveJson);
+  const adminImportSaveJson = useGameStore((s) => s.adminImportSaveJson);
   const forceWinBattle = useGameStore((s) => s.forceWinBattle);
   const resetCampaign = useGameStore((s) => s.resetCampaign);
 
-  const activeGear = pilot.gears[pilot.activeGearId];
+  const [tab, setTab] = useState<AdminTab>('pilot');
+  const [targetGearId, setTargetGearId] = useState<MechClassId>(
+    pilot.activeGearId
+  );
 
-  const [levelInput, setLevelInput] = useState(String(activeGear.level));
+  // Pilot tab inputs
+  const [levelInput, setLevelInput] = useState(
+    String(pilot.gears[pilot.activeGearId].level)
+  );
   const [expInput, setExpInput] = useState('500');
-  const [ptsInput, setPtsInput] = useState('10');
+  const [pointsInput, setPointsInput] = useState('10');
   const [creditsInput, setCreditsInput] = useState('5000');
-  const [wpInput, setWpInput] = useState('200');
+  const [wpInput, setWpInput] = useState('500');
+
+  // Items tab inputs
   const [genSlot, setGenSlot] = useState<EquipmentSlot>('main_weapon');
   const [genTier, setGenTier] = useState<number>(2);
   const [genRarity, setGenRarity] = useState<ItemRarity>('epic');
+  const [genReqLevel, setGenReqLevel] = useState<string>('');
+  const [genQuality, setGenQuality] = useState<string>('');
   const [genQty, setGenQty] = useState<number>(3);
+  const [delMaxRarity, setDelMaxRarity] = useState<ItemRarity>('common');
+  const [delMaxTier, setDelMaxTier] = useState<number>(2);
+
+  // Shop tab force-add inputs
+  const [forceShopSlot, setForceShopSlot] = useState<EquipmentSlot>('main_weapon');
+  const [forceShopTier, setForceShopTier] = useState<number>(3);
+  const [forceShopRarity, setForceShopRarity] = useState<ItemRarity>('legendary');
+  const [forceShopTpl, setForceShopTpl] = useState<string>('');
+
+  // Battle tab skip-round input
+  const [skipRoundInput, setSkipRoundInput] = useState('21');
+
+  // Campaign tab month input
+  const [monthInput, setMonthInput] = useState(String(pilot.campaignMonth));
+
+  // System tab state
+  const [importJson, setImportJson] = useState('');
   const [confirmReset, setConfirmReset] = useState(false);
-  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [showInspector, setShowInspector] = useState(false);
+  const [errorLogs, setErrorLogs] = useState<AppErrorLogEntry[]>(() =>
+    getErrorLogs()
+  );
 
-  if (!open) return null;
+  const [feedback, setFeedback] = useState<string | null>(null);
 
+  useEffect(() => {
+    setTargetGearId(pilot.activeGearId);
+    setLevelInput(String(pilot.gears[pilot.activeGearId].level));
+    setMonthInput(String(pilot.campaignMonth));
+  }, [pilot.activeGearId, pilot.gears, pilot.campaignMonth, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    setErrorLogs(getErrorLogs());
+    return subscribeErrorLogs(() => {
+      setErrorLogs(getErrorLogs());
+    });
+  }, [open]);
+
+  if (!open || !ENABLE_ADMIN_CP) return null;
+
+  const targetGear = pilot.gears[targetGearId] ?? pilot.gears[pilot.activeGearId];
   const flash = (msg: string) => {
-    setStatusMsg(msg);
+    setFeedback(msg);
   };
+
+  const tabs: Array<{ id: AdminTab; label: string; icon: typeof User }> = [
+    { id: 'pilot', label: t('admin.tab.pilot'), icon: User },
+    { id: 'items', label: t('admin.tab.items'), icon: Package },
+    { id: 'shop', label: t('admin.tab.shop'), icon: ShoppingBag },
+    { id: 'skills', label: t('admin.tab.skills'), icon: Sparkles },
+    { id: 'battle', label: t('admin.tab.battle'), icon: Swords },
+    { id: 'campaign', label: t('admin.tab.campaign'), icon: Flag },
+    { id: 'formation', label: t('admin.tab.formation'), icon: LayoutGrid },
+    { id: 'system', label: t('admin.tab.system'), icon: Wrench },
+  ];
+
+  const handleCopyExport = async () => {
+    const json = adminExportSaveJson();
+    try {
+      await navigator.clipboard.writeText(json);
+      flash(t('error.copiedBtn'));
+    } catch {
+      setImportJson(json);
+      flash(t('admin.systemExportCopy'));
+    }
+  };
+
+  const handleDownloadExport = () => {
+    const json = adminExportSaveJson();
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `dream_ace_save_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    flash(t('admin.systemExportDownload'));
+  };
+
+  const handleImportSave = () => {
+    const res = adminImportSaveJson(importJson);
+    if (res.ok) {
+      flash(t('admin.systemImportOk'));
+      setImportJson('');
+    } else {
+      flash(t('admin.systemImportErr', { err: res.error ?? 'Unknown' }));
+    }
+  };
+
+  const forceSlotTemplates = ITEM_TEMPLATES.filter(
+    (tpl) => tpl.slot === forceShopSlot
+  );
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
       role="dialog"
       aria-modal="true"
-      aria-label="Admin Control Panel"
+      aria-label={t('admin.title')}
     >
-      <div className="w-full max-w-3xl max-h-[90dvh] overflow-y-auto tactical-scroll rounded-lg border border-amber-500/60 bg-[#0B111C] shadow-2xl">
+      <div className="w-full sm:max-w-4xl h-[92dvh] sm:h-[85dvh] rounded-t-2xl sm:rounded-xl border border-amber-500/40 bg-[#0A101B] text-slate-100 shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="sticky top-0 z-10 px-4 sm:px-5 py-3 border-b border-slate-800 bg-[#090E17] flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <Terminal className="w-5 h-5 text-amber-400 shrink-0" />
+        <div className="px-4 py-3 border-b border-slate-800 bg-[#0E1624] flex items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <Sliders className="w-4 h-4 text-amber-400 shrink-0" />
             <div className="min-w-0">
-              <h2 className="font-display text-xl font-bold text-slate-100 leading-none truncate">
+              <h2 className="font-display text-lg font-bold tracking-wide text-amber-300 truncate">
                 {t('admin.title')}
               </h2>
-              <p className="text-[11px] text-slate-400 mt-0.5 truncate">
+              <p className="text-[11px] text-slate-400 truncate">
                 {t('admin.subtitle')}
               </p>
             </div>
           </div>
-
           <button
             type="button"
-            onClick={() => setOpen(false)}
-            className="min-h-[44px] min-w-[44px] rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 flex items-center justify-center text-slate-300 cursor-pointer shrink-0"
+            onClick={() => setAdminPanelOpen(false)}
+            aria-label={t('admin.close')}
+            className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 cursor-pointer shrink-0"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="p-5 space-y-5 text-xs">
-          {statusMsg && (
-            <div className="rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-emerald-300 font-mono-nums">
-              {statusMsg}
+        {/* Wrapped Icon Tab Bar (NO horizontal scrollbar) */}
+        <div className="px-3 py-2 border-b border-slate-800 bg-[#0C1320] flex flex-wrap gap-1.5 shrink-0">
+          {tabs.map((tb) => {
+            const Icon = tb.icon;
+            const active = tab === tb.id;
+            return (
+              <button
+                key={tb.id}
+                type="button"
+                data-testid={`admin-tab-${tb.id}`}
+                onClick={() => setTab(tb.id)}
+                className={`min-h-[36px] px-2.5 rounded-lg border text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
+                  active
+                    ? 'border-amber-400 bg-amber-500/20 text-amber-200'
+                    : 'border-slate-800 bg-slate-900/80 text-slate-400 hover:text-slate-100'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5 shrink-0" />
+                <span>{tb.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Feedback Toast Bar */}
+        {feedback && (
+          <div className="px-4 py-2 border-b border-emerald-500/30 bg-emerald-950/30 text-xs text-emerald-200 flex items-center justify-between gap-2 shrink-0">
+            <span className="inline-flex items-center gap-1.5">
+              <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span>{feedback}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setFeedback(null)}
+              className="text-slate-400 hover:text-slate-200 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* Tab Body */}
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 pb-safe">
+          {/* 1. PILOT & GEAR TAB */}
+          {tab === 'pilot' && (
+            <div className="space-y-4">
+              {/* Target Gear Selector */}
+              <div className="p-3 rounded-lg border border-slate-800 bg-[#0D1422] space-y-2">
+                <div className="text-xs font-semibold text-slate-300">
+                  {t('admin.targetGear')}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {MECH_CLASS_LIST.map((cls) => {
+                    const g = pilot.gears[cls.id];
+                    const selected = targetGearId === cls.id;
+                    return (
+                      <button
+                        key={cls.id}
+                        type="button"
+                        onClick={() => {
+                          setTargetGearId(cls.id);
+                          setLevelInput(String(g.level));
+                        }}
+                        className={`min-h-[38px] px-3 rounded-lg border text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer ${
+                          selected
+                            ? 'border-amber-400 bg-amber-500/15 text-amber-200'
+                            : 'border-slate-700 bg-slate-900 text-slate-300'
+                        }`}
+                      >
+                        <ClassIcon classId={cls.id} className="w-3.5 h-3.5" />
+                        <span>
+                          {getClassName(lang, cls.id)} Lv.{g.level}
+                          {!g.owned ? ' (Locked)' : ''}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Level & EXP */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="p-3 rounded-lg border border-slate-800 bg-[#0D1422] space-y-2">
+                  <div className="text-xs font-semibold text-slate-300">
+                    {t('admin.setLevel')} (1–{BALANCE_CONFIG.maxLevel})
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      max={BALANCE_CONFIG.maxLevel}
+                      value={levelInput}
+                      onChange={(e) => setLevelInput(e.target.value)}
+                      className="flex-1 h-9 px-2.5 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        adminSetGearLevel(Number(levelInput) || 1, targetGearId);
+                        flash(
+                          `${getClassName(lang, targetGearId)} → Lv.${levelInput}`
+                        );
+                      }}
+                      className="h-9 px-3 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs cursor-pointer"
+                    >
+                      {t('admin.apply')}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-lg border border-slate-800 bg-[#0D1422] space-y-2">
+                  <div className="text-xs font-semibold text-slate-300">
+                    {t('admin.addExp')}
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      value={expInput}
+                      onChange={(e) => setExpInput(e.target.value)}
+                      className="flex-1 h-9 px-2.5 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        adminAddGearExp(Number(expInput) || 0, targetGearId);
+                        flash(`+${expInput} EXP`);
+                      }}
+                      className="h-9 px-3 rounded bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs cursor-pointer"
+                    >
+                      +{expInput}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Stat Points */}
+                <div className="p-3 rounded-lg border border-slate-800 bg-[#0D1422] space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-slate-300">
+                      {t('admin.statPoints')}
+                    </span>
+                    <span className="font-mono-nums text-amber-300">
+                      {targetGear.unspentPoints} pts
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      value={pointsInput}
+                      onChange={(e) => setPointsInput(e.target.value)}
+                      className="w-20 h-9 px-2.5 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        adminSetGearUnspentPoints(
+                          Number(pointsInput) || 0,
+                          targetGearId
+                        );
+                        flash(`Points = ${pointsInput}`);
+                      }}
+                      className="h-9 px-3 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-xs font-semibold cursor-pointer"
+                    >
+                      Set
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        adminAddGearUnspentPoints(
+                          Number(pointsInput) || 0,
+                          targetGearId
+                        );
+                        flash(`+${pointsInput} pts`);
+                      }}
+                      className="h-9 px-3 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs cursor-pointer"
+                    >
+                      +{pointsInput}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        adminResetGearAllocation(targetGearId);
+                        flash(t('admin.resetAllocation'));
+                      }}
+                      className="h-9 px-2.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-xs text-slate-300 cursor-pointer"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Unlock all Gears */}
+                <div className="p-3 rounded-lg border border-slate-800 bg-[#0D1422] flex flex-col justify-between gap-2">
+                  <div className="text-xs font-semibold text-slate-300">
+                    {t('admin.unlockAllGears')}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      adminUnlockAllGears();
+                      flash(t('admin.unlockAllGears'));
+                    }}
+                    className="h-9 px-3 rounded bg-amber-500/20 border border-amber-500/60 hover:bg-amber-500/30 text-amber-200 font-semibold text-xs cursor-pointer"
+                  >
+                    {t('admin.unlockAllGears')} (4/4)
+                  </button>
+                </div>
+
+                {/* Credits */}
+                <div className="p-3 rounded-lg border border-slate-800 bg-[#0D1422] space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-slate-300">
+                      {t('common.credits')}
+                    </span>
+                    <span className="font-mono-nums text-amber-300">
+                      {pilot.credits.toLocaleString()} CR
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      value={creditsInput}
+                      onChange={(e) => setCreditsInput(e.target.value)}
+                      className="flex-1 h-9 px-2.5 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        adminSetCredits(Number(creditsInput) || 0);
+                        flash(`Credits = ${creditsInput}`);
+                      }}
+                      className="h-9 px-3 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-xs font-semibold cursor-pointer"
+                    >
+                      Set
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        adminAddCredits(Number(creditsInput) || 0);
+                        flash(`+${creditsInput} CR`);
+                      }}
+                      className="h-9 px-3 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs cursor-pointer"
+                    >
+                      +CR
+                    </button>
+                  </div>
+                </div>
+
+                {/* War Points */}
+                <div className="p-3 rounded-lg border border-slate-800 bg-[#0D1422] space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-slate-300">
+                      {t('common.warPoints')}
+                    </span>
+                    <span className="font-mono-nums text-purple-300">
+                      {pilot.warPoints.toLocaleString()} WP
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      value={wpInput}
+                      onChange={(e) => setWpInput(e.target.value)}
+                      className="flex-1 h-9 px-2.5 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        adminSetWarPoints(Number(wpInput) || 0);
+                        flash(`WP = ${wpInput}`);
+                      }}
+                      className="h-9 px-3 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-xs font-semibold cursor-pointer"
+                    >
+                      Set
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        adminAddWarPoints(Number(wpInput) || 0);
+                        flash(`+${wpInput} WP`);
+                      }}
+                      className="h-9 px-3 rounded bg-purple-500 hover:bg-purple-400 text-white font-bold text-xs cursor-pointer"
+                    >
+                      +WP
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
-          {/* 1. SELECTED GEAR CONTROLS */}
-          <section className="rounded border border-slate-800 bg-[#080C14] p-4 space-y-3">
-            <h3 className="font-display text-base font-bold text-amber-400">
-              {t('admin.gearSection', {
-                gear: getClassName(lang, activeGear.classId),
-                level: activeGear.level,
-              })}
-            </h3>
+          {/* 2. ITEMS TAB */}
+          {tab === 'items' && (
+            <div className="space-y-4">
+              <div className="p-3.5 rounded-lg border border-slate-800 bg-[#0D1422] space-y-3">
+                <div className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                  {t('admin.itemGenerator')}
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                  <label className="space-y-1 block">
+                    <span className="text-[11px] text-slate-400 block">Slot</span>
+                    <select
+                      value={genSlot}
+                      onChange={(e) => setGenSlot(e.target.value as EquipmentSlot)}
+                      className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs"
+                    >
+                      {EQUIPMENT_SLOTS.map((s) => (
+                        <option key={s} value={s}>
+                          {getSlotLabel(lang, s)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {/* Set Level */}
-              <div className="space-y-1.5">
-                <label className="block text-slate-400">Set Level (1–50)</label>
-                <div className="flex gap-1.5">
+                  <label className="space-y-1 block">
+                    <span className="text-[11px] text-slate-400 block">Tier</span>
+                    <select
+                      value={genTier}
+                      onChange={(e) => setGenTier(Number(e.target.value))}
+                      className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs"
+                    >
+                      {[1, 2, 3, 4].map((ti) => (
+                        <option key={ti} value={ti}>
+                          T{ti}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="space-y-1 block">
+                    <span className="text-[11px] text-slate-400 block">
+                      {t('inv.filterRarity')}
+                    </span>
+                    <select
+                      value={genRarity}
+                      onChange={(e) => setGenRarity(e.target.value as ItemRarity)}
+                      className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs"
+                    >
+                      {RARITY_LIST.map((r) => (
+                        <option key={r} value={r}>
+                          {getRarityLabel(lang, r)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="space-y-1 block">
+                    <span className="text-[11px] text-slate-400 block">
+                      {t('admin.itemsReqLevel')}
+                    </span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={50}
+                      placeholder="Auto"
+                      value={genReqLevel}
+                      onChange={(e) => setGenReqLevel(e.target.value)}
+                      className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                    />
+                  </label>
+
+                  <label className="space-y-1 block">
+                    <span className="text-[11px] text-slate-400 block">
+                      {t('admin.itemsRollQuality')}
+                    </span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      placeholder="Random"
+                      value={genQuality}
+                      onChange={(e) => setGenQuality(e.target.value)}
+                      className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                    />
+                  </label>
+
+                  <label className="space-y-1 block">
+                    <span className="text-[11px] text-slate-400 block">Qty</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={genQty}
+                      onChange={(e) =>
+                        setGenQty(Math.max(1, Math.min(100, Number(e.target.value) || 1)))
+                      }
+                      className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                    />
+                  </label>
+                </div>
+
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const added = adminGenerateItems(
+                        genSlot,
+                        genTier,
+                        genRarity,
+                        genQty,
+                        {
+                          requiredLevel:
+                            genReqLevel !== ''
+                              ? Math.max(1, Number(genReqLevel) || 1)
+                              : undefined,
+                          rollQuality:
+                            genQuality !== ''
+                              ? Math.max(1, Math.min(100, Number(genQuality) || 50))
+                              : undefined,
+                        }
+                      );
+                      flash(`+${added} items (${getSlotLabel(lang, genSlot)})`);
+                    }}
+                    className="min-h-[40px] px-4 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <SlotIcon slot={genSlot} className="w-3.5 h-3.5" />
+                    <span>{t('admin.generateItems')}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const added = adminFillInventory(50);
+                      flash(t('admin.itemsFilledFeedback', { count: added }));
+                    }}
+                    className="min-h-[40px] px-3 rounded-lg border border-sky-500/60 bg-sky-500/15 hover:bg-sky-500/25 text-sky-200 font-semibold text-xs cursor-pointer"
+                  >
+                    {t('admin.itemsFill50')}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const added = adminFillInventory(100);
+                      flash(t('admin.itemsFilledFeedback', { count: added }));
+                    }}
+                    className="min-h-[40px] px-3 rounded-lg border border-sky-500/60 bg-sky-500/15 hover:bg-sky-500/25 text-sky-200 font-semibold text-xs cursor-pointer"
+                  >
+                    {t('admin.itemsFill100')}
+                  </button>
+                </div>
+              </div>
+
+              {/* Bulk Delete Tools */}
+              <div className="p-3.5 rounded-lg border border-rose-500/30 bg-[#0D1422] space-y-3">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-rose-300">
+                    Inventory Cleanup ({pilot.inventory.length} items)
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={delMaxRarity}
+                    onChange={(e) =>
+                      setDelMaxRarity(e.target.value as ItemRarity)
+                    }
+                    className="h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs"
+                  >
+                    {RARITY_LIST.map((r) => (
+                      <option key={r} value={r}>
+                        &lt;= {getRarityLabel(lang, r)}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={delMaxTier}
+                    onChange={(e) => setDelMaxTier(Number(e.target.value))}
+                    className="h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs"
+                  >
+                    {[1, 2, 3, 4].map((ti) => (
+                      <option key={ti} value={ti}>
+                        &lt;= T{ti}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const n = adminDeleteItems('by_filter', {
+                        maxRarity: delMaxRarity,
+                        maxTier: delMaxTier,
+                      });
+                      flash(t('admin.itemsDeletedFeedback', { count: n }));
+                    }}
+                    className="min-h-[36px] px-3 rounded border border-rose-500/50 bg-rose-500/15 hover:bg-rose-500/25 text-rose-200 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{t('admin.itemsDeleteFiltered')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const n = adminDeleteItems('all_unequipped');
+                      flash(t('admin.itemsDeletedFeedback', { count: n }));
+                    }}
+                    className="min-h-[36px] px-3 rounded bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{t('admin.itemsDeleteAll')}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 3. SHOP TAB */}
+          {tab === 'shop' && (
+            <div className="space-y-4">
+              <div className="p-3.5 rounded-lg border border-slate-800 bg-[#0D1422] space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-xs text-slate-300 font-mono-nums">
+                    Credits Stock: {shopStock.filter((i) => !i.soldOut).length}/
+                    {shopStock.length} · WP Offers:{' '}
+                    {wpMarketOffers.filter((o) => !o.soldOut).length}/
+                    {wpMarketOffers.length}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      adminRestockShopNow();
+                      flash(t('admin.shopRestockNow'));
+                    }}
+                    className="min-h-[38px] px-3.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>{t('admin.shopRestockNow')}</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <label className="space-y-1 block">
+                    <span className="text-[11px] text-slate-400 block">
+                      {t('admin.shopMinStock')} (1–10)
+                    </span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={adminConfig.shopMinStock}
+                      onChange={(e) => {
+                        const val = Math.max(
+                          1,
+                          Math.min(10, Number(e.target.value) || 1)
+                        );
+                        adminUpdateConfig({
+                          shopMinStock: val,
+                          shopMaxStock: Math.max(val, adminConfig.shopMaxStock),
+                        });
+                      }}
+                      className="w-full h-9 px-2.5 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                    />
+                  </label>
+
+                  <label className="space-y-1 block">
+                    <span className="text-[11px] text-slate-400 block">
+                      {t('admin.shopMaxStock')} (1–10)
+                    </span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={adminConfig.shopMaxStock}
+                      onChange={(e) => {
+                        const val = Math.max(
+                          adminConfig.shopMinStock,
+                          Math.min(10, Number(e.target.value) || 10)
+                        );
+                        adminUpdateConfig({ shopMaxStock: val });
+                      }}
+                      className="w-full h-9 px-2.5 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                    />
+                  </label>
+
+                  <label className="space-y-1 block">
+                    <span className="text-[11px] text-slate-400 block">
+                      {t('admin.shopPriceMult')} ({adminConfig.shopPriceMultiplier}x)
+                    </span>
+                    <input
+                      type="number"
+                      step={0.1}
+                      min={0.1}
+                      max={5}
+                      value={adminConfig.shopPriceMultiplier}
+                      onChange={(e) =>
+                        adminUpdateConfig({
+                          shopPriceMultiplier: Math.max(
+                            0.1,
+                            Math.min(5, Number(e.target.value) || 1)
+                          ),
+                        })
+                      }
+                      className="w-full h-9 px-2.5 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                    />
+                  </label>
+                </div>
+
+                {/* Rarity Weights */}
+                <div className="space-y-1.5">
+                  <div className="text-[11px] text-slate-400">
+                    {t('admin.shopRarityWeights')}
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {RARITY_LIST.map((r) => (
+                      <label key={r} className="space-y-1 block">
+                        <span className="text-[10px] uppercase text-slate-400 block">
+                          {getRarityLabel(lang, r)}
+                        </span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={adminConfig.shopRarityWeights[r]}
+                          onChange={(e) =>
+                            adminUpdateConfig({
+                              shopRarityWeights: {
+                                ...adminConfig.shopRarityWeights,
+                                [r]: Math.max(0, Number(e.target.value) || 0),
+                              },
+                            })
+                          }
+                          className="w-full h-8 px-2 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Force-add specific item */}
+              <div className="p-3.5 rounded-lg border border-slate-800 bg-[#0D1422] space-y-2.5">
+                <div className="text-xs font-bold text-amber-300">
+                  {t('admin.shopForceAdd')}
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <select
+                    value={forceShopSlot}
+                    onChange={(e) => {
+                      setForceShopSlot(e.target.value as EquipmentSlot);
+                      setForceShopTpl('');
+                    }}
+                    className="h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs"
+                  >
+                    {EQUIPMENT_SLOTS.map((s) => (
+                      <option key={s} value={s}>
+                        {getSlotLabel(lang, s)}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={forceShopTpl}
+                    onChange={(e) => setForceShopTpl(e.target.value)}
+                    className="h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs"
+                  >
+                    <option value="">Any Template</option>
+                    {forceSlotTemplates.map((tpl) => (
+                      <option key={tpl.id} value={tpl.id}>
+                        {lang === 'vi' ? tpl.nameVi : tpl.nameEn}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={forceShopTier}
+                    onChange={(e) => setForceShopTier(Number(e.target.value))}
+                    className="h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs"
+                  >
+                    {[1, 2, 3, 4].map((ti) => (
+                      <option key={ti} value={ti}>
+                        T{ti}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={forceShopRarity}
+                    onChange={(e) =>
+                      setForceShopRarity(e.target.value as ItemRarity)
+                    }
+                    className="h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs"
+                  >
+                    {RARITY_LIST.map((r) => (
+                      <option key={r} value={r}>
+                        {getRarityLabel(lang, r)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    adminForceAddShopItem({
+                      templateId: forceShopTpl || undefined,
+                      slot: forceShopSlot,
+                      tier: forceShopTier,
+                      rarity: forceShopRarity,
+                    });
+                    flash(t('admin.shopForceAddBtn'));
+                  }}
+                  className="min-h-[38px] px-4 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs cursor-pointer"
+                >
+                  {t('admin.shopForceAddBtn')}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 4. SKILLS TAB */}
+          {tab === 'skills' && (
+            <div className="space-y-3">
+              <div className="p-3.5 rounded-lg border border-slate-800 bg-[#0D1422] space-y-3">
+                <div className="text-xs font-semibold text-slate-300">
+                  {t('admin.targetGear')}: {getClassName(lang, targetGearId)}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {MECH_CLASS_LIST.map((cls) => (
+                    <button
+                      key={cls.id}
+                      type="button"
+                      onClick={() => setTargetGearId(cls.id)}
+                      className={`h-9 px-3 rounded border text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer ${
+                        targetGearId === cls.id
+                          ? 'border-amber-400 bg-amber-500/15 text-amber-200'
+                          : 'border-slate-700 bg-slate-900 text-slate-300'
+                      }`}
+                    >
+                      <ClassIcon classId={cls.id} className="w-3.5 h-3.5" />
+                      <span>{getClassName(lang, cls.id)}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      adminUnlockAllSkillsForGear(targetGearId, true);
+                      flash(t('admin.skillsUnlockAllMax'));
+                    }}
+                    className="min-h-[40px] px-4 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs cursor-pointer"
+                  >
+                    {t('admin.skillsUnlockAllMax')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      adminUnlockAllSkillsForGear(targetGearId, false);
+                      flash(t('admin.skillsUnlockAllLv1'));
+                    }}
+                    className="min-h-[40px] px-4 rounded-lg border border-sky-500/50 bg-sky-500/15 hover:bg-sky-500/25 text-sky-200 font-semibold text-xs cursor-pointer"
+                  >
+                    {t('admin.skillsUnlockAllLv1')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      adminGrantAllOpeningCards();
+                      flash(t('admin.skillsGrantCards'));
+                    }}
+                    className="min-h-[40px] px-4 rounded-lg border border-purple-500/50 bg-purple-500/15 hover:bg-purple-500/25 text-purple-200 font-semibold text-xs cursor-pointer"
+                  >
+                    {t('admin.skillsGrantCards')}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!battle || Boolean(battle.summary)}
+                    onClick={() => {
+                      adminResetBattleCooldowns();
+                      flash(t('admin.skillsResetCd'));
+                    }}
+                    className="min-h-[40px] px-4 rounded-lg border border-emerald-500/50 bg-emerald-500/15 hover:bg-emerald-500/25 disabled:opacity-40 text-emerald-200 font-semibold text-xs cursor-pointer disabled:cursor-not-allowed"
+                  >
+                    {t('admin.skillsResetCd')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 5. BATTLE TAB */}
+          {tab === 'battle' && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {(
+                  [
+                    ['godMode', t('admin.godMode')],
+                    ['oneHitKills', t('admin.oneHit')],
+                    ['alwaysWin', t('admin.alwaysWin')],
+                    ['softEnrageEnabled', t('admin.softEnrage')],
+                    ['forceBoss', t('admin.battleForceBoss')],
+                  ] as const
+                ).map(([key, label]) => (
+                  <label
+                    key={key}
+                    className="p-3 rounded-lg border border-slate-800 bg-[#0D1422] flex items-center justify-between gap-2 cursor-pointer"
+                  >
+                    <span className="text-xs font-semibold text-slate-200">
+                      {label}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(adminConfig[key])}
+                      onChange={(e) =>
+                        adminUpdateConfig({ [key]: e.target.checked })
+                      }
+                      className="w-4 h-4 accent-amber-400"
+                    />
+                  </label>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 p-3.5 rounded-lg border border-slate-800 bg-[#0D1422]">
+                {/* Battle Size */}
+                <label className="space-y-1 block">
+                  <span className="text-[11px] text-slate-400 block">
+                    {t('admin.battleSizeOverride')}
+                  </span>
+                  <select
+                    value={adminConfig.battleSizeOverride ?? ''}
+                    onChange={(e) =>
+                      adminUpdateConfig({
+                        battleSizeOverride: e.target.value
+                          ? (Number(e.target.value) as BattleSize)
+                          : null,
+                      })
+                    }
+                    className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs"
+                  >
+                    <option value="">Default</option>
+                    <option value="4">4v4</option>
+                    <option value="6">6v6</option>
+                    <option value="8">8v8</option>
+                  </select>
+                </label>
+
+                {/* Enemy Level Offset */}
+                <label className="space-y-1 block">
+                  <span className="text-[11px] text-slate-400 block">
+                    {t('admin.battleLevelOffset')}
+                  </span>
+                  <input
+                    type="number"
+                    min={-10}
+                    max={30}
+                    placeholder={t('admin.battleLevelOffsetDefault')}
+                    value={adminConfig.battleLevelOffsetOverride ?? ''}
+                    onChange={(e) =>
+                      adminUpdateConfig({
+                        battleLevelOffsetOverride:
+                          e.target.value === ''
+                            ? null
+                            : Math.floor(Number(e.target.value) || 0),
+                      })
+                    }
+                    className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                  />
+                </label>
+
+                {/* Enrage Start Round */}
+                <label className="space-y-1 block">
+                  <span className="text-[11px] text-slate-400 block">
+                    {t('admin.battleEnrageStart')}
+                  </span>
                   <input
                     type="number"
                     min={1}
-                    max={50}
-                    value={levelInput}
-                    onChange={(e) => setLevelInput(e.target.value)}
-                    className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-950 font-mono-nums text-slate-100"
+                    max={100}
+                    value={adminConfig.enrageStartRound}
+                    onChange={(e) =>
+                      adminUpdateConfig({
+                        enrageStartRound: Math.max(
+                          1,
+                          Number(e.target.value) || 20
+                        ),
+                      })
+                    }
+                    className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
                   />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const lv = Number(levelInput) || 1;
-                      adminSetGearLevel(lv);
-                      flash(`Set ${activeGear.classId} to Lv.${lv}`);
-                    }}
-                    className="h-9 px-3 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold cursor-pointer"
-                  >
-                    Set
-                  </button>
+                </label>
+
+                {/* Enrage Step % */}
+                <label className="space-y-1 block">
+                  <span className="text-[11px] text-slate-400 block">
+                    {t('admin.battleEnrageStep')}
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={Math.round(adminConfig.enrageStepPct * 100)}
+                    onChange={(e) =>
+                      adminUpdateConfig({
+                        enrageStepPct:
+                          Math.max(0, Number(e.target.value) || 0) / 100,
+                      })
+                    }
+                    className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                  />
+                </label>
+              </div>
+
+              {/* Reward Mult */}
+              <div className="p-3.5 rounded-lg border border-slate-800 bg-[#0D1422] space-y-2">
+                <div className="text-xs font-semibold text-slate-300">
+                  {t('admin.rewardMult')}: {adminConfig.rewardMultiplier}x
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {[1, 2, 5, 10].map((mult) => (
+                    <button
+                      key={mult}
+                      type="button"
+                      onClick={() =>
+                        adminUpdateConfig({ rewardMultiplier: mult })
+                      }
+                      className={`h-8 px-3 rounded border text-xs font-mono-nums font-bold cursor-pointer ${
+                        adminConfig.rewardMultiplier === mult
+                          ? 'border-amber-400 bg-amber-500/20 text-amber-200'
+                          : 'border-slate-700 bg-slate-900 text-slate-300'
+                      }`}
+                    >
+                      {mult}x
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              {/* Add EXP */}
-              <div className="space-y-1.5">
-                <label className="block text-slate-400">Add EXP</label>
-                <div className="flex gap-1.5">
+              {/* Active Battle Live Controls */}
+              <div className="p-3.5 rounded-lg border border-amber-500/30 bg-[#0D1422] flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-300">
+                    {t('admin.battleSkipRound')}
+                  </span>
                   <input
                     type="number"
                     min={1}
-                    value={expInput}
-                    onChange={(e) => setExpInput(e.target.value)}
-                    className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-950 font-mono-nums text-slate-100"
+                    max={999}
+                    value={skipRoundInput}
+                    onChange={(e) => setSkipRoundInput(e.target.value)}
+                    className="w-20 h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
                   />
                   <button
                     type="button"
+                    disabled={!battle || Boolean(battle.summary)}
                     onClick={() => {
-                      const amt = Number(expInput) || 0;
-                      adminAddGearExp(amt);
-                      flash(`Added +${amt} EXP to ${activeGear.classId}`);
+                      adminSkipBattleToRound(Number(skipRoundInput) || 1);
+                      flash(`Round → ${skipRoundInput}`);
                     }}
-                    className="h-9 px-3 rounded bg-sky-600 hover:bg-sky-500 text-white font-semibold cursor-pointer"
+                    className="h-9 px-3 rounded bg-sky-500 hover:bg-sky-400 disabled:opacity-40 text-slate-950 font-bold text-xs cursor-pointer disabled:cursor-not-allowed"
                   >
-                    +EXP
+                    {t('admin.battleSkipBtn')}
                   </button>
                 </div>
-              </div>
 
-              {/* Add / Set Stat Points */}
-              <div className="space-y-1.5">
-                <label className="block text-slate-400">
-                  Stat Points (Cur: {activeGear.unspentPoints})
-                </label>
-                <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  disabled={!battle || Boolean(battle.summary)}
+                  onClick={() => {
+                    forceWinBattle();
+                    setAdminPanelOpen(false);
+                  }}
+                  className="min-h-[40px] px-4 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-bold text-xs cursor-pointer disabled:cursor-not-allowed"
+                >
+                  {t('admin.battleInstantWin')}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 6. CAMPAIGN TAB */}
+          {tab === 'campaign' && (
+            <div className="space-y-4">
+              <div className="p-3.5 rounded-lg border border-slate-800 bg-[#0D1422] flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-300">
+                    {t('admin.campaignMonth')}
+                  </span>
                   <input
                     type="number"
-                    min={0}
-                    value={ptsInput}
-                    onChange={(e) => setPtsInput(e.target.value)}
-                    className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-950 font-mono-nums text-slate-100"
+                    min={1}
+                    max={999}
+                    value={monthInput}
+                    onChange={(e) => setMonthInput(e.target.value)}
+                    className="w-20 h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
                   />
                   <button
                     type="button"
                     onClick={() => {
-                      const v = Number(ptsInput) || 0;
-                      adminAddGearUnspentPoints(v);
-                      flash(`Added +${v} stat pts`);
+                      adminSetCampaignMonth(Number(monthInput) || 1);
+                      flash(`Month → ${monthInput}`);
                     }}
-                    className="h-9 px-2.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold cursor-pointer"
+                    className="h-9 px-3 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs cursor-pointer"
                   >
-                    +Add
+                    {t('admin.campaignSetMonth')}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const v = Number(ptsInput) || 0;
-                      adminSetGearUnspentPoints(v);
-                      flash(`Set stat pts to ${v}`);
-                    }}
-                    className="h-9 px-2.5 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold cursor-pointer"
-                  >
-                    Set
-                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    adminUnlockAllSectors();
+                    flash(t('admin.unlockAllSectors'));
+                  }}
+                  className="h-9 px-3.5 rounded border border-sky-500/50 bg-sky-500/15 hover:bg-sky-500/25 text-sky-200 font-semibold text-xs cursor-pointer"
+                >
+                  {t('admin.unlockAllSectors')}
+                </button>
+              </div>
+
+              <div className="p-3.5 rounded-lg border border-slate-800 bg-[#0D1422] space-y-2">
+                <div className="text-xs font-bold text-amber-300">
+                  {t('admin.campaignBasesTitle')}
+                </div>
+                <div className="divide-y divide-slate-800/80">
+                  {SECTORS_CATALOG.map((sec) => {
+                    const bs = pilot.baseStates[sec.id];
+                    return (
+                      <div
+                        key={sec.id}
+                        className="py-2 flex flex-wrap items-center justify-between gap-2 text-xs"
+                      >
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-100 truncate">
+                            {getSectorName(lang, sec.id)}
+                          </div>
+                          <div className="text-[11px] text-slate-400">
+                            {bs?.faction ?? 'hostile'} · {bs?.status ?? 'operational'}
+                            {bs?.underAttack ? ' · UNDER ATTACK' : ''}
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              adminSetBaseFaction(sec.id, 'allied');
+                              flash(`${getSectorName(lang, sec.id)} → Allied`);
+                            }}
+                            className="h-8 px-2.5 rounded border border-emerald-500/40 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 text-[11px] font-semibold cursor-pointer"
+                          >
+                            {t('admin.campaignCapture')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              adminSetBaseFaction(sec.id, 'neutral');
+                              flash(`${getSectorName(lang, sec.id)} → Neutral`);
+                            }}
+                            className="h-8 px-2.5 rounded border border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-semibold cursor-pointer"
+                          >
+                            {t('admin.campaignNeutral')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              adminSetBaseFaction(sec.id, 'hostile');
+                              flash(`${getSectorName(lang, sec.id)} → Hostile`);
+                            }}
+                            className="h-8 px-2.5 rounded border border-rose-500/40 bg-rose-500/15 hover:bg-rose-500/25 text-rose-200 text-[11px] font-semibold cursor-pointer"
+                          >
+                            {t('admin.campaignHostile')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              adminTriggerEnemyAttack(sec.id);
+                              flash(`Raid → ${getSectorName(lang, sec.id)}`);
+                            }}
+                            className="h-8 px-2.5 rounded border border-amber-500/50 bg-amber-500/15 hover:bg-amber-500/25 text-amber-200 text-[11px] font-semibold cursor-pointer"
+                          >
+                            {t('admin.campaignTriggerAttack')}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
+          )}
 
-            <div className="pt-1">
-              <button
-                type="button"
-                onClick={() => {
-                  adminResetGearAllocation();
-                  flash(`Reset stat allocation for ${activeGear.classId}`);
-                }}
-                className="h-8 px-3 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 cursor-pointer"
-              >
-                Reset Allocation ({activeGear.classId})
-              </button>
-            </div>
-          </section>
-
-          {/* 2. GLOBAL PILOT & CAMPAIGN CONTROLS */}
-          <section className="rounded border border-slate-800 bg-[#080C14] p-4 space-y-3">
-            <h3 className="font-display text-base font-bold text-sky-400">
-              {t('admin.globalSection')}
-            </h3>
-
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="space-y-1.5">
-                <label className="block text-slate-400">
-                  Credits (Cur: {pilot.credits.toLocaleString()})
-                </label>
-                <div className="flex gap-1.5">
-                  <input
-                    type="number"
-                    min={0}
-                    value={creditsInput}
-                    onChange={(e) => setCreditsInput(e.target.value)}
-                    className="w-32 h-9 px-2 rounded border border-slate-700 bg-slate-950 font-mono-nums text-slate-100"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const v = Number(creditsInput) || 0;
-                      adminAddCredits(v);
-                      flash(`Added +${v.toLocaleString()} CR`);
-                    }}
-                    className="h-9 px-3 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold cursor-pointer"
-                  >
-                    +Add CR
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const v = Number(creditsInput) || 0;
-                      adminSetCredits(v);
-                      flash(`Set Credits to ${v.toLocaleString()} CR`);
-                    }}
-                    className="h-9 px-3 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold cursor-pointer"
-                  >
-                    Set CR
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-slate-400">
-                  War Points (Cur: {(pilot.warPoints ?? 0).toLocaleString()} WP)
-                </label>
-                <div className="flex gap-1.5">
-                  <input
-                    type="number"
-                    min={0}
-                    value={wpInput}
-                    onChange={(e) => setWpInput(e.target.value)}
-                    className="w-28 h-9 px-2 rounded border border-slate-700 bg-slate-950 font-mono-nums text-slate-100"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const v = Number(wpInput) || 0;
-                      adminAddWarPoints(v);
-                      flash(`Added +${v.toLocaleString()} WP`);
-                    }}
-                    className="h-9 px-3 rounded bg-purple-600 hover:bg-purple-500 text-white font-semibold cursor-pointer"
-                  >
-                    +Add WP
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const v = Number(wpInput) || 0;
-                      adminSetWarPoints(v);
-                      flash(`Set War Points to ${v.toLocaleString()} WP`);
-                    }}
-                    className="h-9 px-3 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold cursor-pointer"
-                  >
-                    Set WP
-                  </button>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  adminUnlockAllGears();
-                  flash('Unlocked all 4 Gears!');
-                }}
-                className="h-9 px-3.5 rounded border border-emerald-500/40 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 font-semibold cursor-pointer"
-              >
-                Unlock All 4 Gears
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  adminUnlockAllSectors();
-                  flash('Unlocked all campaign sectors!');
-                }}
-                className="h-9 px-3.5 rounded border border-sky-500/40 bg-sky-500/15 hover:bg-sky-500/25 text-sky-200 font-semibold cursor-pointer"
-              >
-                Unlock All Sectors
-              </button>
-            </div>
-          </section>
-
-          {/* 3. ITEM GENERATOR */}
-          <section className="rounded border border-slate-800 bg-[#080C14] p-4 space-y-3">
-            <h3 className="font-display text-base font-bold text-purple-400">
-              {t('admin.itemGenSection')}
-            </h3>
-
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 items-end">
-              <div>
-                <label className="block text-slate-400 mb-1">Slot</label>
-                <select
-                  value={genSlot}
-                  onChange={(e) => setGenSlot(e.target.value as EquipmentSlot)}
-                  className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-950 text-slate-100"
-                >
-                  {EQUIPMENT_SLOTS.map((s) => (
-                    <option key={s} value={s}>
-                      {getSlotLabel(lang, s)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-slate-400 mb-1">Tier (1–4)</label>
-                <select
-                  value={genTier}
-                  onChange={(e) => setGenTier(Number(e.target.value))}
-                  className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-950 font-mono-nums text-slate-100"
-                >
-                  {[1, 2, 3, 4].map((tr) => (
-                    <option key={tr} value={tr}>
-                      Tier {tr}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-slate-400 mb-1">Rarity</label>
-                <select
-                  value={genRarity}
-                  onChange={(e) => setGenRarity(e.target.value as ItemRarity)}
-                  className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-950 text-slate-100"
-                >
-                  {RARITY_LIST.map((r) => (
-                    <option key={r} value={r}>
-                      {getRarityLabel(lang, r)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-slate-400 mb-1">Qty (1–20)</label>
+          {/* 7. FORMATION TAB */}
+          {tab === 'formation' && (
+            <div className="p-4 rounded-lg border border-slate-800 bg-[#0D1422] grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <label className="space-y-1 block">
+                <span className="text-xs text-slate-300 block">
+                  {t('admin.formationFrontCap')} (1–8)
+                </span>
                 <input
                   type="number"
                   min={1}
-                  max={20}
-                  value={genQty}
-                  onChange={(e) => setGenQty(Number(e.target.value) || 1)}
-                  className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-950 font-mono-nums text-slate-100"
-                />
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  const n = adminGenerateItems(
-                    genSlot,
-                    genTier,
-                    genRarity,
-                    genQty
-                  );
-                  flash(
-                    `Generated ${n}x Tier ${genTier} ${genRarity} ${genSlot} into Cargo`
-                  );
-                }}
-                className="h-9 px-3 rounded bg-purple-600 hover:bg-purple-500 text-white font-semibold cursor-pointer"
-              >
-                Generate
-              </button>
-            </div>
-          </section>
-
-          {/* 4. COMBAT & REWARD TOGGLES */}
-          <section className="rounded border border-slate-800 bg-[#080C14] p-4 space-y-3">
-            <h3 className="font-display text-base font-bold text-emerald-400">
-              {t('admin.togglesSection')}
-            </h3>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="inline-flex items-center gap-2 px-3 py-2 rounded border border-slate-700 bg-slate-900 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={adminConfig.godMode}
-                  onChange={(e) =>
-                    adminUpdateConfig({ godMode: e.target.checked })
-                  }
-                />
-                <span className="text-slate-100 font-medium">God Mode</span>
-              </label>
-
-              <label className="inline-flex items-center gap-2 px-3 py-2 rounded border border-slate-700 bg-slate-900 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={adminConfig.oneHitKills}
-                  onChange={(e) =>
-                    adminUpdateConfig({ oneHitKills: e.target.checked })
-                  }
-                />
-                <span className="text-slate-100 font-medium">One-Hit Kills</span>
-              </label>
-
-              <label className="inline-flex items-center gap-2 px-3 py-2 rounded border border-slate-700 bg-slate-900 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={adminConfig.alwaysWin}
-                  onChange={(e) =>
-                    adminUpdateConfig({ alwaysWin: e.target.checked })
-                  }
-                />
-                <span className="text-slate-100 font-medium">Always Win</span>
-              </label>
-
-              <label
-                className="inline-flex items-center gap-2 px-3 py-2 rounded border border-amber-500/40 bg-amber-500/10 cursor-pointer"
-                title={t('admin.softEnrageDesc')}
-              >
-                <input
-                  type="checkbox"
-                  checked={adminConfig.softEnrageEnabled}
-                  onChange={(e) => {
-                    adminUpdateConfig({ softEnrageEnabled: e.target.checked });
-                    flash(
-                      `Soft Enrage ${e.target.checked ? 'ENABLED' : 'DISABLED'}`
-                    );
-                  }}
-                />
-                <span className="text-amber-200 font-medium">
-                  {t('admin.softEnrage')}
-                </span>
-              </label>
-
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded border border-slate-700 bg-slate-900">
-                <span className="text-slate-400">REWARD_MULT:</span>
-                <input
-                  type="number"
-                  step={0.5}
-                  min={0.5}
-                  max={20}
-                  value={adminConfig.rewardMultiplier}
+                  max={8}
+                  value={adminConfig.formationFrontCapacity}
                   onChange={(e) =>
                     adminUpdateConfig({
-                      rewardMultiplier: Math.max(
-                        0.1,
-                        Number(e.target.value) || 2.0
+                      formationFrontCapacity: Math.max(
+                        1,
+                        Math.min(8, Number(e.target.value) || 4)
                       ),
                     })
                   }
-                  className="w-16 h-7 px-1.5 rounded border border-slate-700 bg-slate-950 font-mono-nums text-amber-300"
+                  className="w-full h-9 px-2.5 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
                 />
-                <span className="text-slate-500">x</span>
-              </div>
+              </label>
 
-              {screen === 'BATTLE' && battle && !battle.summary && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    forceWinBattle();
-                    setOpen(false);
-                  }}
-                  className="min-h-[40px] px-3.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold cursor-pointer"
-                >
-                  Instant Win Current Battle
-                </button>
-              )}
+              <label className="space-y-1 block">
+                <span className="text-xs text-slate-300 block">
+                  {t('admin.formationBackCap')} (1–8)
+                </span>
+                <input
+                  type="number"
+                  min={1}
+                  max={8}
+                  value={adminConfig.formationBackCapacity}
+                  onChange={(e) =>
+                    adminUpdateConfig({
+                      formationBackCapacity: Math.max(
+                        1,
+                        Math.min(8, Number(e.target.value) || 4)
+                      ),
+                    })
+                  }
+                  className="w-full h-9 px-2.5 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                />
+              </label>
+
+              <label className="space-y-1 block">
+                <span className="text-xs text-slate-300 block">
+                  {t('admin.formationBackRed')} (0–85%)
+                </span>
+                <input
+                  type="number"
+                  min={0}
+                  max={85}
+                  value={Math.round(adminConfig.backRowDamageReduction * 100)}
+                  onChange={(e) =>
+                    adminUpdateConfig({
+                      backRowDamageReduction:
+                        Math.max(0, Math.min(85, Number(e.target.value) || 0)) /
+                        100,
+                    })
+                  }
+                  className="w-full h-9 px-2.5 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                />
+              </label>
             </div>
+          )}
 
-            {/* Battle Squad Size Override (4v4 / 6v6 / 8v8) */}
-            <div className="pt-2 border-t border-slate-800/80 space-y-2">
-              <div className="text-slate-400 font-medium">
-                {t('admin.battleSizeLabel')}
+          {/* 8. SYSTEM TAB */}
+          {tab === 'system' && (
+            <div className="space-y-4">
+              {/* Debug Toggle: Show Raw i18n Keys */}
+              <label className="p-3.5 rounded-lg border border-slate-800 bg-[#0D1422] flex items-center justify-between gap-2 cursor-pointer">
+                <span className="text-xs font-semibold text-slate-200 flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-sky-400" />
+                  <span>{t('admin.systemRawI18n')}</span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={adminConfig.showRawI18nKeys}
+                  onChange={(e) =>
+                    adminUpdateConfig({ showRawI18nKeys: e.target.checked })
+                  }
+                  className="w-4 h-4 accent-amber-400"
+                />
+              </label>
+
+              {/* Export / Import Save JSON */}
+              <div className="p-3.5 rounded-lg border border-slate-800 bg-[#0D1422] space-y-2.5">
+                <div className="text-xs font-bold text-amber-300">
+                  {t('admin.systemExportTitle')}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyExport}
+                    className="h-9 px-3 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Copy className="w-3.5 h-3.5 text-sky-400" />
+                    <span>{t('admin.systemExportCopy')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDownloadExport}
+                    className="h-9 px-3 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>{t('admin.systemExportDownload')}</span>
+                  </button>
+                </div>
+
+                <textarea
+                  rows={3}
+                  value={importJson}
+                  onChange={(e) => setImportJson(e.target.value)}
+                  placeholder={t('admin.systemImportPlaceholder')}
+                  className="w-full p-2.5 rounded border border-slate-700 bg-[#070B12] text-xs font-mono text-slate-200"
+                />
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    disabled={!importJson.trim()}
+                    onClick={handleImportSave}
+                    className="h-9 px-4 rounded bg-sky-500 hover:bg-sky-400 disabled:opacity-40 text-slate-950 font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>{t('admin.systemImportBtn')}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!confirmReset) {
+                        setConfirmReset(true);
+                        return;
+                      }
+                      resetCampaign();
+                      setConfirmReset(false);
+                      setAdminPanelOpen(false);
+                    }}
+                    className="h-9 px-4 rounded bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span>
+                      {confirmReset
+                        ? t('admin.systemResetConfirm')
+                        : t('admin.systemResetSave')}
+                    </span>
+                  </button>
+                </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {(
-                  [
-                    { val: null, label: t('admin.battleSizeDefault') },
-                    { val: 4 as BattleSize, label: '4v4' },
-                    { val: 6 as BattleSize, label: '6v6' },
-                    { val: 8 as BattleSize, label: '8v8' },
-                  ] as Array<{ val: BattleSize | null; label: string }>
-                ).map((opt) => {
-                  const active = adminConfig.battleSizeOverride === opt.val;
-                  return (
+
+              {/* Error Log Viewer */}
+              <div className="p-3.5 rounded-lg border border-slate-800 bg-[#0D1422] space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-rose-300">
+                    {t('admin.systemErrorLog', { count: errorLogs.length })}
+                  </span>
+                  {errorLogs.length > 0 && (
                     <button
-                      key={String(opt.val)}
                       type="button"
-                      onClick={() => {
-                        adminUpdateConfig({ battleSizeOverride: opt.val });
-                        flash(`Battle size override: ${opt.label}`);
-                      }}
-                      className={`min-h-[40px] px-3.5 rounded border text-xs font-mono-nums font-semibold transition-colors cursor-pointer ${
-                        active
-                          ? 'border-amber-400 bg-amber-500/20 text-amber-200'
-                          : 'border-slate-700 bg-slate-900 text-slate-300 hover:text-slate-100'
-                      }`}
+                      onClick={() => clearErrorLogs()}
+                      className="text-[11px] text-slate-400 hover:text-slate-200 cursor-pointer"
                     >
-                      {opt.label}
+                      {t('admin.systemClearErrors')}
                     </button>
-                  );
-                })}
+                  )}
+                </div>
+                {errorLogs.length === 0 ? (
+                  <div className="text-xs text-slate-500">
+                    {t('admin.systemNoErrors')}
+                  </div>
+                ) : (
+                  <div className="max-h-40 overflow-y-auto space-y-1.5">
+                    {errorLogs.map((entry) => (
+                      <div
+                        key={entry.id}
+                        className="p-2 rounded border border-rose-500/30 bg-[#070B12] text-[11px] font-mono text-rose-200"
+                      >
+                        <div className="text-[10px] text-slate-400">
+                          [{new Date(entry.timestamp).toLocaleTimeString()}]{' '}
+                          {entry.source}
+                        </div>
+                        <div className="break-words">{entry.message}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Live State Inspector */}
+              <div className="p-3.5 rounded-lg border border-slate-800 bg-[#0D1422] space-y-2">
+                <button
+                  type="button"
+                  onClick={() => setShowInspector((v) => !v)}
+                  className="text-xs font-bold text-sky-300 hover:text-sky-200 cursor-pointer"
+                >
+                  {t('admin.systemInspector')} {showInspector ? '▾' : '▸'}
+                </button>
+                {showInspector && (
+                  <pre className="max-h-60 overflow-auto rounded border border-slate-800 bg-[#070B12] p-2.5 text-[11px] font-mono text-slate-300">
+                    {JSON.stringify(
+                      {
+                        pilotName: pilot.name,
+                        activeGearId: pilot.activeGearId,
+                        credits: pilot.credits,
+                        warPoints: pilot.warPoints,
+                        inventoryCount: pilot.inventory.length,
+                        consumablesCount: (pilot.consumables ?? []).length,
+                        shopStockTotal: shopStock.length,
+                        shopStockAvailable: shopStock.filter((i) => !i.soldOut)
+                          .length,
+                        wpOffersAvailable: wpMarketOffers.filter(
+                          (o) => !o.soldOut
+                        ).length,
+                        campaignMonth: pilot.campaignMonth,
+                        inBattle: Boolean(battle),
+                        battleRound: battle?.round ?? null,
+                        adminConfig,
+                      },
+                      null,
+                      2
+                    )}
+                  </pre>
+                )}
               </div>
             </div>
-          </section>
-
-          {/* 5. DANGER ZONE: RESET SAVE */}
-          <div className="pt-2 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
-            {!confirmReset ? (
-              <button
-                type="button"
-                onClick={() => setConfirmReset(true)}
-                className="h-9 px-3.5 inline-flex items-center gap-1.5 rounded border border-red-500/50 bg-red-500/10 hover:bg-red-500/20 text-red-300 font-semibold cursor-pointer"
-              >
-                <ShieldAlert className="w-4 h-4" />
-                <span>{t('admin.resetSave')}</span>
-              </button>
-            ) : (
-              <div className="flex items-center gap-2">
-                <span className="text-red-300">{t('title.erasePrompt')}</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setConfirmReset(false);
-                    resetCampaign();
-                    setOpen(false);
-                  }}
-                  className="h-9 px-3.5 rounded bg-red-600 hover:bg-red-500 text-white font-semibold cursor-pointer"
-                >
-                  {t('admin.confirmResetSave')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirmReset(false)}
-                  className="h-9 px-3 rounded border border-slate-700 text-slate-300 cursor-pointer"
-                >
-                  {t('common.cancel')}
-                </button>
-              </div>
-            )}
-
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              className="h-9 px-4 rounded bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold cursor-pointer"
-            >
-              Close
-            </button>
-          </div>
+          )}
         </div>
       </div>
     </div>

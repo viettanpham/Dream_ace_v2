@@ -14,28 +14,49 @@ import {
   getSkillById,
   LEGACY_SKILL_ID_MAP,
 } from '../data/skills';
+import {
+  DEFAULT_ADMIN_SHOP_RARITY_WEIGHTS,
+  SHOP_STOCK_CONFIG,
+} from '../data/shopConfig';
 import type {
   AdminConfig,
   BaseRuntimeState,
   BattleSize,
   BattleSpeed,
   BattleViewMode,
+  ConsumableItem,
   GearUnit,
+  InventoryFilterState,
   ItemInstance,
   Language,
   MechClassId,
   PilotAccount,
+  QuickSellFilterConfig,
+  ShopItemListing,
+  WpMarketOffer,
 } from '../types/game';
-import { generateItemInstance, generateShopStock } from './equipment';
+import { generateItemInstance } from './equipment';
+import { getDefaultInventoryFilterState } from './inventory';
+import { DEFAULT_QUICK_SELL_CONFIG } from './quickSell';
+import {
+  buildShopOptionsFromState,
+  generateCategorizedShopStock,
+  generateWpMarketOffers,
+  hasOperationalShipyard,
+} from './shop';
 import { isSkillAllowedForClass, MAX_ACTIVE_SKILL_BAR } from './skills';
 import { createDefaultGearUnit, createDefaultPilotAccount } from './stats';
 import { createDefaultTacticsForClass, sanitizeGearTactics } from './tactics';
 
-export const CURRENT_SAVE_VERSION = 6;
+export const CURRENT_SAVE_VERSION = 7;
 
 export interface PersistedCampaignState {
   pilot: PilotAccount;
-  shopStock: ItemInstance[];
+  shopStock: ShopItemListing[];
+  wpMarketOffers: WpMarketOffer[];
+  battlesUntilRestock: number;
+  inventoryFilterState: InventoryFilterState;
+  quickSellConfig: QuickSellFilterConfig;
   selectedSectorId: string;
   hasSaveData: boolean;
   muted: boolean;
@@ -64,6 +85,18 @@ export function createDefaultAdminConfig(): AdminConfig {
     rewardMultiplier: BALANCE_CONFIG.rewardMultDefault,
     battleSizeOverride: null,
     softEnrageEnabled: true,
+    enrageStartRound: BALANCE_CONFIG.enrageStartRound,
+    enrageStepPct: BALANCE_CONFIG.enrageStepPct,
+    forceBoss: false,
+    battleLevelOffsetOverride: null,
+    shopMinStock: SHOP_STOCK_CONFIG.minStockPerCategory,
+    shopMaxStock: SHOP_STOCK_CONFIG.maxStockPerCategory,
+    shopRarityWeights: { ...DEFAULT_ADMIN_SHOP_RARITY_WEIGHTS },
+    shopPriceMultiplier: 1.0,
+    formationFrontCapacity: 4,
+    formationBackCapacity: 4,
+    backRowDamageReduction: BALANCE_CONFIG.backRowDamageReduction,
+    showRawI18nKeys: false,
   };
 }
 
@@ -81,10 +114,27 @@ export function createFreshCampaignState(
     },
     rng
   );
-  const pilot = createDefaultPilotAccount(name, starterClassId, [starterWeapon]);
+  const pilot: PilotAccount = {
+    ...createDefaultPilotAccount(name, starterClassId, [starterWeapon]),
+    consumables: [],
+    activeExpBoostBattles: 0,
+    activeEnchantBonusPct: 0,
+  };
+  const adminConfig = createDefaultAdminConfig();
   return {
     pilot,
-    shopStock: generateShopStock(1, BALANCE_CONFIG.shopStockSize, rng),
+    shopStock: generateCategorizedShopStock(
+      1,
+      buildShopOptionsFromState(pilot, adminConfig),
+      rng
+    ),
+    wpMarketOffers: generateWpMarketOffers(
+      { shipyardBonus: hasOperationalShipyard(pilot) },
+      rng
+    ),
+    battlesUntilRestock: SHOP_STOCK_CONFIG.restockEveryNBattles,
+    inventoryFilterState: getDefaultInventoryFilterState(),
+    quickSellConfig: { ...DEFAULT_QUICK_SELL_CONFIG },
     selectedSectorId: SECTORS_CATALOG[0].id,
     hasSaveData: false,
     muted: false,
@@ -92,7 +142,7 @@ export function createFreshCampaignState(
     skipAnimations: false,
     battleViewMode: null,
     language: 'vi',
-    adminConfig: createDefaultAdminConfig(),
+    adminConfig,
   };
 }
 
@@ -197,6 +247,13 @@ function convertLegacyItemInstance(
         Math.min(BALANCE_CONFIG.enchantMaxLevel, Number(obj.enchantLevel) || 0)
       ),
       specialTraits: tpl.specialTraits ? { ...tpl.specialTraits } : undefined,
+      locked: Boolean(obj.locked),
+      favorited: Boolean(obj.favorited),
+      isNew: Boolean(obj.isNew),
+      obtainedAt:
+        typeof obj.obtainedAt === 'number' && Number.isFinite(obj.obtainedAt)
+          ? obj.obtainedAt
+          : Date.now(),
     };
   }
 
@@ -255,8 +312,18 @@ export function migrateSaveData(
       ? raw.selectedSectorId
       : SECTORS_CATALOG[0].id;
 
+  const defAdmin = createDefaultAdminConfig();
   const rawAdmin = (raw.adminConfig ?? {}) as Partial<AdminConfig>;
   const rawSizeOverride = Number(rawAdmin.battleSizeOverride) as BattleSize;
+  const safeMinStock = Math.max(
+    1,
+    Math.min(10, Math.floor(Number(rawAdmin.shopMinStock) || defAdmin.shopMinStock))
+  );
+  const safeMaxStock = Math.max(
+    safeMinStock,
+    Math.min(10, Math.floor(Number(rawAdmin.shopMaxStock) || defAdmin.shopMaxStock))
+  );
+  const rawWeights = rawAdmin.shopRarityWeights;
   const adminConfig: AdminConfig = {
     godMode: Boolean(rawAdmin.godMode),
     oneHitKills: Boolean(rawAdmin.oneHitKills),
@@ -273,7 +340,73 @@ export function migrateSaveData(
       typeof rawAdmin.softEnrageEnabled === 'boolean'
         ? rawAdmin.softEnrageEnabled
         : true,
+    enrageStartRound: Math.max(
+      1,
+      Math.floor(Number(rawAdmin.enrageStartRound) || defAdmin.enrageStartRound)
+    ),
+    enrageStepPct:
+      typeof rawAdmin.enrageStepPct === 'number' && rawAdmin.enrageStepPct >= 0
+        ? rawAdmin.enrageStepPct
+        : defAdmin.enrageStepPct,
+    forceBoss: Boolean(rawAdmin.forceBoss),
+    battleLevelOffsetOverride:
+      typeof rawAdmin.battleLevelOffsetOverride === 'number' &&
+      Number.isFinite(rawAdmin.battleLevelOffsetOverride)
+        ? Math.floor(rawAdmin.battleLevelOffsetOverride)
+        : null,
+    shopMinStock: safeMinStock,
+    shopMaxStock: safeMaxStock,
+    shopRarityWeights:
+      rawWeights && typeof rawWeights === 'object'
+        ? {
+            common: Math.max(0, Number(rawWeights.common) || 0),
+            rare: Math.max(0, Number(rawWeights.rare) || 0),
+            epic: Math.max(0, Number(rawWeights.epic) || 0),
+            legendary: Math.max(0, Number(rawWeights.legendary) || 0),
+          }
+        : { ...defAdmin.shopRarityWeights },
+    shopPriceMultiplier:
+      typeof rawAdmin.shopPriceMultiplier === 'number' &&
+      rawAdmin.shopPriceMultiplier > 0
+        ? rawAdmin.shopPriceMultiplier
+        : 1.0,
+    formationFrontCapacity: Math.max(
+      1,
+      Math.min(8, Math.floor(Number(rawAdmin.formationFrontCapacity) || 4))
+    ),
+    formationBackCapacity: Math.max(
+      1,
+      Math.min(8, Math.floor(Number(rawAdmin.formationBackCapacity) || 4))
+    ),
+    backRowDamageReduction:
+      typeof rawAdmin.backRowDamageReduction === 'number' &&
+      rawAdmin.backRowDamageReduction >= 0 &&
+      rawAdmin.backRowDamageReduction <= 0.85
+        ? rawAdmin.backRowDamageReduction
+        : BALANCE_CONFIG.backRowDamageReduction,
+    showRawI18nKeys: Boolean(rawAdmin.showRawI18nKeys),
   };
+
+  const rawInvFilter = (raw.inventoryFilterState ?? {}) as Partial<InventoryFilterState>;
+  const inventoryFilterState: InventoryFilterState = {
+    ...getDefaultInventoryFilterState(),
+    ...rawInvFilter,
+    rarities: Array.isArray(rawInvFilter.rarities) ? rawInvFilter.rarities : [],
+    tiers: Array.isArray(rawInvFilter.tiers) ? rawInvFilter.tiers : [],
+  };
+
+  const rawQuickSell = (raw.quickSellConfig ?? {}) as Partial<QuickSellFilterConfig>;
+  const quickSellConfig: QuickSellFilterConfig = {
+    ...DEFAULT_QUICK_SELL_CONFIG,
+    ...rawQuickSell,
+  };
+
+  const battlesUntilRestock = Math.max(
+    1,
+    Math.floor(
+      Number(raw.battlesUntilRestock) || SHOP_STOCK_CONFIG.restockEveryNBattles
+    )
+  );
 
   // Case A: v4 / v5 (`pilot` object present)
   if (version >= 4 && raw.pilot && typeof raw.pilot === 'object') {
@@ -377,10 +510,17 @@ export function migrateSaveData(
         )
       : [];
 
-    const rawShop = Array.isArray(raw.shopStock)
+    const rawShop: ShopItemListing[] = Array.isArray(raw.shopStock)
       ? raw.shopStock
-          .map((it) => convertLegacyItemInstance(it, rng))
-          .filter((it): it is ItemInstance => it !== null)
+          .map((it) => {
+            const converted = convertLegacyItemInstance(it, rng);
+            if (!converted) return null;
+            const soldOut = Boolean(
+              (it as Record<string, unknown>)?.soldOut
+            );
+            return { ...converted, soldOut } as ShopItemListing;
+          })
+          .filter((it): it is ShopItemListing => it !== null)
       : [];
 
     const activeGearLevel = gears[finalActiveGearId].level;
@@ -431,30 +571,70 @@ export function migrateSaveData(
       new Set([...unlockedSectorIds, 'aegis_relay', 'veridian_colony'])
     );
 
+    const rawConsumables: ConsumableItem[] = Array.isArray(rawPilot.consumables)
+      ? rawPilot.consumables.filter(
+          (c): c is ConsumableItem =>
+            Boolean(c && typeof c === 'object' && typeof c.id === 'string' && c.quantity > 0)
+        )
+      : [];
+
+    const migratedPilot: PilotAccount = {
+      name:
+        typeof rawPilot.name === 'string' && rawPilot.name.trim().length > 0
+          ? rawPilot.name.slice(0, 18)
+          : 'Vance',
+      credits: Math.max(0, Number(rawPilot.credits) || 0),
+      warPoints: Math.max(0, Number(rawPilot.warPoints) || 0),
+      ownedOpeningCards,
+      inventory: rawInventory,
+      gears,
+      activeGearId: finalActiveGearId,
+      unlockedSectorIds: finalUnlockedSectors,
+      capturedSectorIds,
+      campaignMonth: Math.max(1, Number(rawPilot.campaignMonth) || 1),
+      baseStates: cleanBaseStates,
+      hiredWingman: rawPilot.hiredWingman ?? null,
+      engineerShieldBoost: Boolean(rawPilot.engineerShieldBoost),
+      activeBonusMission: rawPilot.activeBonusMission ?? null,
+      consumables: rawConsumables,
+      activeExpBoostBattles: Math.max(
+        0,
+        Number(rawPilot.activeExpBoostBattles) || 0
+      ),
+      activeEnchantBonusPct: Math.max(
+        0,
+        Number(rawPilot.activeEnchantBonusPct) || 0
+      ),
+    };
+
+    const rawWpOffers: WpMarketOffer[] = Array.isArray(raw.wpMarketOffers)
+      ? (raw.wpMarketOffers as WpMarketOffer[]).filter(
+          (o) => Boolean(o && typeof o === 'object' && typeof o.id === 'string')
+        )
+      : [];
+
+    const hasAvailableShopStock = rawShop.some((it) => !it.soldOut);
+
     return {
-      pilot: {
-        name:
-          typeof rawPilot.name === 'string' && rawPilot.name.trim().length > 0
-            ? rawPilot.name.slice(0, 18)
-            : 'Vance',
-        credits: Math.max(0, Number(rawPilot.credits) || 0),
-        warPoints: Math.max(0, Number(rawPilot.warPoints) || 0),
-        ownedOpeningCards,
-        inventory: rawInventory,
-        gears,
-        activeGearId: finalActiveGearId,
-        unlockedSectorIds: finalUnlockedSectors,
-        capturedSectorIds,
-        campaignMonth: Math.max(1, Number(rawPilot.campaignMonth) || 1),
-        baseStates: cleanBaseStates,
-        hiredWingman: rawPilot.hiredWingman ?? null,
-        engineerShieldBoost: Boolean(rawPilot.engineerShieldBoost),
-        activeBonusMission: rawPilot.activeBonusMission ?? null,
-      },
+      pilot: migratedPilot,
       shopStock:
-        rawShop.length > 0
+        rawShop.length > 0 && hasAvailableShopStock
           ? rawShop
-          : generateShopStock(activeGearLevel, BALANCE_CONFIG.shopStockSize, rng),
+          : generateCategorizedShopStock(
+              activeGearLevel,
+              buildShopOptionsFromState(migratedPilot, adminConfig),
+              rng
+            ),
+      wpMarketOffers:
+        rawWpOffers.length > 0
+          ? rawWpOffers
+          : generateWpMarketOffers(
+              { shipyardBonus: hasOperationalShipyard(migratedPilot) },
+              rng
+            ),
+      battlesUntilRestock,
+      inventoryFilterState,
+      quickSellConfig,
       selectedSectorId,
       hasSaveData,
       muted,
@@ -549,37 +729,49 @@ export function migrateSaveData(
     unlockedSectorIds.push(SECTORS_CATALOG[2].id);
   }
 
+  const legacyPilot: PilotAccount = {
+    name:
+      typeof legacyPlayer.name === 'string' &&
+      legacyPlayer.name.trim().length > 0
+        ? legacyPlayer.name.slice(0, 18)
+        : 'Vance',
+    credits: Math.max(
+      0,
+      Number(legacyPlayer.credits) ?? BALANCE_CONFIG.startingCredits
+    ),
+    warPoints: 0,
+    ownedOpeningCards: [],
+    inventory: migratedInventory,
+    gears,
+    activeGearId: legacyClass,
+    unlockedSectorIds: Array.from(
+      new Set([...unlockedSectorIds, 'aegis_relay', 'veridian_colony'])
+    ),
+    capturedSectorIds: ['aegis_relay'],
+    campaignMonth: 1,
+    baseStates: createInitialBaseStates(),
+    hiredWingman: null,
+    engineerShieldBoost: false,
+    activeBonusMission: null,
+    consumables: [],
+    activeExpBoostBattles: 0,
+    activeEnchantBonusPct: 0,
+  };
+
   return {
-    pilot: {
-      name:
-        typeof legacyPlayer.name === 'string' &&
-        legacyPlayer.name.trim().length > 0
-          ? legacyPlayer.name.slice(0, 18)
-          : 'Vance',
-      credits: Math.max(
-        0,
-        Number(legacyPlayer.credits) ?? BALANCE_CONFIG.startingCredits
-      ),
-      warPoints: 0,
-      ownedOpeningCards: [],
-      inventory: migratedInventory,
-      gears,
-      activeGearId: legacyClass,
-      unlockedSectorIds: Array.from(
-        new Set([...unlockedSectorIds, 'aegis_relay', 'veridian_colony'])
-      ),
-      capturedSectorIds: ['aegis_relay'],
-      campaignMonth: 1,
-      baseStates: createInitialBaseStates(),
-      hiredWingman: null,
-      engineerShieldBoost: false,
-      activeBonusMission: null,
-    },
-    shopStock: generateShopStock(
+    pilot: legacyPilot,
+    shopStock: generateCategorizedShopStock(
       migratedLevel,
-      BALANCE_CONFIG.shopStockSize,
+      buildShopOptionsFromState(legacyPilot, adminConfig),
       rng
     ),
+    wpMarketOffers: generateWpMarketOffers(
+      { shipyardBonus: hasOperationalShipyard(legacyPilot) },
+      rng
+    ),
+    battlesUntilRestock,
+    inventoryFilterState,
+    quickSellConfig,
     selectedSectorId,
     hasSaveData: hasSaveData || gears[legacyClass].battlesFought > 0,
     muted,

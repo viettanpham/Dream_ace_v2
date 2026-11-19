@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Volume2, VolumeX } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Sliders, Volume2, VolumeX } from 'lucide-react';
 import { MECH_CLASS_LIST } from '../data/classes';
 import {
   getClassCode,
@@ -8,7 +8,7 @@ import {
   getClassRole,
   useI18n,
 } from '../i18n';
-import { useGameStore } from '../store/useGameStore';
+import { ENABLE_ADMIN_CP, useGameStore } from '../store/useGameStore';
 import type { MechClassId } from '../types/game';
 import { FighterSvg } from './FighterSvg';
 import { LanguageToggle } from './LanguageToggle';
@@ -18,16 +18,35 @@ export function TitleScreen() {
   const pilot = useGameStore((s) => s.pilot);
   const hasSaveData = useGameStore((s) => s.hasSaveData);
   const muted = useGameStore((s) => s.muted);
+  const adminUnlocked = useGameStore((s) => s.adminUnlocked);
   const startCampaign = useGameStore((s) => s.startCampaign);
   const continueCampaign = useGameStore((s) => s.continueCampaign);
   const resetCampaign = useGameStore((s) => s.resetCampaign);
   const toggleMute = useGameStore((s) => s.toggleMute);
+  const unlockAdminMode = useGameStore((s) => s.unlockAdminMode);
+  const toggleAdminPanel = useGameStore((s) => s.toggleAdminPanel);
 
   const [confirmReset, setConfirmReset] = useState(false);
   const [newPilotName, setNewPilotName] = useState(pilot.name || 'Kira');
   const [starterClass, setStarterClass] = useState<MechClassId>(
     pilot.activeGearId || 'striker'
   );
+  const logoTapsRef = useRef(0);
+  const lastLogoTapRef = useRef(0);
+
+  const handleTitleTap = () => {
+    if (!ENABLE_ADMIN_CP) return;
+    const now = Date.now();
+    if (now - lastLogoTapRef.current > 2500) {
+      logoTapsRef.current = 0;
+    }
+    lastLogoTapRef.current = now;
+    logoTapsRef.current += 1;
+    if (logoTapsRef.current >= 7) {
+      logoTapsRef.current = 0;
+      unlockAdminMode(true);
+    }
+  };
 
   const activeGear = pilot.gears[pilot.activeGearId];
   const ownedCount = MECH_CLASS_LIST.filter((c) => pilot.gears[c.id].owned).length;
@@ -90,6 +109,16 @@ export function TitleScreen() {
 
       {/* Top Controls */}
       <div className="relative z-10 flex items-center justify-end gap-2 px-4 sm:px-6 pt-4 pt-safe">
+        {ENABLE_ADMIN_CP && adminUnlocked && (
+          <button
+            type="button"
+            onClick={toggleAdminPanel}
+            className="min-h-[44px] sm:min-h-0 sm:h-9 px-3 inline-flex items-center gap-1.5 rounded-lg sm:rounded border border-amber-500/60 bg-amber-500/15 hover:bg-amber-500/25 text-xs font-bold text-amber-300 cursor-pointer"
+          >
+            <Sliders className="w-3.5 h-3.5" />
+            <span>{t('admin.btnLabel')}</span>
+          </button>
+        )}
         <LanguageToggle />
         <button
           type="button"
@@ -116,7 +145,10 @@ export function TitleScreen() {
             <div className="flex items-center gap-3 text-xs font-medium tracking-[0.18em] text-amber-400 uppercase">
               <span>{t('app.subtitle')}</span>
             </div>
-            <h1 className="font-display text-5xl sm:text-7xl font-bold tracking-tight text-slate-50 leading-[0.94]">
+            <h1
+              onClick={handleTitleTap}
+              className="font-display text-5xl sm:text-7xl font-bold tracking-tight text-slate-50 leading-[0.94] select-none cursor-pointer"
+            >
               {t('app.title')}
             </h1>
             <p className="max-w-xl text-sm sm:text-base text-slate-300 leading-relaxed">

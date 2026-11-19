@@ -35,6 +35,7 @@ import { useGameStore } from '../store/useGameStore';
 import type { SkillCategory, SkillDefinition } from '../types/game';
 import { BottomSheet } from './BottomSheet';
 import { FighterSvg } from './FighterSvg';
+import { ClassIcon } from './GameIcons';
 import { SkillIcon } from './SkillIcon';
 
 type SkillFilter = 'all' | 'class' | 'general' | 'special_elite';
@@ -172,10 +173,7 @@ export function SkillView() {
           </div>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
-              <span
-                className="w-2 h-2 rounded-full"
-                style={{ backgroundColor: activeClass.accentHex }}
-              />
+              <ClassIcon classId={activeGear.classId} className="w-3.5 h-3.5 shrink-0" />
               <span className="font-semibold text-amber-400">
                 {activeGearName} {t('common.levelShort')}
                 {activeGear.level}

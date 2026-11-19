@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
+  AlertTriangle,
   Award,
   Home,
   LayoutGrid,
@@ -10,9 +11,10 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
+import { isAnyCheatActive } from '../engine/inventory';
 import { getExpForNextLevel } from '../engine/stats';
 import { getClassName, useI18n } from '../i18n';
-import { useGameStore } from '../store/useGameStore';
+import { ENABLE_ADMIN_CP, useGameStore } from '../store/useGameStore';
 import { BottomSheet } from './BottomSheet';
 import { LanguageToggle } from './LanguageToggle';
 import { StatBar } from './StatBar';
@@ -23,17 +25,38 @@ export function TopHud() {
   const pilot = useGameStore((s) => s.pilot);
   const muted = useGameStore((s) => s.muted);
   const battleViewMode = useGameStore((s) => s.battleViewMode);
+  const adminUnlocked = useGameStore((s) => s.adminUnlocked);
+  const adminConfig = useGameStore((s) => s.adminConfig);
   const setScreen = useGameStore((s) => s.setScreen);
   const returnToHangar = useGameStore((s) => s.returnToHangar);
   const toggleMute = useGameStore((s) => s.toggleMute);
   const startBattle = useGameStore((s) => s.startBattle);
   const setBattleViewMode = useGameStore((s) => s.setBattleViewMode);
   const toggleAdminPanel = useGameStore((s) => s.toggleAdminPanel);
+  const unlockAdminMode = useGameStore((s) => s.unlockAdminMode);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const tapCountRef = useRef(0);
+  const lastTapRef = useRef(0);
+
+  const handleSecretTap = () => {
+    if (!ENABLE_ADMIN_CP) return;
+    const now = Date.now();
+    if (now - lastTapRef.current > 2500) {
+      tapCountRef.current = 0;
+    }
+    lastTapRef.current = now;
+    tapCountRef.current += 1;
+    if (tapCountRef.current >= 7) {
+      tapCountRef.current = 0;
+      unlockAdminMode(true);
+    }
+  };
 
   const activeGear = pilot.gears[pilot.activeGearId];
   const expNeeded = getExpForNextLevel(activeGear.level);
+  const cheatsActive = isAnyCheatActive(adminConfig);
+  const showAdminBtn = ENABLE_ADMIN_CP && adminUnlocked;
   const effectiveDefaultMode =
     battleViewMode ??
     (typeof window !== 'undefined' && window.innerWidth < 768
@@ -53,8 +76,12 @@ export function TopHud() {
             {t('app.title')}
           </button>
 
-          {/* Mobile compact Pilot + Gear Lv */}
-          <div className="flex md:hidden items-center gap-1.5 min-w-0">
+          {/* Mobile compact Pilot + Gear Lv (7-tap unlocks Admin CP) */}
+          <button
+            type="button"
+            onClick={handleSecretTap}
+            className="flex md:hidden items-center gap-1.5 min-w-0 text-left cursor-pointer select-none"
+          >
             <span className="font-semibold text-sm text-slate-100 truncate max-w-[74px]">
               {pilot.name || 'Vance'}
             </span>
@@ -63,12 +90,29 @@ export function TopHud() {
               {t('common.levelShort')}
               {activeGear.level}
             </span>
-          </div>
+          </button>
+
+          {cheatsActive && (
+            <button
+              type="button"
+              onClick={() => ENABLE_ADMIN_CP && toggleAdminPanel()}
+              data-testid="cheats-active-badge"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-rose-500/70 bg-rose-500/20 text-[11px] font-bold text-rose-200 whitespace-nowrap shrink-0 cursor-pointer"
+              title={t('admin.cheatsActiveBadge')}
+            >
+              <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
+              <span className="hidden sm:inline">{t('admin.cheatsActiveBadge')}</span>
+              <span className="sm:hidden">CHEAT</span>
+            </button>
+          )}
         </div>
 
         {/* Center: Desktop full info / Mobile Credits */}
         <div className="flex items-center gap-2.5 sm:gap-5 text-xs sm:text-sm text-slate-300 min-w-0">
-          <div className="hidden md:flex items-center gap-2 whitespace-nowrap min-w-0">
+          <div
+            onClick={handleSecretTap}
+            className="hidden md:flex items-center gap-2 whitespace-nowrap min-w-0 cursor-pointer select-none"
+          >
             <span className="text-slate-400">{t('common.pilot')}:</span>
             <span className="font-semibold text-slate-100">
               {pilot.name || 'Vance'}
@@ -124,6 +168,19 @@ export function TopHud() {
               className="min-h-[44px] md:min-h-0 md:h-9 px-2.5 sm:px-3.5 bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 font-medium text-xs rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               {t('nav.returnHangar')}
+            </button>
+          )}
+
+          {showAdminBtn && (
+            <button
+              type="button"
+              data-testid="tophud-admin-btn"
+              onClick={toggleAdminPanel}
+              className="min-h-[40px] md:min-h-0 md:h-9 px-2.5 inline-flex items-center gap-1.5 rounded border border-amber-500/60 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 font-bold text-xs tracking-wider cursor-pointer shrink-0"
+              title={t('admin.title')}
+            >
+              <Sliders className="w-3.5 h-3.5" />
+              <span>{t('admin.btnLabel')}</span>
             </button>
           )}
 
@@ -252,17 +309,19 @@ export function TopHud() {
               </span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                setSettingsOpen(false);
-                toggleAdminPanel();
-              }}
-              className="min-h-[44px] px-3.5 rounded-lg border border-slate-800 bg-slate-900 hover:bg-slate-800 text-slate-200 text-sm font-medium flex items-center gap-2.5 cursor-pointer"
-            >
-              <Sliders className="w-4 h-4 text-amber-400" />
-              <span>{t('admin.title')}</span>
-            </button>
+            {ENABLE_ADMIN_CP && adminUnlocked && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSettingsOpen(false);
+                  toggleAdminPanel();
+                }}
+                className="min-h-[44px] px-3.5 rounded-lg border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-200 text-sm font-semibold flex items-center gap-2.5 cursor-pointer"
+              >
+                <Sliders className="w-4 h-4 text-amber-400" />
+                <span>{t('admin.title')}</span>
+              </button>
+            )}
 
             <button
               type="button"

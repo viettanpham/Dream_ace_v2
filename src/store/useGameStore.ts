@@ -2,9 +2,11 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { BALANCE_CONFIG, getGarageUnlockCost } from '../data/balance';
 import { EMPTY_STAT_BLOCK, MECH_CLASS_LIST } from '../data/classes';
+import { EQUIPMENT_SLOTS } from '../data/items';
 import { getNextSectorId, SECTORS_CATALOG } from '../data/maps';
 import { WINGMAN_CHAT_KEYS } from '../data/pilots';
-import { getSkillById } from '../data/skills';
+import { SHOP_STOCK_CONFIG } from '../data/shopConfig';
+import { getSkillById, OPENING_CARDS_LIST } from '../data/skills';
 import {
   calculateBattleRewards,
   chooseAiDecision,
@@ -18,7 +20,6 @@ import {
 import {
   equipItemOnGear,
   generateItemInstance,
-  generateShopStock,
   getItemEquippedByGear,
   getSellPrice,
   resolveEnchantAttempt,
@@ -26,6 +27,10 @@ import {
   unequipInstanceFromAnyGear,
   unequipSlotOnGear,
 } from '../engine/equipment';
+import {
+  getDefaultInventoryFilterState,
+  RARITY_RANK,
+} from '../engine/inventory';
 import {
   acceptBaseBonusMission,
   advanceCampaignMonth,
@@ -42,9 +47,17 @@ import {
   CURRENT_SAVE_VERSION,
   migrateSaveData,
 } from '../engine/migration';
+import { DEFAULT_QUICK_SELL_CONFIG } from '../engine/quickSell';
+import {
+  buildShopOptionsFromState,
+  generateCategorizedShopStock,
+  generateWpMarketOffers,
+  hasOperationalShipyard,
+} from '../engine/shop';
 import {
   buyOpeningCard,
   equipSkillToGearBar,
+  getSkillsForClass,
   learnOrUpgradeSkillOnGear,
   unequipSkillFromGearBar,
 } from '../engine/skills';
@@ -73,6 +86,7 @@ import type {
   AutoRepeatSession,
   AutoSafetyConfig,
   AutoStopReason,
+  BaseFaction,
   BaseTab,
   BattleEvent,
   BattleRoundSnapshot,
@@ -81,31 +95,68 @@ import type {
   BattleViewMode,
   CombatLogEntry,
   CombatUnit,
+  ConsumableItem,
   EnchantAttemptResult,
   EquipmentSlot,
   EquipValidationResult,
   GearTacticsProfile,
+  InventoryFilterState,
   ItemInstance,
   ItemRarity,
   Language,
   MechClassId,
   PilotAccount,
+  QuickSellFilterConfig,
+  QuickSellUndoState,
   ScreenState,
+  ShopItemListing,
   SimpleTacticsConfig,
   SimpleTacticsPresetId,
   SkillValidationResult,
   StatBlock,
   TacticsPresetId,
   TacticsRule,
+  WpMarketOffer,
 } from '../types/game';
 import { soundFx } from '../utils/sound';
+
+export const ENABLE_ADMIN_CP: boolean =
+  import.meta.env.VITE_ENABLE_ADMIN_CP !== 'false';
+
+export const ADMIN_UNLOCK_STORAGE_KEY = 'dream_ace_admin_enabled';
+
+function readPersistedAdminUnlock(): boolean {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return false;
+    return window.localStorage.getItem(ADMIN_UNLOCK_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writePersistedAdminUnlock(enabled: boolean): void {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    if (enabled) {
+      window.localStorage.setItem(ADMIN_UNLOCK_STORAGE_KEY, '1');
+    } else {
+      window.localStorage.removeItem(ADMIN_UNLOCK_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore storage failures
+  }
+}
 
 export type ShopSubTab = 'buy' | 'sell' | 'warpoints';
 
 interface GameStoreState {
-  // Persisted state (v5 per-Gear + full Skill System + War Points)
+  // Persisted state (v7 per-Gear + full Skill System + Random Shop + Inventory Filters + Admin CP)
   pilot: PilotAccount;
-  shopStock: ItemInstance[];
+  shopStock: ShopItemListing[];
+  wpMarketOffers: WpMarketOffer[];
+  battlesUntilRestock: number;
+  inventoryFilterState: InventoryFilterState;
+  quickSellConfig: QuickSellFilterConfig;
   selectedSectorId: string;
   hasSaveData: boolean;
   muted: boolean;
@@ -120,11 +171,13 @@ interface GameStoreState {
   activeTab: BaseTab;
   shopSubTab: ShopSubTab;
   battle: BattleState | null;
+  adminUnlocked: boolean;
   adminPanelOpen: boolean;
   autoBattleEnabled: boolean;
   tacticsModalOpen: boolean;
   autoRepeatLimit: AutoRepeatLimit;
   autoRepeatSession: AutoRepeatSession | null;
+  quickSellUndo: QuickSellUndoState | null;
 
   // Language
   setLanguage: (lang: Language) => void;
@@ -182,12 +235,39 @@ interface GameStoreState {
   stopAutoRepeat: (reason?: AutoStopReason) => void;
   clearAutoRepeatSummary: () => void;
 
-  // Equipment, Shop & Enchant actions
+  // Equipment, Inventory, Quick Sell, Shop, WP Market & Consumables actions
+  setInventoryFilterState: (patch: Partial<InventoryFilterState>) => void;
+  resetInventoryFilterState: () => void;
+  setQuickSellConfig: (patch: Partial<QuickSellFilterConfig>) => void;
+  toggleItemLock: (instanceId: string) => void;
+  toggleItemFavorite: (instanceId: string) => void;
+  markItemSeen: (instanceId: string) => void;
+  bulkSetItemLock: (instanceIds: string[], locked: boolean) => void;
+  bulkSellItems: (instanceIds: string[]) => {
+    soldCount: number;
+    creditsEarned: number;
+  };
+  executeQuickSell: (instanceIds: string[]) => {
+    soldCount: number;
+    creditsEarned: number;
+  };
+  undoQuickSell: () => { ok: boolean; restoredCount: number };
+  clearQuickSellUndo: () => void;
   equipItem: (instanceId: string) => EquipValidationResult;
   unequipSlot: (slot: EquipmentSlot) => void;
   unequipInstanceEverywhere: (instanceId: string) => void;
   buyShopItem: (instanceId: string) => { ok: boolean };
   refreshShopStock: () => { ok: boolean; cost: number };
+  buyWpMarketOffer: (offerId: string) => {
+    ok: boolean;
+    reason?: 'not_found' | 'sold_out' | 'insufficient_wp';
+  };
+  refreshWpMarket: () => { ok: boolean; cost: number };
+  useConsumable: (consumableId: string) => {
+    ok: boolean;
+    openedItem?: ItemInstance;
+    kind?: ConsumableItem['kind'];
+  };
   sellItem: (instanceId: string) => { ok: boolean; creditsEarned: number };
   enchantEquippedSlot: (slot: EquipmentSlot) => EnchantAttemptResult | null;
 
@@ -212,14 +292,15 @@ interface GameStoreState {
   toggleSkipAnimations: () => void;
   setBattleViewMode: (mode: BattleViewMode) => void;
 
-  // Admin CP actions
+  // Admin CP actions (all routed through store reducers)
+  unlockAdminMode: (openPanel?: boolean) => void;
   setAdminPanelOpen: (open: boolean) => void;
   toggleAdminPanel: () => void;
-  adminSetGearLevel: (level: number) => void;
-  adminAddGearExp: (amount: number) => void;
-  adminSetGearUnspentPoints: (points: number) => void;
-  adminAddGearUnspentPoints: (delta: number) => void;
-  adminResetGearAllocation: () => void;
+  adminSetGearLevel: (level: number, gearId?: MechClassId) => void;
+  adminAddGearExp: (amount: number, gearId?: MechClassId) => void;
+  adminSetGearUnspentPoints: (points: number, gearId?: MechClassId) => void;
+  adminAddGearUnspentPoints: (delta: number, gearId?: MechClassId) => void;
+  adminResetGearAllocation: (gearId?: MechClassId) => void;
   adminSetCredits: (amount: number) => void;
   adminAddCredits: (delta: number) => void;
   adminSetWarPoints: (amount: number) => void;
@@ -228,11 +309,33 @@ interface GameStoreState {
     slot: EquipmentSlot,
     tier: number,
     rarity: ItemRarity,
-    quantity: number
+    quantity: number,
+    options?: { requiredLevel?: number; rollQuality?: number }
   ) => number;
+  adminDeleteItems: (
+    mode: 'all_unequipped' | 'by_filter',
+    filter?: { maxRarity?: ItemRarity | null; maxTier?: number | null }
+  ) => number;
+  adminFillInventory: (count: number) => number;
+  adminRestockShopNow: () => void;
+  adminForceAddShopItem: (options: {
+    templateId?: string;
+    slot: EquipmentSlot;
+    tier: number;
+    rarity: ItemRarity;
+  }) => void;
+  adminUnlockAllSkillsForGear: (gearId?: MechClassId, maxLevel?: boolean) => void;
+  adminGrantAllOpeningCards: () => void;
+  adminResetBattleCooldowns: () => void;
+  adminSkipBattleToRound: (targetRound: number) => void;
+  adminSetCampaignMonth: (month: number) => void;
+  adminSetBaseFaction: (sectorId: string, faction: BaseFaction) => void;
+  adminTriggerEnemyAttack: (sectorId: string) => void;
   adminUnlockAllGears: () => void;
   adminUnlockAllSectors: () => void;
   adminUpdateConfig: (patch: Partial<AdminConfig>) => void;
+  adminExportSaveJson: () => string;
+  adminImportSaveJson: (rawJson: string) => { ok: boolean; error?: string };
 }
 
 function findNextAliveTurnIndex(
@@ -352,8 +455,16 @@ function finalizeBattleOutcome(
     won
   );
 
+  // Active EXP Boost consumable (+50% EXP for N battles)
+  const expBoostActive = (state.pilot.activeExpBoostBattles ?? 0) > 0;
+  const effectiveExpGained = expBoostActive
+    ? Math.round(
+        rewards.expGained * (1 + SHOP_STOCK_CONFIG.wpOffers.expBoost.expBonusPct / 100)
+      )
+    : rewards.expGained;
+
   // Per-Gear EXP: ONLY the deployed Gear receives EXP & battle record!
-  const levelResult = applyExpToGear(deployedGear, rewards.expGained, { won });
+  const levelResult = applyExpToGear(deployedGear, effectiveExpGained, { won });
   const battlesToNextLevel = estimateBattlesToNextLevel(
     levelResult.updatedGear,
     rewards.fullVictoryExp
@@ -385,6 +496,9 @@ function finalizeBattleOutcome(
     },
     unlockedSectorIds: nextUnlockedSectors,
     capturedSectorIds: nextCapturedSectors,
+    activeExpBoostBattles: expBoostActive
+      ? Math.max(0, (state.pilot.activeExpBoostBattles ?? 1) - 1)
+      : 0,
   };
 
   // Freshly captured bases start Damaged; repelled raids clear alert; hired wingman/engineer boost consumed; bonus missions paid
@@ -399,11 +513,18 @@ function finalizeBattleOutcome(
     : advanceCampaignMonth(baseConseq.pilot);
   const nextPilot: PilotAccount = monthStep.pilot;
 
-  // Auto-refresh randomized shop stock after every battle
-  const refreshedShopStock = generateShopStock(
-    levelResult.updatedGear.level,
-    BALANCE_CONFIG.shopStockSize
-  );
+  // Auto-restock Credits Shop & WP Market based on restockEveryNBattles cadence
+  const nextBattlesUntilRestock = Math.max(0, (state.battlesUntilRestock || 1) - 1);
+  const shouldRestock = nextBattlesUntilRestock <= 0 || state.shopStock.length === 0;
+  const refreshedShopStock = shouldRestock
+    ? generateCategorizedShopStock(
+        levelResult.updatedGear.level,
+        buildShopOptionsFromState(nextPilot, state.adminConfig)
+      )
+    : state.shopStock;
+  const refreshedWpOffers = shouldRestock
+    ? generateWpMarketOffers({ shipyardBonus: hasOperationalShipyard(nextPilot) })
+    : state.wpMarketOffers;
 
   if (won) soundFx.playVictory();
   else soundFx.playDefeat();
@@ -418,7 +539,7 @@ function finalizeBattleOutcome(
       ...state.autoRepeatSession,
       completedRuns: state.autoRepeatSession.completedRuns + 1,
       wins: state.autoRepeatSession.wins + (won ? 1 : 0),
-      totalExp: state.autoRepeatSession.totalExp + rewards.expGained,
+      totalExp: state.autoRepeatSession.totalExp + effectiveExpGained,
       totalCredits: state.autoRepeatSession.totalCredits + rewards.creditsGained,
       totalWarPoints:
         state.autoRepeatSession.totalWarPoints + rewards.warPointsGained,
@@ -443,6 +564,10 @@ function finalizeBattleOutcome(
   return {
     pilot: nextPilot,
     shopStock: refreshedShopStock,
+    wpMarketOffers: refreshedWpOffers,
+    battlesUntilRestock: shouldRestock
+      ? SHOP_STOCK_CONFIG.restockEveryNBattles
+      : nextBattlesUntilRestock,
     hasSaveData: true,
     autoRepeatSession: nextAutoRepeat,
     battle: {
@@ -466,7 +591,7 @@ function finalizeBattleOutcome(
         deployedGearId,
         sectorId: battle.sectorId,
         rounds: battle.round,
-        expGained: rewards.expGained,
+        expGained: effectiveExpGained,
         creditsGained: rewards.creditsGained,
         warPointsGained: rewards.warPointsGained,
         baseCaptureBonusWp: rewards.baseCaptureBonusWp,
@@ -495,11 +620,13 @@ export const useGameStore = create<GameStoreState>()(
       activeTab: 'gear',
       shopSubTab: 'buy',
       battle: null,
+      adminUnlocked: readPersistedAdminUnlock(),
       adminPanelOpen: false,
       autoBattleEnabled: false,
       tacticsModalOpen: false,
       autoRepeatLimit: 1,
       autoRepeatSession: null,
+      quickSellUndo: null,
 
       setLanguage: (language) => {
         soundFx.playClick();
@@ -1016,7 +1143,25 @@ export const useGameStore = create<GameStoreState>()(
         const state = get();
         const summary = advanceCampaignMonth(state.pilot);
         soundFx.playConfirm();
-        set({ pilot: summary.pilot, hasSaveData: true });
+        const activeGear = summary.pilot.gears[summary.pilot.activeGearId];
+        const nextShopStock = SHOP_STOCK_CONFIG.restockOnMonthAdvance
+          ? generateCategorizedShopStock(
+              activeGear.level,
+              buildShopOptionsFromState(summary.pilot, state.adminConfig)
+            )
+          : state.shopStock;
+        const nextWpOffers = SHOP_STOCK_CONFIG.restockOnMonthAdvance
+          ? generateWpMarketOffers({
+              shipyardBonus: hasOperationalShipyard(summary.pilot),
+            })
+          : state.wpMarketOffers;
+        set({
+          pilot: summary.pilot,
+          shopStock: nextShopStock,
+          wpMarketOffers: nextWpOffers,
+          battlesUntilRestock: SHOP_STOCK_CONFIG.restockEveryNBattles,
+          hasSaveData: true,
+        });
         return summary;
       },
 
@@ -1049,6 +1194,198 @@ export const useGameStore = create<GameStoreState>()(
         }
         return res;
       },
+
+      setInventoryFilterState: (patch) => {
+        set((state) => ({
+          inventoryFilterState: {
+            ...state.inventoryFilterState,
+            ...patch,
+          },
+        }));
+      },
+
+      resetInventoryFilterState: () => {
+        set({ inventoryFilterState: getDefaultInventoryFilterState() });
+      },
+
+      setQuickSellConfig: (patch) => {
+        set((state) => ({
+          quickSellConfig: {
+            ...state.quickSellConfig,
+            ...patch,
+          },
+        }));
+      },
+
+      toggleItemLock: (instanceId) => {
+        soundFx.playClick();
+        set((state) => ({
+          pilot: {
+            ...state.pilot,
+            inventory: state.pilot.inventory.map((it) =>
+              it.instanceId === instanceId ? { ...it, locked: !it.locked } : it
+            ),
+          },
+          hasSaveData: true,
+        }));
+      },
+
+      toggleItemFavorite: (instanceId) => {
+        soundFx.playClick();
+        set((state) => ({
+          pilot: {
+            ...state.pilot,
+            inventory: state.pilot.inventory.map((it) =>
+              it.instanceId === instanceId
+                ? { ...it, favorited: !it.favorited }
+                : it
+            ),
+          },
+          hasSaveData: true,
+        }));
+      },
+
+      markItemSeen: (instanceId) => {
+        const state = get();
+        const target = state.pilot.inventory.find(
+          (it) => it.instanceId === instanceId
+        );
+        if (!target || !target.isNew) return;
+        set({
+          pilot: {
+            ...state.pilot,
+            inventory: state.pilot.inventory.map((it) =>
+              it.instanceId === instanceId ? { ...it, isNew: false } : it
+            ),
+          },
+        });
+      },
+
+      bulkSetItemLock: (instanceIds, locked) => {
+        if (instanceIds.length === 0) return;
+        const idSet = new Set(instanceIds);
+        soundFx.playClick();
+        set((state) => ({
+          pilot: {
+            ...state.pilot,
+            inventory: state.pilot.inventory.map((it) =>
+              idSet.has(it.instanceId) ? { ...it, locked } : it
+            ),
+          },
+          hasSaveData: true,
+        }));
+      },
+
+      bulkSellItems: (instanceIds) => {
+        const state = get();
+        if (instanceIds.length === 0) {
+          return { soldCount: 0, creditsEarned: 0 };
+        }
+        const idSet = new Set(instanceIds);
+        const soldItems: ItemInstance[] = [];
+        const remaining: ItemInstance[] = [];
+        let creditsEarned = 0;
+
+        for (const it of state.pilot.inventory) {
+          if (
+            idSet.has(it.instanceId) &&
+            !it.locked &&
+            getItemEquippedByGear(state.pilot.gears, it.instanceId) === null
+          ) {
+            soldItems.push(it);
+            creditsEarned += getSellPrice(it);
+          } else {
+            remaining.push(it);
+          }
+        }
+
+        if (soldItems.length === 0) {
+          return { soldCount: 0, creditsEarned: 0 };
+        }
+
+        soundFx.playConfirm();
+        set({
+          pilot: {
+            ...state.pilot,
+            credits: state.pilot.credits + creditsEarned,
+            inventory: remaining,
+          },
+          hasSaveData: true,
+        });
+        return { soldCount: soldItems.length, creditsEarned };
+      },
+
+      executeQuickSell: (instanceIds) => {
+        const state = get();
+        if (instanceIds.length === 0) {
+          return { soldCount: 0, creditsEarned: 0 };
+        }
+        const idSet = new Set(instanceIds);
+        const soldItems: ItemInstance[] = [];
+        const remaining: ItemInstance[] = [];
+        let creditsEarned = 0;
+
+        for (const it of state.pilot.inventory) {
+          if (
+            idSet.has(it.instanceId) &&
+            !it.locked &&
+            !it.favorited &&
+            getItemEquippedByGear(state.pilot.gears, it.instanceId) === null
+          ) {
+            soldItems.push(it);
+            creditsEarned += getSellPrice(it);
+          } else {
+            remaining.push(it);
+          }
+        }
+
+        if (soldItems.length === 0) {
+          return { soldCount: 0, creditsEarned: 0 };
+        }
+
+        soundFx.playConfirm();
+        set({
+          pilot: {
+            ...state.pilot,
+            credits: state.pilot.credits + creditsEarned,
+            inventory: remaining,
+          },
+          quickSellUndo: {
+            soldItems,
+            totalCredits: creditsEarned,
+            soldAt: Date.now(),
+          },
+          hasSaveData: true,
+        });
+        return { soldCount: soldItems.length, creditsEarned };
+      },
+
+      undoQuickSell: () => {
+        const state = get();
+        const undo = state.quickSellUndo;
+        if (!undo || undo.soldItems.length === 0) {
+          return { ok: false, restoredCount: 0 };
+        }
+        const existingIds = new Set(
+          state.pilot.inventory.map((i) => i.instanceId)
+        );
+        const toRestore = undo.soldItems.filter(
+          (i) => !existingIds.has(i.instanceId)
+        );
+        soundFx.playClick();
+        set({
+          pilot: {
+            ...state.pilot,
+            credits: Math.max(0, state.pilot.credits - undo.totalCredits),
+            inventory: [...toRestore, ...state.pilot.inventory],
+          },
+          quickSellUndo: null,
+          hasSaveData: true,
+        });
+        return { ok: true, restoredCount: toRestore.length };
+      },
+
+      clearQuickSellUndo: () => set({ quickSellUndo: null }),
 
       equipItem: (instanceId) => {
         const state = get();
@@ -1090,18 +1427,27 @@ export const useGameStore = create<GameStoreState>()(
           (it) => it.instanceId === instanceId
         );
         if (idx === -1) return { ok: false };
-        const item = state.shopStock[idx];
-        if (state.pilot.credits < item.price) return { ok: false };
+        const listing = state.shopStock[idx];
+        if (listing.soldOut) return { ok: false };
+        if (state.pilot.credits < listing.price) return { ok: false };
 
-        const nextStock = [...state.shopStock];
-        nextStock.splice(idx, 1);
+        // Mark listing as SOLD OUT instead of removing so shop never appears empty/0
+        const nextStock = state.shopStock.map((it, i) =>
+          i === idx ? { ...it, soldOut: true } : it
+        );
+        const { soldOut: _ignored, ...cleanItem } = listing;
+        const purchasedItem: ItemInstance = {
+          ...cleanItem,
+          isNew: true,
+          obtainedAt: Date.now(),
+        };
 
         soundFx.playConfirm();
         set({
           pilot: {
             ...state.pilot,
-            credits: state.pilot.credits - item.price,
-            inventory: [item, ...state.pilot.inventory],
+            credits: state.pilot.credits - listing.price,
+            inventory: [purchasedItem, ...state.pilot.inventory],
           },
           shopStock: nextStock,
           hasSaveData: true,
@@ -1111,7 +1457,7 @@ export const useGameStore = create<GameStoreState>()(
 
       refreshShopStock: () => {
         const state = get();
-        const cost = BALANCE_CONFIG.shopRefreshCost;
+        const cost = SHOP_STOCK_CONFIG.refreshCostCredits;
         if (state.pilot.credits < cost) {
           return { ok: false, cost };
         }
@@ -1122,13 +1468,186 @@ export const useGameStore = create<GameStoreState>()(
             ...state.pilot,
             credits: state.pilot.credits - cost,
           },
-          shopStock: generateShopStock(
+          shopStock: generateCategorizedShopStock(
             activeGear.level,
-            BALANCE_CONFIG.shopStockSize
+            buildShopOptionsFromState(state.pilot, state.adminConfig)
           ),
+          battlesUntilRestock: SHOP_STOCK_CONFIG.restockEveryNBattles,
           hasSaveData: true,
         });
         return { ok: true, cost };
+      },
+
+      buyWpMarketOffer: (offerId) => {
+        const state = get();
+        const idx = state.wpMarketOffers.findIndex((o) => o.id === offerId);
+        if (idx === -1) return { ok: false, reason: 'not_found' };
+        const offer = state.wpMarketOffers[idx];
+        if (offer.soldOut) return { ok: false, reason: 'sold_out' };
+        if (state.pilot.warPoints < offer.wpCost) {
+          return { ok: false, reason: 'insufficient_wp' };
+        }
+
+        const existingConsumables = [...(state.pilot.consumables ?? [])];
+        // Stack identical consumables when possible
+        const matchIdx = existingConsumables.findIndex(
+          (c) =>
+            c.kind === offer.kind &&
+            c.slot === offer.slot &&
+            c.minRarity === offer.minRarity &&
+            c.bonusPct === offer.bonusPct &&
+            c.battlesCount === offer.battlesCount
+        );
+        if (matchIdx >= 0) {
+          existingConsumables[matchIdx] = {
+            ...existingConsumables[matchIdx],
+            quantity: existingConsumables[matchIdx].quantity + 1,
+          };
+        } else {
+          existingConsumables.push({
+            id: `cons_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e5).toString(36)}`,
+            kind: offer.kind,
+            quantity: 1,
+            slot: offer.slot,
+            minRarity: offer.minRarity,
+            bonusPct: offer.bonusPct,
+            battlesCount: offer.battlesCount,
+          });
+        }
+
+        const nextOffers = state.wpMarketOffers.map((o, i) =>
+          i === idx ? { ...o, soldOut: true } : o
+        );
+
+        soundFx.playConfirm();
+        set({
+          pilot: {
+            ...state.pilot,
+            warPoints: state.pilot.warPoints - offer.wpCost,
+            consumables: existingConsumables,
+          },
+          wpMarketOffers: nextOffers,
+          hasSaveData: true,
+        });
+        return { ok: true };
+      },
+
+      refreshWpMarket: () => {
+        const state = get();
+        const cost = SHOP_STOCK_CONFIG.wpRefreshCostWp;
+        if (state.pilot.warPoints < cost) {
+          return { ok: false, cost };
+        }
+        soundFx.playClick();
+        set({
+          pilot: {
+            ...state.pilot,
+            warPoints: state.pilot.warPoints - cost,
+          },
+          wpMarketOffers: generateWpMarketOffers({
+            shipyardBonus: hasOperationalShipyard(state.pilot),
+          }),
+          hasSaveData: true,
+        });
+        return { ok: true, cost };
+      },
+
+      useConsumable: (consumableId) => {
+        const state = get();
+        const consumables = state.pilot.consumables ?? [];
+        const idx = consumables.findIndex((c) => c.id === consumableId);
+        if (idx === -1 || consumables[idx].quantity <= 0) {
+          return { ok: false };
+        }
+        const entry = consumables[idx];
+        const nextConsumables = consumables
+          .map((c, i) =>
+            i === idx ? { ...c, quantity: c.quantity - 1 } : c
+          )
+          .filter((c) => c.quantity > 0);
+
+        const activeGear = state.pilot.gears[state.pilot.activeGearId];
+
+        if (entry.kind === 'equipment_crate') {
+          const maxTier =
+            activeGear.level >= 9
+              ? 4
+              : activeGear.level >= 6
+              ? 3
+              : activeGear.level >= 3
+              ? 2
+              : 1;
+          const openedItem = generateItemInstance({
+            slot: entry.slot ?? 'main_weapon',
+            tier: maxTier,
+            rarity: entry.minRarity ?? 'rare',
+            requiredLevel: Math.max(1, activeGear.level),
+            isNew: true,
+          });
+          soundFx.playVictory();
+          set({
+            pilot: {
+              ...state.pilot,
+              consumables: nextConsumables,
+              inventory: [openedItem, ...state.pilot.inventory],
+            },
+            hasSaveData: true,
+          });
+          return { ok: true, openedItem, kind: entry.kind };
+        }
+
+        if (entry.kind === 'enchant_stone') {
+          const bonus =
+            entry.bonusPct ?? SHOP_STOCK_CONFIG.wpOffers.enchantStone.bonusPct;
+          soundFx.playConfirm();
+          set({
+            pilot: {
+              ...state.pilot,
+              consumables: nextConsumables,
+              activeEnchantBonusPct: Math.min(
+                50,
+                (state.pilot.activeEnchantBonusPct ?? 0) + bonus
+              ),
+            },
+            hasSaveData: true,
+          });
+          return { ok: true, kind: entry.kind };
+        }
+
+        if (entry.kind === 'respec_token') {
+          const resetGear = resetGearStatAllocations(activeGear);
+          soundFx.playConfirm();
+          set({
+            pilot: {
+              ...state.pilot,
+              consumables: nextConsumables,
+              gears: {
+                ...state.pilot.gears,
+                [state.pilot.activeGearId]: resetGear,
+              },
+            },
+            hasSaveData: true,
+          });
+          return { ok: true, kind: entry.kind };
+        }
+
+        if (entry.kind === 'exp_boost') {
+          const battles =
+            entry.battlesCount ?? SHOP_STOCK_CONFIG.wpOffers.expBoost.battlesCount;
+          soundFx.playConfirm();
+          set({
+            pilot: {
+              ...state.pilot,
+              consumables: nextConsumables,
+              activeExpBoostBattles:
+                (state.pilot.activeExpBoostBattles ?? 0) + battles,
+            },
+            hasSaveData: true,
+          });
+          return { ok: true, kind: entry.kind };
+        }
+
+        return { ok: false };
       },
 
       sellItem: (instanceId) => {
@@ -1142,6 +1661,9 @@ export const useGameStore = create<GameStoreState>()(
         if (idx === -1) return { ok: false, creditsEarned: 0 };
 
         const inst = state.pilot.inventory[idx];
+        if (inst.locked) {
+          return { ok: false, creditsEarned: 0 };
+        }
         const sellValue = getSellPrice(inst);
         const nextInventory = [...state.pilot.inventory];
         nextInventory.splice(idx, 1);
@@ -1170,8 +1692,14 @@ export const useGameStore = create<GameStoreState>()(
         if (invIdx === -1) return null;
 
         const instance = state.pilot.inventory[invIdx];
+        const bonusPct = state.pilot.activeEnchantBonusPct ?? 0;
         const { result, updatedInstance, remainingCredits } =
-          resolveEnchantAttempt(instance, state.pilot.credits);
+          resolveEnchantAttempt(
+            instance,
+            state.pilot.credits,
+            Math.random,
+            bonusPct
+          );
 
         if (!result.attempted) {
           return result;
@@ -1191,6 +1719,7 @@ export const useGameStore = create<GameStoreState>()(
             ...state.pilot,
             credits: remainingCredits,
             inventory: nextInventory,
+            activeEnchantBonusPct: 0,
           },
           hasSaveData: true,
         });
@@ -1211,7 +1740,8 @@ export const useGameStore = create<GameStoreState>()(
           state.pilot,
           targetSectorId,
           Math.random,
-          state.adminConfig.battleSizeOverride
+          state.adminConfig.battleSizeOverride,
+          state.adminConfig
         );
         soundFx.playConfirm();
 
@@ -1957,18 +2487,38 @@ export const useGameStore = create<GameStoreState>()(
       },
 
       // ---- ADMIN CP ACTIONS ----
-      setAdminPanelOpen: (adminPanelOpen) => set({ adminPanelOpen }),
-      toggleAdminPanel: () =>
-        set((state) => ({ adminPanelOpen: !state.adminPanelOpen })),
+      unlockAdminMode: (openPanel = false) => {
+        if (!ENABLE_ADMIN_CP) return;
+        writePersistedAdminUnlock(true);
+        set((state) => ({
+          adminUnlocked: true,
+          adminPanelOpen: openPanel ? true : state.adminPanelOpen,
+        }));
+      },
 
-      adminSetGearLevel: (level) => {
+      setAdminPanelOpen: (adminPanelOpen) => {
+        if (adminPanelOpen && !ENABLE_ADMIN_CP) return;
+        set({ adminPanelOpen });
+      },
+
+      toggleAdminPanel: () => {
+        if (!ENABLE_ADMIN_CP) return;
+        writePersistedAdminUnlock(true);
+        set((state) => ({
+          adminUnlocked: true,
+          adminPanelOpen: !state.adminPanelOpen,
+        }));
+      },
+
+      adminSetGearLevel: (level, gearId) => {
         const state = get();
         const clamped = Math.max(
           1,
           Math.min(BALANCE_CONFIG.maxLevel, Math.floor(level) || 1)
         );
-        const id = state.pilot.activeGearId;
+        const id = gearId ?? state.pilot.activeGearId;
         const gear = state.pilot.gears[id];
+        if (!gear) return;
         const totalForLevel = getTotalAvailablePointsForLevel(clamped);
         const spent = Object.values(gear.allocatedPoints).reduce(
           (a, b) => a + b,
@@ -1992,10 +2542,11 @@ export const useGameStore = create<GameStoreState>()(
         });
       },
 
-      adminAddGearExp: (amount) => {
+      adminAddGearExp: (amount, gearId) => {
         const state = get();
-        const id = state.pilot.activeGearId;
+        const id = gearId ?? state.pilot.activeGearId;
         const gear = state.pilot.gears[id];
+        if (!gear) return;
         const res = applyExpToGear(gear, Math.max(0, Math.floor(amount) || 0));
         set({
           pilot: {
@@ -2009,10 +2560,11 @@ export const useGameStore = create<GameStoreState>()(
         });
       },
 
-      adminSetGearUnspentPoints: (points) => {
+      adminSetGearUnspentPoints: (points, gearId) => {
         const state = get();
-        const id = state.pilot.activeGearId;
+        const id = gearId ?? state.pilot.activeGearId;
         const gear = state.pilot.gears[id];
+        if (!gear) return;
         set({
           pilot: {
             ...state.pilot,
@@ -2028,10 +2580,11 @@ export const useGameStore = create<GameStoreState>()(
         });
       },
 
-      adminAddGearUnspentPoints: (delta) => {
+      adminAddGearUnspentPoints: (delta, gearId) => {
         const state = get();
-        const id = state.pilot.activeGearId;
+        const id = gearId ?? state.pilot.activeGearId;
         const gear = state.pilot.gears[id];
+        if (!gear) return;
         set({
           pilot: {
             ...state.pilot,
@@ -2050,10 +2603,11 @@ export const useGameStore = create<GameStoreState>()(
         });
       },
 
-      adminResetGearAllocation: () => {
+      adminResetGearAllocation: (gearId) => {
         const state = get();
-        const id = state.pilot.activeGearId;
+        const id = gearId ?? state.pilot.activeGearId;
         const gear = state.pilot.gears[id];
+        if (!gear) return;
         set({
           pilot: {
             ...state.pilot,
@@ -2116,15 +2670,20 @@ export const useGameStore = create<GameStoreState>()(
         }));
       },
 
-      adminGenerateItems: (slot, tier, rarity, quantity) => {
-        const count = Math.max(1, Math.min(20, Math.floor(quantity) || 1));
+      adminGenerateItems: (slot, tier, rarity, quantity, options) => {
+        const count = Math.max(1, Math.min(200, Math.floor(quantity) || 1));
         const generated: ItemInstance[] = [];
+        const now = Date.now();
         for (let i = 0; i < count; i++) {
           generated.push(
             generateItemInstance({
               slot,
               tier: Math.max(1, Math.min(4, tier)),
               rarity,
+              requiredLevel: options?.requiredLevel,
+              rollQuality: options?.rollQuality,
+              isNew: true,
+              obtainedAt: now + i,
             })
           );
         }
@@ -2136,6 +2695,260 @@ export const useGameStore = create<GameStoreState>()(
           hasSaveData: true,
         }));
         return generated.length;
+      },
+
+      adminDeleteItems: (mode, filter) => {
+        const state = get();
+        let removed = 0;
+        const remaining = state.pilot.inventory.filter((it) => {
+          // Never delete equipped or locked items
+          if (getItemEquippedByGear(state.pilot.gears, it.instanceId) !== null) {
+            return true;
+          }
+          if (it.locked) return true;
+          if (mode === 'all_unequipped') {
+            removed += 1;
+            return false;
+          }
+          const matchesRarity =
+            filter?.maxRarity == null ||
+            RARITY_RANK[it.rarity] <= RARITY_RANK[filter.maxRarity];
+          const matchesTier =
+            filter?.maxTier == null || it.tier <= filter.maxTier;
+          if (matchesRarity && matchesTier) {
+            removed += 1;
+            return false;
+          }
+          return true;
+        });
+
+        set({
+          pilot: {
+            ...state.pilot,
+            inventory: remaining,
+          },
+          hasSaveData: true,
+        });
+        return removed;
+      },
+
+      adminFillInventory: (count) => {
+        const state = get();
+        const safeCount = Math.max(1, Math.min(250, Math.floor(count) || 100));
+        const rarities: ItemRarity[] = ['common', 'rare', 'epic', 'legendary'];
+        const activeGear = state.pilot.gears[state.pilot.activeGearId];
+        const generated: ItemInstance[] = [];
+        const now = Date.now();
+        for (let i = 0; i < safeCount; i++) {
+          const slot = EQUIPMENT_SLOTS[i % EQUIPMENT_SLOTS.length];
+          const tier = ((i % 4) + 1) as 1 | 2 | 3 | 4;
+          const rarity = rarities[i % rarities.length];
+          generated.push(
+            generateItemInstance({
+              slot,
+              tier,
+              rarity,
+              requiredLevel: Math.max(
+                1,
+                Math.min(BALANCE_CONFIG.maxLevel, activeGear.level + (i % 5) - 2)
+              ),
+              isNew: i < 12,
+              obtainedAt: now + i,
+            })
+          );
+        }
+        set({
+          pilot: {
+            ...state.pilot,
+            inventory: [...generated, ...state.pilot.inventory],
+          },
+          hasSaveData: true,
+        });
+        return generated.length;
+      },
+
+      adminRestockShopNow: () => {
+        const state = get();
+        const activeGear = state.pilot.gears[state.pilot.activeGearId];
+        set({
+          shopStock: generateCategorizedShopStock(
+            activeGear.level,
+            buildShopOptionsFromState(state.pilot, state.adminConfig)
+          ),
+          wpMarketOffers: generateWpMarketOffers({
+            shipyardBonus: hasOperationalShipyard(state.pilot),
+          }),
+          battlesUntilRestock: SHOP_STOCK_CONFIG.restockEveryNBattles,
+          hasSaveData: true,
+        });
+      },
+
+      adminForceAddShopItem: ({ templateId, slot, tier, rarity }) => {
+        const state = get();
+        const item = generateItemInstance({
+          templateId,
+          slot,
+          tier: Math.max(1, Math.min(4, tier)),
+          rarity,
+        });
+        const listing: ShopItemListing = {
+          ...item,
+          price: Math.max(
+            40,
+            Math.round(item.price * (state.adminConfig.shopPriceMultiplier || 1))
+          ),
+          soldOut: false,
+        };
+        set({
+          shopStock: [listing, ...state.shopStock],
+          hasSaveData: true,
+        });
+      },
+
+      adminUnlockAllSkillsForGear: (gearId, maxLevel = true) => {
+        const state = get();
+        const id = gearId ?? state.pilot.activeGearId;
+        const gear = state.pilot.gears[id];
+        if (!gear) return;
+        const allowed = getSkillsForClass(id);
+        const nextLevels: Record<string, number> = { ...gear.skillLevels };
+        const targetLv = maxLevel ? BALANCE_CONFIG.skillMaxLevel : 1;
+        for (const sk of allowed) {
+          nextLevels[sk.id] = Math.max(nextLevels[sk.id] ?? 0, targetLv);
+        }
+        const activeBar = [...gear.equippedSkillBar];
+        for (const sk of allowed) {
+          if (sk.category !== 'passive' && !activeBar.includes(sk.id) && activeBar.length < 6) {
+            activeBar.push(sk.id);
+          }
+        }
+        set({
+          pilot: {
+            ...state.pilot,
+            gears: {
+              ...state.pilot.gears,
+              [id]: {
+                ...gear,
+                skillLevels: nextLevels,
+                equippedSkillBar: activeBar,
+              },
+            },
+          },
+          hasSaveData: true,
+        });
+      },
+
+      adminGrantAllOpeningCards: () => {
+        set((state) => ({
+          pilot: {
+            ...state.pilot,
+            ownedOpeningCards: OPENING_CARDS_LIST.map((c) => c.id),
+          },
+          hasSaveData: true,
+        }));
+      },
+
+      adminResetBattleCooldowns: () => {
+        const { battle } = get();
+        if (!battle || battle.summary) return;
+        set({
+          battle: {
+            ...battle,
+            units: battle.units.map((u) =>
+              u.isPlayer
+                ? {
+                    ...u,
+                    skillCooldowns: {},
+                    usedOnceSkills: [],
+                    sp: u.derived.maxSp,
+                  }
+                : u
+            ),
+          },
+        });
+      },
+
+      adminSkipBattleToRound: (targetRound) => {
+        const { battle } = get();
+        if (!battle || battle.summary) return;
+        const safeRound = Math.max(1, Math.min(999, Math.floor(targetRound) || 1));
+        set({
+          battle: {
+            ...battle,
+            round: safeRound,
+          },
+        });
+      },
+
+      adminSetCampaignMonth: (month) => {
+        const safeMonth = Math.max(1, Math.min(999, Math.floor(month) || 1));
+        set((state) => ({
+          pilot: {
+            ...state.pilot,
+            campaignMonth: safeMonth,
+          },
+          hasSaveData: true,
+        }));
+      },
+
+      adminSetBaseFaction: (sectorId, faction) => {
+        const state = get();
+        const existing = state.pilot.baseStates[sectorId];
+        if (!existing) return;
+        const nextCaptured =
+          faction === 'allied'
+            ? Array.from(new Set([...state.pilot.capturedSectorIds, sectorId]))
+            : state.pilot.capturedSectorIds.filter((id) => id !== sectorId);
+        const nextUnlocked =
+          faction === 'allied'
+            ? Array.from(new Set([...state.pilot.unlockedSectorIds, sectorId]))
+            : state.pilot.unlockedSectorIds;
+        set({
+          pilot: {
+            ...state.pilot,
+            capturedSectorIds: nextCaptured,
+            unlockedSectorIds: nextUnlocked,
+            baseStates: {
+              ...state.pilot.baseStates,
+              [sectorId]: {
+                ...existing,
+                faction,
+                status: 'operational',
+                repairMonthsRemaining: 0,
+                underAttack: false,
+                attackCountdownMonths: 0,
+                attackFromSectorId: null,
+              },
+            },
+          },
+          hasSaveData: true,
+        });
+      },
+
+      adminTriggerEnemyAttack: (sectorId) => {
+        const state = get();
+        const existing = state.pilot.baseStates[sectorId];
+        if (!existing) return;
+        const hostileSource =
+          SECTORS_CATALOG.find(
+            (s) => state.pilot.baseStates[s.id]?.faction === 'hostile'
+          )?.id ?? SECTORS_CATALOG[SECTORS_CATALOG.length - 1].id;
+        set({
+          pilot: {
+            ...state.pilot,
+            baseStates: {
+              ...state.pilot.baseStates,
+              [sectorId]: {
+                ...existing,
+                faction: 'allied',
+                underAttack: true,
+                attackCountdownMonths: 2,
+                attackFromSectorId: hostileSource,
+              },
+            },
+          },
+          hasSaveData: true,
+        });
       },
 
       adminUnlockAllGears: () => {
@@ -2169,6 +2982,58 @@ export const useGameStore = create<GameStoreState>()(
           },
         }));
       },
+
+      adminExportSaveJson: () => {
+        const state = get();
+        const payload = {
+          version: CURRENT_SAVE_VERSION,
+          exportedAt: new Date().toISOString(),
+          state: {
+            pilot: state.pilot,
+            shopStock: state.shopStock,
+            wpMarketOffers: state.wpMarketOffers,
+            battlesUntilRestock: state.battlesUntilRestock,
+            inventoryFilterState: state.inventoryFilterState,
+            quickSellConfig: state.quickSellConfig,
+            selectedSectorId: state.selectedSectorId,
+            hasSaveData: state.hasSaveData,
+            muted: state.muted,
+            battleSpeed: state.battleSpeed,
+            skipAnimations: state.skipAnimations,
+            battleViewMode: state.battleViewMode,
+            language: state.language,
+            adminConfig: state.adminConfig,
+          },
+        };
+        return JSON.stringify(payload, null, 2);
+      },
+
+      adminImportSaveJson: (rawJson) => {
+        try {
+          const parsed = JSON.parse(rawJson);
+          if (!parsed || typeof parsed !== 'object') {
+            return { ok: false, error: 'Invalid JSON object' };
+          }
+          const version =
+            typeof (parsed as { version?: unknown }).version === 'number'
+              ? (parsed as { version: number }).version
+              : CURRENT_SAVE_VERSION;
+          const payloadState =
+            (parsed as { state?: unknown }).state ?? parsed;
+          const migrated = migrateSaveData(payloadState, version);
+          set({
+            ...migrated,
+            battle: null,
+            screen: migrated.hasSaveData ? 'HANGAR' : 'TITLE',
+          });
+          return { ok: true };
+        } catch (err) {
+          return {
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
+      },
     }),
     {
       name: 'starfront_mech_rpg_save_v1',
@@ -2177,6 +3042,10 @@ export const useGameStore = create<GameStoreState>()(
       partialize: (state) => ({
         pilot: state.pilot,
         shopStock: state.shopStock,
+        wpMarketOffers: state.wpMarketOffers,
+        battlesUntilRestock: state.battlesUntilRestock,
+        inventoryFilterState: state.inventoryFilterState,
+        quickSellConfig: state.quickSellConfig,
         selectedSectorId: state.selectedSectorId,
         hasSaveData: state.hasSaveData,
         muted: state.muted,
@@ -2217,20 +3086,56 @@ export const useGameStore = create<GameStoreState>()(
           }
           if (!state.adminConfig || typeof state.adminConfig !== 'object') {
             state.adminConfig = createDefaultAdminConfig();
-          } else if (
-            typeof state.adminConfig.rewardMultiplier !== 'number' ||
-            !Number.isFinite(state.adminConfig.rewardMultiplier) ||
-            state.adminConfig.rewardMultiplier <= 0
-          ) {
+          } else {
             state.adminConfig = {
               ...createDefaultAdminConfig(),
               ...state.adminConfig,
-              rewardMultiplier: BALANCE_CONFIG.rewardMultDefault,
+              rewardMultiplier:
+                typeof state.adminConfig.rewardMultiplier === 'number' &&
+                Number.isFinite(state.adminConfig.rewardMultiplier) &&
+                state.adminConfig.rewardMultiplier > 0
+                  ? state.adminConfig.rewardMultiplier
+                  : BALANCE_CONFIG.rewardMultDefault,
             };
+          }
+          // Guarantee shop stock and WP market offers are NEVER empty on reload!
+          const activeGear = state.pilot?.gears?.[state.pilot?.activeGearId];
+          const refLevel = activeGear?.level ?? 1;
+          if (
+            !Array.isArray(state.shopStock) ||
+            state.shopStock.length === 0 ||
+            !state.shopStock.some((it) => !it.soldOut)
+          ) {
+            state.shopStock = generateCategorizedShopStock(
+              refLevel,
+              buildShopOptionsFromState(state.pilot, state.adminConfig)
+            );
+          }
+          if (
+            !Array.isArray(state.wpMarketOffers) ||
+            state.wpMarketOffers.length === 0
+          ) {
+            state.wpMarketOffers = generateWpMarketOffers({
+              shipyardBonus: hasOperationalShipyard(state.pilot),
+            });
+          }
+          if (
+            typeof state.battlesUntilRestock !== 'number' ||
+            state.battlesUntilRestock < 1
+          ) {
+            state.battlesUntilRestock = SHOP_STOCK_CONFIG.restockEveryNBattles;
+          }
+          if (!state.inventoryFilterState || typeof state.inventoryFilterState !== 'object') {
+            state.inventoryFilterState = getDefaultInventoryFilterState();
+          }
+          if (!state.quickSellConfig || typeof state.quickSellConfig !== 'object') {
+            state.quickSellConfig = { ...DEFAULT_QUICK_SELL_CONFIG };
           }
           // Ensure transient modal/UI flags are always reset on reload
           state.adminPanelOpen = false;
           state.tacticsModalOpen = false;
+          state.quickSellUndo = null;
+          state.adminUnlocked = readPersistedAdminUnlock();
           state.muted = Boolean(state.muted);
           state.skipAnimations = Boolean(state.skipAnimations);
           soundFx.setMuted(state.muted);

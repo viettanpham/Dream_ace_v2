@@ -323,13 +323,17 @@ export function sortTurnOrder(units: CombatUnit[]): string[] {
  */
 export function getEnemyEnrageBonusPct(
   round: number,
-  enabled = true
+  enabled = true,
+  startRound = BALANCE_CONFIG.enrageStartRound,
+  stepPct = BALANCE_CONFIG.enrageStepPct
 ): number {
-  if (!enabled || round <= BALANCE_CONFIG.enrageStartRound) return 0;
-  const extraRounds = round - BALANCE_CONFIG.enrageStartRound;
+  const safeStart = Math.max(1, Math.floor(startRound));
+  const safeStep = Math.max(0, stepPct);
+  if (!enabled || round <= safeStart) return 0;
+  const extraRounds = round - safeStart;
   return Math.min(
     BALANCE_CONFIG.enrageMaxBonusPct,
-    Math.round(extraRounds * BALANCE_CONFIG.enrageStepPct * 1000) / 1000
+    Math.round(extraRounds * safeStep * 1000) / 1000
   );
 }
 
@@ -488,11 +492,16 @@ export function createInitialBattleState(
   pilot: PilotAccount,
   sectorId: string,
   rng: () => number = Math.random,
-  squadSizeOverride?: BattleSize | null
+  squadSizeOverride?: BattleSize | null,
+  adminConfig?: Partial<AdminConfig>
 ): BattleState {
   const sector = getSectorById(sectorId);
   const squadSize: BattleSize = squadSizeOverride ?? sector.squadSize ?? 4;
-  const frontCount = Math.ceil(squadSize / 2); // 4->2F/2B, 6->3F/3B, 8->4F/4B
+  const frontCap = Math.max(
+    1,
+    Math.min(squadSize, adminConfig?.formationFrontCapacity ?? Math.ceil(squadSize / 2))
+  );
+  const frontCount = Math.min(Math.ceil(squadSize / 2), frontCap); // respects admin formation cap
   const activeGear = pilot.gears[pilot.activeGearId];
   const classIds = MECH_CLASS_LIST.map((c) => c.id);
 
@@ -623,7 +632,7 @@ export function createInitialBattleState(
   for (let i = 0; i < squadSize; i++) {
     const archetype = roster[i % roster.length];
     const archDef = ENEMY_ARCHETYPE_DEFS[archetype];
-    const isBoss = sector.hasBoss && i === 0;
+    const isBoss = (sector.hasBoss || Boolean(adminConfig?.forceBoss)) && i === 0;
     const isFront = i < frontCount;
     // Fortress (6v6) and Capital (8v8) front-line gunships act as defense turrets/structures (square Radar tokens)
     const isStructure =
@@ -634,15 +643,20 @@ export function createInitialBattleState(
       : isStructure
       ? 'Defense Turret'
       : randomItem(archDef.names, rng);
+    const effectiveLevelOffset =
+      adminConfig?.battleLevelOffsetOverride !== undefined &&
+      adminConfig?.battleLevelOffsetOverride !== null
+        ? adminConfig.battleLevelOffsetOverride
+        : sector.levelOffset;
     const enemyLevel = Math.max(
       1,
       activeGear.level +
-        sector.levelOffset +
+        effectiveLevelOffset +
         (isBoss
           ? 1
           : i === 0
           ? 0
-          : Math.floor(rng() * 2) - (sector.levelOffset === 0 ? 1 : 0))
+          : Math.floor(rng() * 2) - (effectiveLevelOffset === 0 ? 1 : 0))
     );
 
     enemyUnits.push(
@@ -1121,24 +1135,30 @@ function applyDamageToUnit(
   const targetSideFrontAlive = unitsContext.some(
     (u) => u.side === curTarget.side && u.alive && u.row === 'front'
   );
+  const backRowRed =
+    typeof options.adminConfig?.backRowDamageReduction === 'number'
+      ? Math.max(0, Math.min(0.85, options.adminConfig.backRowDamageReduction))
+      : BALANCE_CONFIG.backRowDamageReduction;
   const backRowMult =
     curTarget.row === 'back' &&
     targetSideFrontAlive &&
     !hasStatus(curAttacker, 'siege_mode') &&
     !ignoreDef
-      ? 1 - BALANCE_CONFIG.backRowDamageReduction
+      ? 1 - backRowRed
       : 1.0;
 
   // Vulnerable debuff (+15% dmg taken from Scanning)
   const vulnSt = getStatus(curTarget, 'vulnerable');
   const vulnMult = vulnSt ? 1 + (vulnSt.magnitude ?? 0.15) : 1.0;
 
-  // Anti-Stalemate (Soft Enrage): enemy outgoing damage scales +10%/round after round 20 (cap +200%)
+  // Anti-Stalemate (Soft Enrage): enemy outgoing damage scales after startRound (cap +200%)
   const enrageBonus =
     curAttacker.side === 'enemy'
       ? getEnemyEnrageBonusPct(
           options.round,
-          options.adminConfig?.softEnrageEnabled ?? true
+          options.adminConfig?.softEnrageEnabled ?? true,
+          options.adminConfig?.enrageStartRound ?? BALANCE_CONFIG.enrageStartRound,
+          options.adminConfig?.enrageStepPct ?? BALANCE_CONFIG.enrageStepPct
         )
       : 0;
   const enrageMult = 1 + enrageBonus;

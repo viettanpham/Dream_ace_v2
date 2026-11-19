@@ -6,34 +6,45 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { HangarScreen } from './components/HangarScreen';
 import { TitleScreen } from './components/TitleScreen';
 import { TopHud } from './components/TopHud';
-import { useGameStore } from './store/useGameStore';
+import { ENABLE_ADMIN_CP, useGameStore } from './store/useGameStore';
+import { installGlobalErrorCapture } from './utils/errorLog';
 
 function AppShell() {
   const screen = useGameStore((s) => s.screen);
   const adminPanelOpen = useGameStore((s) => s.adminPanelOpen);
   const tacticsModalOpen = useGameStore((s) => s.tacticsModalOpen);
   const toggleAdminPanel = useGameStore((s) => s.toggleAdminPanel);
+  const unlockAdminMode = useGameStore((s) => s.unlockAdminMode);
   const setAdminPanelOpen = useGameStore((s) => s.setAdminPanelOpen);
   const setTacticsModalOpen = useGameStore((s) => s.setTacticsModalOpen);
   const startBattle = useGameStore((s) => s.startBattle);
   const battleSectorId = useGameStore((s) => s.battle?.sectorId);
 
-  // Global Admin CP activation: Ctrl+Shift+A or ?admin=1
+  // Global error ring buffer + Admin CP activation: Ctrl+Shift+A or ?admin=1 (persisted)
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('admin') === '1') {
-      setAdminPanelOpen(true);
+    installGlobalErrorCapture();
+
+    if (ENABLE_ADMIN_CP) {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('admin') === '1') {
+        unlockAdminMode(true);
+      }
     }
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'a') {
+      if (
+        ENABLE_ADMIN_CP &&
+        e.ctrlKey &&
+        e.shiftKey &&
+        e.key.toLowerCase() === 'a'
+      ) {
         e.preventDefault();
         toggleAdminPanel();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [setAdminPanelOpen, toggleAdminPanel]);
+  }, [unlockAdminMode, toggleAdminPanel]);
 
   if (screen === 'TITLE') {
     return (
