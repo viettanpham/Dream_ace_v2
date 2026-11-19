@@ -711,12 +711,11 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'auto.target.all_allies': 'Toàn đội đồng minh',
 
   // Turn Queue (colorblind-safe tags + active banner + next round divider)
-  'queue.teamTag.ally': '[PHE TA]',
+  'queue.teamTag.ally': '[TA]',
   'queue.teamTag.enemy': '[ĐỊCH]',
   'queue.teamTag.boss': '[BOSS]',
   'queue.actingLabel': 'ĐANG LƯỢT',
   'queue.actingBanner': 'Đang lượt: {tag} {name}',
-  'queue.actedHint': 'Đã đi',
   'queue.nextRoundDivider': 'Vòng {round}',
   'queue.overflowMore': '+{count} nữa',
 

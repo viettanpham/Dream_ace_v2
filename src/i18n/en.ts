@@ -714,7 +714,6 @@ export const EN_TRANSLATIONS = {
   'queue.teamTag.boss': '[BOSS]',
   'queue.actingLabel': 'ACTING',
   'queue.actingBanner': 'Acting: {tag} {name}',
-  'queue.actedHint': 'Acted',
   'queue.nextRoundDivider': 'Round {round}',
   'queue.overflowMore': '+{count} more',
 

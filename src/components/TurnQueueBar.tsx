@@ -6,6 +6,7 @@ import {
   Swords,
   TrendingDown,
   TrendingUp,
+  X,
 } from 'lucide-react';
 import { buildTurnQueue } from '../engine/combat';
 import { getClassName, getTeamTagLabel, useI18n } from '../i18n';
@@ -93,11 +94,15 @@ function ConveyorChip({
     return (
       <button
         type="button"
+        data-testid="turn-queue-chip"
+        data-unit-id={entry.unitId}
+        data-acting="true"
+        data-phase={entry.phase}
         onClick={() => onInspect(entry)}
         title={fullTooltip}
         aria-label={fullTooltip}
         className={`relative shrink-0 rounded-md border-2 bg-amber-400/18 text-left transition-colors cursor-pointer select-none ${
-          compactPhone ? 'w-[96px] px-1.5 py-1' : 'w-[146px] px-2 py-1'
+          compactPhone ? 'w-[104px] px-1.5 py-1' : 'w-[156px] px-2 py-1'
         } ${animateShift ? 'anim-conveyor-shift' : ''}`}
         style={{
           borderColor: 'var(--turn-active)',
@@ -108,7 +113,7 @@ function ConveyorChip({
         {/* Pulsing ▼ marker */}
         <span
           className={`absolute -top-2 left-1/2 -translate-x-1/2 text-[9px] leading-none text-amber-200 ${
-            animateShift ? 'animate-bounce' : ''
+            animateShift ? 'anim-turn-arrow' : ''
           }`}
           aria-hidden="true"
         >
@@ -117,9 +122,9 @@ function ConveyorChip({
 
         <div className="flex items-center justify-between gap-1 text-[9px] font-bold tracking-wider uppercase">
           <span
-            className="px-1 py-0.2 rounded-sm leading-tight truncate"
+            className="px-1 rounded-sm leading-tight truncate"
             style={{
-              backgroundColor: 'rgba(15, 23, 42, 0.85)',
+              backgroundColor: 'rgba(15, 23, 42, 0.88)',
               color: teamColor,
               border: `1px solid ${teamColor}`,
             }}
@@ -136,7 +141,9 @@ function ConveyorChip({
           <span
             className={`font-mono-nums text-[10px] font-bold shrink-0 inline-flex items-center gap-0.5 ${speedColor}`}
           >
-            {entry.isSlowed && <TrendingDown className="w-2.5 h-2.5 text-red-400" />}
+            {entry.isSlowed && (
+              <TrendingDown className="w-2.5 h-2.5 text-red-400" />
+            )}
             {entry.isSpeedBoosted && (
               <TrendingUp className="w-2.5 h-2.5 text-emerald-400" />
             )}
@@ -150,11 +157,15 @@ function ConveyorChip({
   return (
     <button
       type="button"
+      data-testid="turn-queue-chip"
+      data-unit-id={entry.unitId}
+      data-acting="false"
+      data-phase={entry.phase}
       onClick={() => onInspect(entry)}
       title={fullTooltip}
       aria-label={fullTooltip}
       className={`shrink-0 rounded border bg-[#0E1522] hover:bg-slate-800/80 text-left cursor-pointer select-none ${
-        compactPhone ? 'w-[62px] px-1.5 py-1' : 'w-[122px] px-1.5 py-1'
+        compactPhone ? 'w-[64px] px-1.5 py-1' : 'w-[126px] px-1.5 py-1'
       } ${entry.phase === 'next_round' ? 'opacity-85' : ''} ${
         animateShift ? 'anim-conveyor-shift' : ''
       }`}
@@ -167,7 +178,9 @@ function ConveyorChip({
       {compactPhone ? (
         <div className="flex flex-col items-center justify-center leading-tight">
           <div className="flex items-center gap-0.5 text-[10px] font-bold">
-            <span style={{ color: teamColor }}>{getClassGlyph(entry.classId)}</span>
+            <span style={{ color: teamColor }}>
+              {getClassGlyph(entry.classId)}
+            </span>
             <span className="text-slate-100 truncate">
               {getCompactInitials(entry.name)}
             </span>
@@ -190,7 +203,9 @@ function ConveyorChip({
           <span
             className={`font-mono-nums text-[10px] font-semibold shrink-0 inline-flex items-center gap-0.5 ${speedColor}`}
           >
-            {entry.isSlowed && <TrendingDown className="w-2.5 h-2.5 text-red-400" />}
+            {entry.isSlowed && (
+              <TrendingDown className="w-2.5 h-2.5 text-red-400" />
+            )}
             {entry.isSpeedBoosted && (
               <TrendingUp className="w-2.5 h-2.5 text-emerald-400" />
             )}
@@ -203,11 +218,12 @@ function ConveyorChip({
 }
 
 /**
- * Conveyor-style Turn Queue Bar:
- * [Round N] [In combat] [Enrage?]  chip1(ACTING) chip2... | Round N+1 | next1 next2... [+N]
- * - Zero horizontal scroll, zero auto-scroll.
- * - Uses ResizeObserver to fit exact number of fixed-width chips + overflow "+N" popover/sheet.
- * - Brief shift animation at 1x-2x (when !skipAnimations); instant at 3x+ or skipAnimations.
+ * Conveyor Turn Queue Bar (non-scrolling):
+ * [Round N] [In combat] [Enrage?] chip1(ACTING) chip2... | Round N+1 | next1 next2... [+N]
+ * - Uses pure buildTurnQueue(battle) -> { round, current, next }.
+ * - Acted units NEVER appear in current; they appear only in next (Round N+1).
+ * - Fixed-width flex container with overflow-hidden, ZERO scrollbar, ZERO auto-scroll.
+ * - Overflow chip "+N" opens an anchored popover with the full current + next list.
  */
 export function TurnQueueBar({
   battle,
@@ -217,17 +233,24 @@ export function TurnQueueBar({
 }: TurnQueueBarProps) {
   const { lang, t } = useI18n();
   const trackRef = useRef<HTMLDivElement | null>(null);
-  const [trackWidth, setTrackWidth] = useState(560);
+  const popoverAnchorRef = useRef<HTMLDivElement | null>(null);
+  const [trackWidth, setTrackWidth] = useState<number>(() =>
+    typeof window !== 'undefined' ? Math.max(240, window.innerWidth - 220) : 720
+  );
   const [isPhone, setIsPhone] = useState<boolean>(() =>
     typeof window !== 'undefined' ? window.innerWidth < 640 : false
   );
   const [overflowOpen, setOverflowOpen] = useState(false);
-  const [inspectedEntry, setInspectedEntry] = useState<TurnQueueEntry | null>(null);
+  const [inspectedEntry, setInspectedEntry] = useState<TurnQueueEntry | null>(
+    null
+  );
 
   const animateShift = battleSpeed <= 2 && !skipAnimations;
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
     const mq = window.matchMedia('(max-width: 639px)');
     const onChange = (e: MediaQueryListEvent) => setIsPhone(e.matches);
     setIsPhone(mq.matches);
@@ -237,7 +260,15 @@ export function TurnQueueBar({
 
   useEffect(() => {
     const el = trackRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
+    if (!el) return;
+    const measure = () => {
+      const rectW = el.getBoundingClientRect?.().width ?? el.clientWidth;
+      if (typeof rectW === 'number' && rectW > 0) {
+        setTrackWidth(rectW);
+      }
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect?.width;
       if (typeof w === 'number' && w > 0) {
@@ -248,24 +279,40 @@ export function TurnQueueBar({
     return () => ro.disconnect();
   }, []);
 
+  // Dismiss overflow popover on Escape or outside click
+  useEffect(() => {
+    if (!overflowOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOverflowOpen(false);
+    };
+    const onPointerDown = (e: MouseEvent) => {
+      if (
+        popoverAnchorRef.current &&
+        !popoverAnchorRef.current.contains(e.target as Node)
+      ) {
+        setOverflowOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('mousedown', onPointerDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('mousedown', onPointerDown);
+    };
+  }, [overflowOpen]);
+
   const queue = useMemo(() => buildTurnQueue(battle), [battle]);
+  const currentRoundChips = queue.current;
+  const nextRoundChips = queue.next;
 
-  // Conveyor items (NO acted units at the front!)
-  const currentRoundChips = useMemo(() => {
-    const list: TurnQueueEntry[] = [];
-    if (queue.current) list.push(queue.current);
-    list.push(...queue.upcoming);
-    return list;
-  }, [queue]);
-
-  const nextRoundChips = queue.nextRound;
-
-  // Compute exact visible chip budget from measured container width
+  // Compute exact visible chip budget from measured container width (with 8px safety buffer so chips never clip)
   const { visibleCurrent, visibleNext, showDivider, hiddenCount } = useMemo(() => {
-    const activeW = isPhone ? 102 : 152;
-    const chipW = isPhone ? 68 : 128;
-    const dividerW = isPhone ? 58 : 82;
-    const overflowBtnW = 48;
+    const gap = 6;
+    const activeW = (isPhone ? 104 : 156) + gap;
+    const chipW = (isPhone ? 64 : 126) + gap;
+    const dividerW = (isPhone ? 62 : 84) + gap;
+    const overflowBtnW = 54;
+    const usableW = Math.max(activeW, trackWidth - 8);
 
     const totalChips = currentRoundChips.length + nextRoundChips.length;
     if (totalChips === 0) {
@@ -277,17 +324,16 @@ export function TurnQueueBar({
       };
     }
 
-    // Reserve space for overflow chip if total exceeds budget
     const fullRequiredW =
       (currentRoundChips.length > 0 ? activeW : 0) +
       Math.max(0, currentRoundChips.length - 1) * chipW +
       (nextRoundChips.length > 0 ? dividerW : 0) +
       nextRoundChips.length * chipW;
 
-    const needsOverflow = fullRequiredW > trackWidth;
+    const needsOverflow = fullRequiredW > usableW;
     let remainingW = Math.max(
       activeW,
-      trackWidth - (needsOverflow ? overflowBtnW : 0)
+      usableW - (needsOverflow ? overflowBtnW : 0)
     );
 
     const visCur: TurnQueueEntry[] = [];
@@ -334,7 +380,10 @@ export function TurnQueueBar({
   const enrageMult = (1 + enrageBonusPct).toFixed(1);
 
   return (
-    <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+    <div
+      data-testid="turn-queue-bar"
+      className="relative flex items-center gap-2 min-w-0 w-full"
+    >
       {/* Left Header Badges: [Round N] [In combat] [Enrage?] */}
       <div className="flex items-center gap-1.5 shrink-0">
         <span className="px-2 py-1 rounded bg-slate-900 border border-slate-700 font-mono-nums text-[11px] font-bold text-slate-100 whitespace-nowrap">
@@ -355,14 +404,17 @@ export function TurnQueueBar({
           >
             <Flame className="w-3 h-3 text-orange-400 shrink-0" />
             <span>{t('queue.enrageBadge', { pct: enragePct })}</span>
-            <span className="hidden sm:inline text-orange-300">({enrageMult}x)</span>
+            <span className="hidden sm:inline text-orange-300">
+              ({enrageMult}x)
+            </span>
           </span>
         )}
       </div>
 
-      {/* Fixed-Width Non-Scrolling Conveyor Track */}
+      {/* Fixed-Width Non-Scrolling Conveyor Track (overflow-hidden, zero scrollbar, zero auto-scroll) */}
       <div
         ref={trackRef}
+        data-testid="turn-queue-track"
         key={animateShift ? `${battle.round}-${battle.activeTurnIndex}` : 'static'}
         className="flex-1 min-w-0 flex items-center gap-1.5 overflow-hidden pt-2 pb-0.5"
         aria-label={t('queue.fullQueueTitle')}
@@ -379,7 +431,10 @@ export function TurnQueueBar({
         ))}
 
         {showDivider && (
-          <div className="shrink-0 flex items-center gap-1 px-1.5 py-1 rounded border border-dashed border-slate-700 bg-slate-950/90 text-[10px] font-mono-nums font-semibold text-slate-400 whitespace-nowrap">
+          <div
+            data-testid="turn-queue-divider"
+            className="shrink-0 flex items-center gap-1 px-1.5 py-1 rounded border border-dashed border-slate-700 bg-slate-950/90 text-[10px] font-mono-nums font-semibold text-slate-400 whitespace-nowrap"
+          >
             <span>{t('queue.nextRound', { round: queue.round + 1 })}</span>
           </div>
         )}
@@ -394,107 +449,124 @@ export function TurnQueueBar({
             onInspect={setInspectedEntry}
           />
         ))}
+      </div>
 
-        {hiddenCount > 0 && (
+      {/* "+N" Overflow Trigger + Anchored Full-Queue Popover */}
+      {hiddenCount > 0 && (
+        <div ref={popoverAnchorRef} className="relative shrink-0">
           <button
             type="button"
-            onClick={() => setOverflowOpen(true)}
+            data-testid="turn-queue-overflow"
+            onClick={() => setOverflowOpen((v) => !v)}
+            aria-expanded={overflowOpen}
+            aria-haspopup="dialog"
             title={t('queue.overflowHint', { count: hiddenCount })}
             aria-label={t('queue.overflowHint', { count: hiddenCount })}
-            className="shrink-0 min-h-[34px] min-w-[40px] px-2 rounded border border-slate-600 bg-slate-900 hover:bg-slate-800 hover:border-amber-400/60 text-[11px] font-mono-nums font-bold text-amber-300 inline-flex items-center justify-center gap-0.5 cursor-pointer"
+            className="min-h-[34px] min-w-[44px] px-2 rounded border border-slate-600 bg-slate-900 hover:bg-slate-800 hover:border-amber-400/60 text-[11px] font-mono-nums font-bold text-amber-300 inline-flex items-center justify-center gap-0.5 cursor-pointer"
           >
             <span>+{hiddenCount}</span>
             <ChevronDown className="w-3 h-3" />
           </button>
-        )}
-      </div>
 
-      {/* Full Conveyor Queue Popover / BottomSheet */}
-      <BottomSheet
-        open={overflowOpen}
-        onClose={() => setOverflowOpen(false)}
-        title={t('queue.fullQueueTitle')}
-        subtitle={t('battle.round', { round: queue.round })}
-      >
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-amber-300">
-              <ListOrdered className="w-3.5 h-3.5" />
-              <span>{t('queue.currentRoundGroup', { round: queue.round })}</span>
-            </div>
-            <div className="space-y-1.5">
-              {currentRoundChips.map((entry, idx) => {
-                const color = getTeamCssVar(entry.teamRole);
-                const isFirst = idx === 0 && !battle.summary;
-                return (
-                  <div
-                    key={`sheet-cur-${entry.unitId}`}
-                    className={`rounded-lg border px-3 py-2 flex items-center justify-between gap-2 ${
-                      isFirst
-                        ? 'border-amber-300 bg-amber-400/15'
-                        : 'border-slate-800 bg-[#0A101B]'
-                    }`}
-                    style={{ borderLeftWidth: '4px', borderLeftColor: color }}
-                  >
-                    <div className="min-w-0 flex items-center gap-2">
-                      <span
-                        className="text-xs font-bold shrink-0"
-                        style={{ color }}
-                      >
-                        {getTeamTagLabel(lang, entry.teamRole)}
-                      </span>
-                      <span className="text-sm font-semibold text-slate-100 truncate">
-                        {entry.name}
-                      </span>
-                      {isFirst && (
-                        <span className="px-1.5 py-0.5 rounded bg-amber-300 text-slate-950 text-[10px] font-bold uppercase">
-                          {t('queue.actingNow')}
-                        </span>
-                      )}
-                    </div>
-                    <div className="font-mono-nums text-xs text-slate-300 shrink-0">
-                      {t('queue.speedLabel')} {entry.effectiveSpeed}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          {overflowOpen && (
+            <div
+              role="dialog"
+              data-testid="turn-queue-popover"
+              aria-label={t('queue.fullQueueTitle')}
+              className="absolute right-0 top-full mt-2 z-50 w-[min(92vw,340px)] max-h-[70vh] flex flex-col rounded-lg border border-slate-700 bg-[#0B111D] shadow-2xl overflow-hidden"
+            >
+              <div className="shrink-0 px-3 py-2 border-b border-slate-800 bg-[#080C15] flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-slate-100">
+                  <ListOrdered className="w-3.5 h-3.5 text-amber-300" />
+                  <span>{t('queue.fullQueueTitle')}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setOverflowOpen(false)}
+                  aria-label={t('common.close')}
+                  className="h-7 w-7 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 flex items-center justify-center cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
 
-          <div className="space-y-2">
-            <div className="text-xs font-bold uppercase tracking-wider text-slate-400">
-              {t('queue.nextRoundGroup', { round: queue.round + 1 })}
-            </div>
-            <div className="space-y-1.5">
-              {nextRoundChips.map((entry) => {
-                const color = getTeamCssVar(entry.teamRole);
-                return (
-                  <div
-                    key={`sheet-next-${entry.unitId}`}
-                    className="rounded-lg border border-slate-800/80 bg-[#090E18] px-3 py-2 flex items-center justify-between gap-2"
-                    style={{ borderLeftWidth: '4px', borderLeftColor: color }}
-                  >
-                    <div className="min-w-0 flex items-center gap-2">
-                      <span
-                        className="text-xs font-bold shrink-0"
-                        style={{ color }}
-                      >
-                        {getTeamTagLabel(lang, entry.teamRole)}
-                      </span>
-                      <span className="text-sm text-slate-200 truncate">
-                        {entry.name}
-                      </span>
-                    </div>
-                    <div className="font-mono-nums text-xs text-slate-400 shrink-0">
-                      {t('queue.speedLabel')} {entry.effectiveSpeed}
-                    </div>
+              <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3 tactical-scroll">
+                <div className="space-y-1.5">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-amber-300">
+                    {t('queue.currentRoundGroup', { round: queue.round })}
                   </div>
-                );
-              })}
+                  {currentRoundChips.map((entry, idx) => {
+                    const color = getTeamCssVar(entry.teamRole);
+                    const isFirst = idx === 0 && !battle.summary;
+                    return (
+                      <div
+                        key={`pop-cur-${entry.unitId}`}
+                        className={`rounded border px-2.5 py-1.5 flex items-center justify-between gap-2 ${
+                          isFirst
+                            ? 'border-amber-300 bg-amber-400/15'
+                            : 'border-slate-800 bg-[#0A101B]'
+                        }`}
+                        style={{ borderLeftWidth: '4px', borderLeftColor: color }}
+                      >
+                        <div className="min-w-0 flex items-center gap-1.5">
+                          <span
+                            className="text-[11px] font-bold shrink-0"
+                            style={{ color }}
+                          >
+                            {getTeamTagLabel(lang, entry.teamRole)}
+                          </span>
+                          <span className="text-xs font-semibold text-slate-100 truncate">
+                            {entry.name}
+                          </span>
+                          {isFirst && (
+                            <span className="px-1.5 py-0.5 rounded bg-amber-300 text-slate-950 text-[9px] font-bold uppercase shrink-0">
+                              {t('queue.actingNow')}
+                            </span>
+                          )}
+                        </div>
+                        <div className="font-mono-nums text-[11px] text-slate-300 shrink-0">
+                          {t('queue.speedLabel')} {entry.effectiveSpeed}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    {t('queue.nextRoundGroup', { round: queue.round + 1 })}
+                  </div>
+                  {nextRoundChips.map((entry) => {
+                    const color = getTeamCssVar(entry.teamRole);
+                    return (
+                      <div
+                        key={`pop-next-${entry.unitId}`}
+                        className="rounded border border-slate-800/80 bg-[#090E18] px-2.5 py-1.5 flex items-center justify-between gap-2"
+                        style={{ borderLeftWidth: '4px', borderLeftColor: color }}
+                      >
+                        <div className="min-w-0 flex items-center gap-1.5">
+                          <span
+                            className="text-[11px] font-bold shrink-0"
+                            style={{ color }}
+                          >
+                            {getTeamTagLabel(lang, entry.teamRole)}
+                          </span>
+                          <span className="text-xs text-slate-200 truncate">
+                            {entry.name}
+                          </span>
+                        </div>
+                        <div className="font-mono-nums text-[11px] text-slate-400 shrink-0">
+                          {t('queue.speedLabel')} {entry.effectiveSpeed}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
-          </div>
+          )}
         </div>
-      </BottomSheet>
+      )}
 
       {/* Tap-to-inspect chip full name sheet (for mobile/long names) */}
       <BottomSheet
@@ -519,7 +591,9 @@ export function TurnQueueBar({
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-slate-400">{t('battle.round', { round: queue.round })}</span>
+              <span className="text-slate-400">
+                {t('battle.round', { round: queue.round })}
+              </span>
               <span className="text-amber-300 font-semibold">
                 {inspectedEntry.phase === 'current'
                   ? t('queue.actingNow')

@@ -311,7 +311,10 @@ function compareUnitTurnPriority(a: CombatUnit, b: CombatUnit): number {
 }
 
 export function sortTurnOrder(units: CombatUnit[]): string[] {
-  return [...units].sort(compareUnitTurnPriority).map((u) => u.id);
+  return units
+    .filter((u) => u.alive)
+    .sort(compareUnitTurnPriority)
+    .map((u) => u.id);
 }
 
 /**
@@ -416,15 +419,18 @@ function toTurnQueueEntry(
 }
 
 /**
- * Builds the exact structured Turn Queue for the current round (acted / current / upcoming)
- * plus a clean Round N+1 preview sorted strictly by Speed descending.
- * Dead units are excluded; newly summoned or revived alive units not yet in turnOrder
- * are inserted cleanly into upcoming and nextRound in Speed DESC order.
+ * Pure conveyor turn-queue builder: returns { round, current, next }.
+ * - current: living units that have NOT yet acted this round, sorted by live effective
+ *   Speed DESC (deterministic tie-breakers), with the ACTING unit strictly FIRST (index 0).
+ *   Units that already acted this round are excluded from current.
+ * - next: ALL living units sorted by live effective Speed DESC (Round N+1 preview),
+ *   including units that already acted this round in their sorted Speed slot.
+ * - Dead units are excluded from both lists; newly summoned/revived alive units not yet
+ *   in turnOrder are inserted into current (after acting unit) and next in Speed DESC order.
  */
 export function buildTurnQueue(battle: BattleState): TurnQueueView {
   const unitMap = new Map(battle.units.map((u) => [u.id, u]));
-  const acted: TurnQueueEntry[] = [];
-  let current: TurnQueueEntry | null = null;
+  let actingUnit: CombatUnit | null = null;
   const upcomingUnits: CombatUnit[] = [];
   const seenIds = new Set<string>();
 
@@ -433,10 +439,10 @@ export function buildTurnQueue(battle: BattleState): TurnQueueView {
     seenIds.add(id);
     const u = unitMap.get(id);
     if (!u || !u.alive) continue;
-    if (i < battle.activeTurnIndex) {
-      acted.push(toTurnQueueEntry(u, 'acted'));
-    } else if (i === battle.activeTurnIndex) {
-      current = toTurnQueueEntry(u, 'current');
+    // Units with index < activeTurnIndex have already acted -> NOT in current
+    if (i < battle.activeTurnIndex) continue;
+    if (i === battle.activeTurnIndex) {
+      actingUnit = u;
     } else {
       upcomingUnits.push(u);
     }
@@ -449,28 +455,32 @@ export function buildTurnQueue(battle: BattleState): TurnQueueView {
     }
   }
 
-  // Upcoming units in current round always ordered by live effective Speed DESC
+  // Remaining un-acted units sorted strictly by live effective Speed DESC
   const sortedUpcomingUnits = [...upcomingUnits].sort(compareUnitTurnPriority);
-  if (!current && sortedUpcomingUnits.length > 0) {
-    const promoted = sortedUpcomingUnits.shift()!;
-    current = toTurnQueueEntry(promoted, 'current');
-  }
-  const upcoming = sortedUpcomingUnits.map((u) =>
-    toTurnQueueEntry(u, 'upcoming')
-  );
 
-  // Next round preview: all alive units sorted by live effective Speed DESC
-  const aliveUnits = battle.units.filter((u) => u.alive);
-  const nextRound = [...aliveUnits]
+  // If the unit at activeTurnIndex died mid-turn, promote the next fastest un-acted living unit
+  if (!actingUnit && sortedUpcomingUnits.length > 0) {
+    actingUnit = sortedUpcomingUnits.shift()!;
+  }
+
+  const current: TurnQueueEntry[] = [];
+  if (actingUnit) {
+    current.push(toTurnQueueEntry(actingUnit, 'current'));
+  }
+  for (const u of sortedUpcomingUnits) {
+    current.push(toTurnQueueEntry(u, 'upcoming'));
+  }
+
+  // Next round: ALL living units sorted strictly by live effective Speed DESC
+  const next: TurnQueueEntry[] = battle.units
+    .filter((u) => u.alive)
     .sort(compareUnitTurnPriority)
     .map((u) => toTurnQueueEntry(u, 'next_round'));
 
   return {
     round: battle.round,
-    acted,
     current,
-    upcoming,
-    nextRound,
+    next,
   };
 }
 

@@ -1313,19 +1313,19 @@ describe('12. Turn Queue Ordering & Mid-Round Speed Changes', () => {
 
     const queue = buildTurnQueue(mockBattle);
     expect(queue.round).toBe(2);
-    expect(queue.acted.map((e) => e.unitId)).toEqual(['e_22']);
-    expect(queue.current?.unitId).toBe('a_21');
-    // Upcoming in Round 2 strictly DESC: 15 then 13
-    expect(queue.upcoming.map((e) => e.unitId)).toEqual(['a_15', 'e_18']);
-    expect(queue.upcoming.map((e) => e.effectiveSpeed)).toEqual([15, 13]);
-    // Round 3 preview strictly DESC across all living units: 22, 21, 15, 13 (SPD 15 NEVER precedes 22/21)
-    expect(queue.nextRound.map((e) => e.unitId)).toEqual([
+    // e_22 already acted -> MUST NOT appear in current; acting unit a_21 is FIRST, then upcoming strictly DESC (15, 13)
+    expect(queue.current.map((e) => e.unitId)).toEqual(['a_21', 'a_15', 'e_18']);
+    expect(queue.current[0].phase).toBe('current');
+    expect(queue.current.map((e) => e.effectiveSpeed)).toEqual([21, 15, 13]);
+    expect(queue.current.some((e) => e.unitId === 'e_22')).toBe(false);
+    // Next round (Round 3) includes all living units sorted strictly DESC: 22, 21, 15, 13
+    expect(queue.next.map((e) => e.unitId)).toEqual([
       'e_22',
       'a_21',
       'a_15',
       'e_18',
     ]);
-    expect(queue.nextRound.map((e) => e.effectiveSpeed)).toEqual([22, 21, 15, 13]);
+    expect(queue.next.map((e) => e.effectiveSpeed)).toEqual([22, 21, 15, 13]);
   });
 });
 
@@ -2125,12 +2125,12 @@ describe('18. Conveyor Turn Queue (Dead Removal, Summon/Revive Insertion & Round
       units: unitsWithReinforce,
     });
 
-    expect(queue.current?.unitId).toBe(aliveOrder[0]);
-    expect(queue.upcoming[0]?.unitId).toBe('ally_reinforce_1');
-    expect(queue.upcoming.some((e) => e.unitId === deadId)).toBe(false);
-    expect(queue.nextRound.some((e) => e.unitId === deadId)).toBe(false);
+    expect(queue.current[0]?.unitId).toBe(aliveOrder[0]);
+    expect(queue.current[1]?.unitId).toBe('ally_reinforce_1');
+    expect(queue.current.some((e) => e.unitId === deadId)).toBe(false);
+    expect(queue.next.some((e) => e.unitId === deadId)).toBe(false);
     // Next round strictly sorted by speed DESC, so SPD 999 reinforcement is first in Round 4
-    expect(queue.nextRound[0]?.unitId).toBe('ally_reinforce_1');
+    expect(queue.next[0]?.unitId).toBe('ally_reinforce_1');
   });
 });
 

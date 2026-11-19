@@ -567,15 +567,13 @@ export interface TurnQueueEntry {
   baseSpeed: number;
   isSlowed: boolean;
   isSpeedBoosted: boolean;
-  phase: 'acted' | 'current' | 'upcoming' | 'next_round';
+  phase: 'current' | 'upcoming' | 'next_round';
 }
 
 export interface TurnQueueView {
   round: number;
-  acted: TurnQueueEntry[];
-  current: TurnQueueEntry | null;
-  upcoming: TurnQueueEntry[];
-  nextRound: TurnQueueEntry[];
+  current: TurnQueueEntry[];
+  next: TurnQueueEntry[];
 }
 
 export interface GearUnit {

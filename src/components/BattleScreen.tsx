@@ -631,8 +631,8 @@ export function BattleScreen() {
 
   return (
     <div className="relative flex-1 min-h-0 flex flex-col bg-tactical-grid overflow-hidden">
-      {/* TOP BAR: TURN QUEUE + VIEW MODE + MANUAL/AUTO + TACTICS + AUTO-REPEAT + SPEED + SKIP + STATS + RETREAT */}
-      <div className="shrink-0 border-b border-slate-800/80 bg-[#0A0F18]/95 px-2.5 sm:px-6 py-2 flex flex-col xl:flex-row xl:items-center justify-between gap-2">
+      {/* TOP BAR: FULL-WIDTH CONVEYOR TURN QUEUE + BATTLE CONTROLS ROW */}
+      <div className="shrink-0 border-b border-slate-800/80 bg-[#0A0F18]/95 px-2.5 sm:px-6 py-2 flex flex-col gap-2">
         <TurnQueueBar
           battle={battle}
           battleSpeed={battleSpeed}
@@ -644,7 +644,7 @@ export function BattleScreen() {
         />
 
         {/* Battle Controls Cluster */}
-        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+        <div className="flex flex-wrap items-center justify-between sm:justify-end gap-1.5 shrink-0">
           {/* Card | Radar View Toggle */}
           <div
             className="inline-flex items-center rounded border border-slate-700 bg-slate-950 p-0.5"
