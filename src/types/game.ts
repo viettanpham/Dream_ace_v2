@@ -348,6 +348,7 @@ export interface ItemSpecialTraits {
   splashPct?: number;
   spRegenPerTurn?: number;
   evasionMod?: number;
+  longRange?: boolean;
 }
 
 export interface ItemTemplate {
@@ -700,13 +701,40 @@ export interface PilotAccount {
   consumables?: ConsumableItem[];
   activeExpBoostBattles?: number;
   activeEnchantBonusPct?: number;
+  squadFormation?: SquadFormationUnit[];
+  formationCustomized?: boolean;
 }
 
 export type EnemyArchetype = 'drone' | 'gunship' | 'sniper' | 'repair_ship';
 
 export type CombatSide = 'ally' | 'enemy';
 
-export type CombatRow = 'front' | 'back';
+export type CombatRow = 'front' | 'middle' | 'back';
+
+export interface FormationRowModifier {
+  /** Defense % modifier (e.g. 0.10 = +10% DEF, -0.10 = -10% DEF) */
+  defensePct: number;
+  /** General damage % modifier (e.g. 0 = 0%, -0.10 = -10% DMG) */
+  damagePct: number;
+  /** Additional damage % modifier for ranged weapons/units (e.g. 0.10 = +10% ranged DMG) */
+  rangedDamagePct: number;
+}
+
+export interface FormationConfig {
+  rowCapacities: Record<CombatRow, number>;
+  maxUnitsPerSide: number;
+  rowModifiers: Record<CombatRow, FormationRowModifier>;
+}
+
+export interface SquadFormationUnit {
+  id: string;
+  name: string;
+  callsign: string;
+  classId: MechClassId;
+  isPlayer: boolean;
+  row: CombatRow;
+  formationCol: number;
+}
 
 export type UnitAnimState =
   | 'idle'
@@ -724,6 +752,7 @@ export interface CombatUnit {
   side: CombatSide;
   row: CombatRow;
   formationCol?: number; // 0..(cols-1) within its row for adjacent splash & grid/radar layout
+  hasLongRangeWeapon?: boolean;
   isPlayer: boolean;
   classId: MechClassId;
   archetype?: EnemyArchetype;
@@ -1043,9 +1072,7 @@ export interface AdminConfig {
   shopMaxStock: number;
   shopRarityWeights: Record<ItemRarity, number>;
   shopPriceMultiplier: number;
-  formationFrontCapacity: number;
-  formationBackCapacity: number;
-  backRowDamageReduction: number;
+  formation: FormationConfig;
   showRawI18nKeys: boolean;
 }
 

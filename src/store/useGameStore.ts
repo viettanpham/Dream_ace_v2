@@ -28,6 +28,14 @@ import {
   unequipSlotOnGear,
 } from '../engine/equipment';
 import {
+  autoPlaceFormation,
+  createDefaultSquadFormation,
+  enforceFormationCapacities,
+  migrateLegacySquadFormation,
+  moveUnitToRow,
+  sanitizeFormationConfig,
+} from '../engine/formation';
+import {
   getDefaultInventoryFilterState,
   RARITY_RANK,
 } from '../engine/inventory';
@@ -94,6 +102,7 @@ import type {
   BattleState,
   BattleViewMode,
   CombatLogEntry,
+  CombatRow,
   CombatUnit,
   ConsumableItem,
   EnchantAttemptResult,
@@ -203,6 +212,18 @@ interface GameStoreState {
   hireWingmanAtBase: (sectorId: string, classId?: MechClassId) => BaseActionResult;
   acceptMissionAtBase: (sectorId: string) => BaseActionResult;
   useEngineerAtBase: (sectorId: string) => BaseActionResult;
+
+  // 3-Row Squad Formation actions
+  moveSquadUnitRow: (
+    unitId: string,
+    targetRow: CombatRow
+  ) => {
+    ok: boolean;
+    reason?: 'not_found' | 'same_row' | 'row_full';
+    currentCount: number;
+    capacity: number;
+  };
+  autoArrangeSquadFormation: () => void;
 
   // Gear Skill System actions (engine-enforced class locks & per-Gear bars)
   learnOrUpgradeSkill: (
@@ -711,10 +732,20 @@ export const useGameStore = create<GameStoreState>()(
 
       setPilotName: (name) => {
         const clean = name.slice(0, 18);
-        set((state) => ({
-          pilot: { ...state.pilot, name: clean },
-          hasSaveData: true,
-        }));
+        set((state) => {
+          const leadName = clean.trim() || 'Vance';
+          const updatedFormation = state.pilot.squadFormation?.map((u) =>
+            u.isPlayer || u.id === 'ally_player' ? { ...u, name: leadName } : u
+          );
+          return {
+            pilot: {
+              ...state.pilot,
+              name: clean,
+              ...(updatedFormation ? { squadFormation: updatedFormation } : {}),
+            },
+            hasSaveData: true,
+          };
+        });
       },
 
       selectActiveGear: (classId) => {
@@ -722,10 +753,24 @@ export const useGameStore = create<GameStoreState>()(
         const targetGear = state.pilot.gears[classId];
         if (!targetGear || !targetGear.owned) return;
         soundFx.playClick();
+        const baseFormation =
+          state.pilot.squadFormation && state.pilot.squadFormation.length > 0
+            ? state.pilot.squadFormation.map((u) =>
+                u.isPlayer || u.id === 'ally_player' ? { ...u, classId } : u
+              )
+            : createDefaultSquadFormation(
+                state.pilot.name,
+                classId,
+                state.adminConfig.formation
+              );
+        const nextFormation = state.pilot.formationCustomized
+          ? enforceFormationCapacities(baseFormation, state.adminConfig.formation)
+          : autoPlaceFormation(baseFormation, state.adminConfig.formation);
         set({
           pilot: {
             ...state.pilot,
             activeGearId: classId,
+            squadFormation: nextFormation,
           },
           hasSaveData: true,
         });
@@ -746,11 +791,26 @@ export const useGameStore = create<GameStoreState>()(
         }
 
         soundFx.playVictory();
+        const baseFormation =
+          state.pilot.squadFormation && state.pilot.squadFormation.length > 0
+            ? state.pilot.squadFormation.map((u) =>
+                u.isPlayer || u.id === 'ally_player' ? { ...u, classId } : u
+              )
+            : createDefaultSquadFormation(
+                state.pilot.name,
+                classId,
+                state.adminConfig.formation
+              );
+        const nextFormation = state.pilot.formationCustomized
+          ? enforceFormationCapacities(baseFormation, state.adminConfig.formation)
+          : autoPlaceFormation(baseFormation, state.adminConfig.formation);
+
         set({
           pilot: {
             ...state.pilot,
             credits: state.pilot.credits - cost,
             activeGearId: classId,
+            squadFormation: nextFormation,
             gears: {
               ...state.pilot.gears,
               [classId]: {
@@ -762,6 +822,65 @@ export const useGameStore = create<GameStoreState>()(
           hasSaveData: true,
         });
         return { ok: true, cost };
+      },
+
+      moveSquadUnitRow: (unitId, targetRow) => {
+        const state = get();
+        const formationCfg = sanitizeFormationConfig(state.adminConfig.formation);
+        const currentFormation =
+          state.pilot.squadFormation && state.pilot.squadFormation.length > 0
+            ? state.pilot.squadFormation
+            : createDefaultSquadFormation(
+                state.pilot.name,
+                state.pilot.activeGearId,
+                formationCfg
+              );
+        const result = moveUnitToRow(
+          currentFormation,
+          unitId,
+          targetRow,
+          formationCfg
+        );
+        if (result.ok) {
+          soundFx.playClick();
+          set({
+            pilot: {
+              ...state.pilot,
+              squadFormation: result.units,
+              formationCustomized: true,
+            },
+            hasSaveData: true,
+          });
+        }
+        return {
+          ok: result.ok,
+          reason: result.reason,
+          currentCount: result.currentCount,
+          capacity: result.capacity,
+        };
+      },
+
+      autoArrangeSquadFormation: () => {
+        const state = get();
+        const formationCfg = sanitizeFormationConfig(state.adminConfig.formation);
+        const currentFormation =
+          state.pilot.squadFormation && state.pilot.squadFormation.length > 0
+            ? state.pilot.squadFormation
+            : createDefaultSquadFormation(
+                state.pilot.name,
+                state.pilot.activeGearId,
+                formationCfg
+              );
+        const arranged = autoPlaceFormation(currentFormation, formationCfg);
+        soundFx.playClick();
+        set({
+          pilot: {
+            ...state.pilot,
+            squadFormation: arranged,
+            formationCustomized: false,
+          },
+          hasSaveData: true,
+        });
       },
 
       commitStatAllocations: (pending) => {
@@ -2975,12 +3094,32 @@ export const useGameStore = create<GameStoreState>()(
       },
 
       adminUpdateConfig: (patch) => {
-        set((state) => ({
-          adminConfig: {
+        set((state) => {
+          const nextFormation = patch.formation
+            ? sanitizeFormationConfig(patch.formation)
+            : state.adminConfig.formation;
+          const nextAdminConfig: AdminConfig = {
             ...state.adminConfig,
             ...patch,
-          },
-        }));
+            formation: nextFormation,
+          };
+          const updatedPilot =
+            patch.formation &&
+            state.pilot.squadFormation &&
+            state.pilot.squadFormation.length > 0
+              ? {
+                  ...state.pilot,
+                  squadFormation: enforceFormationCapacities(
+                    state.pilot.squadFormation,
+                    nextFormation
+                  ),
+                }
+              : state.pilot;
+          return {
+            adminConfig: nextAdminConfig,
+            pilot: updatedPilot,
+          };
+        });
       },
 
       adminExportSaveJson: () => {
@@ -3087,9 +3226,15 @@ export const useGameStore = create<GameStoreState>()(
           if (!state.adminConfig || typeof state.adminConfig !== 'object') {
             state.adminConfig = createDefaultAdminConfig();
           } else {
+            const rawAdmin = state.adminConfig as unknown as Record<
+              string,
+              unknown
+            >;
+            const sanitizedFormation = sanitizeFormationConfig(rawAdmin);
             state.adminConfig = {
               ...createDefaultAdminConfig(),
               ...state.adminConfig,
+              formation: sanitizedFormation,
               rewardMultiplier:
                 typeof state.adminConfig.rewardMultiplier === 'number' &&
                 Number.isFinite(state.adminConfig.rewardMultiplier) &&
@@ -3097,6 +3242,36 @@ export const useGameStore = create<GameStoreState>()(
                   ? state.adminConfig.rewardMultiplier
                   : BALANCE_CONFIG.rewardMultDefault,
             };
+            // Remove legacy dead fields if present on old saves
+            const cleaned = state.adminConfig as unknown as Record<
+              string,
+              unknown
+            >;
+            delete cleaned.formationFrontCapacity;
+            delete cleaned.formationBackCapacity;
+            delete cleaned.backRowDamageReduction;
+          }
+          if (state.pilot && typeof state.pilot === 'object') {
+            if (
+              !Array.isArray(state.pilot.squadFormation) ||
+              state.pilot.squadFormation.length === 0
+            ) {
+              const migratedFormation = migrateLegacySquadFormation(
+                state.pilot.squadFormation,
+                state.pilot.name,
+                state.pilot.activeGearId,
+                state.adminConfig.formation,
+                state.pilot.formationCustomized
+              );
+              state.pilot.squadFormation = migratedFormation.squadFormation;
+              state.pilot.formationCustomized =
+                migratedFormation.formationCustomized;
+            } else {
+              state.pilot.squadFormation = enforceFormationCapacities(
+                state.pilot.squadFormation,
+                state.adminConfig.formation
+              );
+            }
           }
           // Guarantee shop stock and WP market offers are NEVER empty on reload!
           const activeGear = state.pilot?.gears?.[state.pilot?.activeGearId];

@@ -16,6 +16,7 @@ import {
   getSellPrice,
   validateEquipOnGear,
 } from './equipment';
+import { isFormationConfigDefault } from './formation';
 
 export const RARITY_RANK: Record<ItemRarity, number> = {
   common: 0,
@@ -304,10 +305,7 @@ export function isAnyCheatActive(cfg: AdminConfig | undefined | null): boolean {
   ) {
     return true;
   }
-  if (Math.abs(cfg.backRowDamageReduction - BALANCE_CONFIG.backRowDamageReduction) > 0.001) {
-    return true;
-  }
-  if (cfg.formationFrontCapacity !== 4 || cfg.formationBackCapacity !== 4) {
+  if (!isFormationConfigDefault(cfg.formation)) {
     return true;
   }
   return false;

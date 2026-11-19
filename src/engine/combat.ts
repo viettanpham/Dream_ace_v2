@@ -1,5 +1,6 @@
 import { BALANCE_CONFIG, COMBAT_FORMULAS } from '../data/balance';
 import { EMPTY_STAT_BLOCK, MECH_CLASSES, MECH_CLASS_LIST } from '../data/classes';
+import { DEFAULT_FORMATION_CONFIG, FORMATION_ROWS } from '../data/formationConfig';
 import { getSectorById } from '../data/maps';
 import {
   ALLY_PILOT_POOL,
@@ -28,6 +29,7 @@ import type {
   CombatUnit,
   EnemyArchetype,
   FloatingPopup,
+  FormationConfig,
   ItemSpecialTraits,
   MechClassId,
   PilotAccount,
@@ -40,6 +42,15 @@ import type {
   UnitAnimState,
 } from '../types/game';
 import { sumGearEquipmentStats, sumGearSpecialTraits } from './equipment';
+import {
+  assignFormationColumns,
+  autoPlaceFormation,
+  enforceFormationCapacities,
+  getRowCounts,
+  getRowModifier,
+  pickRowForClass,
+  sanitizeFormationConfig,
+} from './formation';
 import {
   canUnitUseSkill,
   type GearPassiveBonuses,
@@ -112,8 +123,13 @@ export function getEffectiveUnitSpeed(unit: CombatUnit): number {
   return Math.max(1, Math.round(speed));
 }
 
-export function getEffectiveUnitDefense(unit: CombatUnit): number {
+export function getEffectiveUnitDefense(
+  unit: CombatUnit,
+  formationConfig: FormationConfig = DEFAULT_FORMATION_CONFIG
+): number {
   let def = unit.derived.defenseRating;
+  const rowMod = getRowModifier(formationConfig, unit.row);
+  def *= Math.max(0.1, 1 + rowMod.defensePct);
   const defUp = getStatus(unit, 'def_up');
   if (defUp) def *= 1 + (defUp.magnitude ?? 0.25);
   const siegeDef = getStatus(unit, 'siege_defense');
@@ -204,6 +220,7 @@ function buildCombatUnit(params: {
   side: CombatSide;
   row: CombatRow;
   formationCol?: number;
+  hasLongRangeWeapon?: boolean;
   isPlayer: boolean;
   classId: MechClassId;
   archetype?: EnemyArchetype;
@@ -270,6 +287,11 @@ function buildCombatUnit(params: {
     side: params.side,
     row: params.row,
     formationCol: params.formationCol,
+    hasLongRangeWeapon: Boolean(
+      params.hasLongRangeWeapon ||
+        params.specialTraits?.longRange ||
+        params.archetype === 'sniper'
+    ),
     isPlayer: params.isPlayer,
     classId: params.classId,
     archetype: params.archetype,
@@ -496,20 +518,15 @@ export function createInitialBattleState(
   adminConfig?: Partial<AdminConfig>
 ): BattleState {
   const sector = getSectorById(sectorId);
-  const squadSize: BattleSize = squadSizeOverride ?? sector.squadSize ?? 4;
-  const frontCap = Math.max(
-    1,
-    Math.min(squadSize, adminConfig?.formationFrontCapacity ?? Math.ceil(squadSize / 2))
+  const rawSquadSize: BattleSize = squadSizeOverride ?? sector.squadSize ?? 4;
+  const formationConfig = sanitizeFormationConfig(
+    (adminConfig?.formation ?? adminConfig) as Record<string, unknown> | undefined
   );
-  const backCap = Math.max(
+  const effectiveSquadCount = Math.max(
     1,
-    Math.min(squadSize, adminConfig?.formationBackCapacity ?? Math.ceil(squadSize / 2))
+    Math.min(rawSquadSize, formationConfig.maxUnitsPerSide)
   );
-  const desiredFront = Math.min(Math.ceil(squadSize / 2), frontCap);
-  const frontCount = Math.min(
-    frontCap,
-    Math.max(desiredFront, squadSize - backCap)
-  ); // respects both front and back admin formation capacities
+  const squadSize: BattleSize = rawSquadSize;
   const activeGear = pilot.gears[pilot.activeGearId];
   const classIds = MECH_CLASS_LIST.map((c) => c.id);
 
@@ -518,13 +535,19 @@ export function createInitialBattleState(
   const playerTraits = sumGearSpecialTraits(activeGear, pilot.inventory);
   const playerPassives = getGearPassiveBonuses(activeGear);
 
+  const savedFormation = Array.isArray(pilot.squadFormation)
+    ? pilot.squadFormation
+    : [];
+  const savedPlayerSlot = savedFormation.find((u) => u.isPlayer);
+
   const playerUnit = buildCombatUnit({
     id: 'ally_player',
     name: pilot.name.trim() || 'Vance',
-    callsign: 'Lead-1',
+    callsign: savedPlayerSlot?.callsign ?? 'Lead-1',
     side: 'ally',
-    row: 'front',
+    row: savedPlayerSlot?.row ?? 'front',
     formationCol: 0,
+    hasLongRangeWeapon: Boolean(playerTraits.longRange),
     isPlayer: true,
     classId: activeGear.classId,
     level: activeGear.level,
@@ -537,17 +560,21 @@ export function createInitialBattleState(
     passives: playerPassives,
   });
 
-  // 2. AI Ally Wingmen (matching squadSize - 1, arranged in 2 rows x up to 4 cols)
+  // 2. AI Ally Wingmen (matching effectiveSquadCount - 1)
   const usedNames = new Set<string>([playerUnit.name]);
   const usedCallsigns = new Set<string>([playerUnit.callsign]);
-  const allyUnits: CombatUnit[] = [playerUnit];
+  const savedWingmen = savedFormation.filter((u) => !u.isPlayer);
+  const rawAllyUnits: CombatUnit[] = [playerUnit];
 
-  for (let i = 0; i < squadSize - 1; i++) {
+  for (let i = 0; i < effectiveSquadCount - 1; i++) {
+    const savedSlot = savedWingmen[i];
     const remainingNames = ALLY_PILOT_POOL.firstNames.filter(
       (n) => !usedNames.has(n)
     );
     const pilotName =
-      remainingNames.length > 0
+      savedSlot?.name && !usedNames.has(savedSlot.name)
+        ? savedSlot.name
+        : remainingNames.length > 0
         ? randomItem(remainingNames, rng)
         : `Wingman-${i + 1}`;
     usedNames.add(pilotName);
@@ -556,25 +583,26 @@ export function createInitialBattleState(
       (c) => !usedCallsigns.has(c)
     );
     const callsign =
-      remainingCallsigns.length > 0
+      savedSlot?.callsign && !usedCallsigns.has(savedSlot.callsign)
+        ? savedSlot.callsign
+        : remainingCallsigns.length > 0
         ? randomItem(remainingCallsigns, rng)
         : `Wing-${i + 1}`;
     usedCallsigns.add(callsign);
 
-    const allyClass: MechClassId = randomItem(classIds, rng);
+    const allyClass: MechClassId =
+      savedSlot?.classId ?? randomItem(classIds, rng);
     const levelJitter = Math.floor(rng() * 3) - 1;
     const allyLevel = Math.max(1, activeGear.level + levelJitter);
-    const slotInTeam = i + 1;
-    const isFront = slotInTeam < frontCount;
 
-    allyUnits.push(
+    rawAllyUnits.push(
       buildCombatUnit({
-        id: `ally_npc_${i + 1}`,
+        id: savedSlot?.id ?? `ally_npc_${i + 1}`,
         name: pilotName,
         callsign,
         side: 'ally',
-        row: isFront ? 'front' : 'back',
-        formationCol: isFront ? slotInTeam : slotInTeam - frontCount,
+        row: savedSlot?.row ?? 'front',
+        formationCol: 0,
         isPlayer: false,
         classId: allyClass,
         level: allyLevel,
@@ -583,21 +611,32 @@ export function createInitialBattleState(
     );
   }
 
-  // Optional Pilot-for-Hire: joins as an EXTRA veteran wingman for this battle!
+  // Place player squadron into the 3 rows:
+  // - If user customized their formation in Garage, keep their row choices while enforcing capacities.
+  // - Otherwise, run class-based auto-placement (Striker->front, Interceptor->front/middle, Siege->back, Support->middle/back).
+  let allyUnits: CombatUnit[] =
+    pilot.formationCustomized && savedFormation.length > 0
+      ? enforceFormationCapacities(rawAllyUnits, formationConfig)
+      : autoPlaceFormation(rawAllyUnits, formationConfig);
+
+  // Optional Pilot-for-Hire: joins as an EXTRA veteran wingman placed into an open row by class preference!
   if (pilot.hiredWingman) {
     const hiredLv = Math.max(1, activeGear.level + pilot.hiredWingman.bonusLevel);
-    const allyBackCount = squadSize - frontCount;
-    const mercInFront = allyBackCount >= backCap && frontCount < frontCap;
-    allyUnits.push(
+    const allyRowCounts = getRowCounts(allyUnits);
+    const mercRow = pickRowForClass(
+      pilot.hiredWingman.classId,
+      allyRowCounts,
+      formationConfig
+    );
+    allyUnits = assignFormationColumns([
+      ...allyUnits,
       buildCombatUnit({
         id: 'ally_hired_merc',
         name: pilot.hiredWingman.callsign,
         callsign: 'MERC',
         side: 'ally',
-        row: mercInFront ? 'front' : 'back',
-        formationCol: mercInFront
-          ? frontCount
-          : Math.max(0, squadSize - frontCount),
+        row: mercRow,
+        formationCol: 0,
         isPlayer: false,
         classId: pilot.hiredWingman.classId,
         level: hiredLv,
@@ -606,8 +645,8 @@ export function createInitialBattleState(
           hiredLv,
           rng
         ),
-      })
-    );
+      }),
+    ]);
   }
 
   // Optional Engineer Field Overcharge: +25% starting Shield on Allied wing for this battle
@@ -623,7 +662,7 @@ export function createInitialBattleState(
     }
   }
 
-  // 3. Hostile Squadron (matching squadSize with mixed archetypes; Front/Back formation)
+  // 3. Hostile Squadron (3-row auto-placement with small random variation)
   const archetypeRosterBySize: Record<BattleSize, EnemyArchetype[]> = {
     4: ['gunship', 'drone', 'sniper', 'repair_ship'],
     6: ['gunship', 'drone', 'gunship', 'sniper', 'repair_ship', 'sniper'],
@@ -638,17 +677,15 @@ export function createInitialBattleState(
       'repair_ship',
     ],
   };
-  const roster = archetypeRosterBySize[squadSize];
-  const enemyUnits: CombatUnit[] = [];
+  const roster = archetypeRosterBySize[rawSquadSize];
+  const rawEnemyUnits: CombatUnit[] = [];
 
-  for (let i = 0; i < squadSize; i++) {
+  for (let i = 0; i < effectiveSquadCount; i++) {
     const archetype = roster[i % roster.length];
     const archDef = ENEMY_ARCHETYPE_DEFS[archetype];
     const isBoss = (sector.hasBoss || Boolean(adminConfig?.forceBoss)) && i === 0;
-    const isFront = i < frontCount;
-    // Fortress (6v6) and Capital (8v8) front-line gunships act as defense turrets/structures (square Radar tokens)
     const isStructure =
-      isBoss || (squadSize >= 6 && isFront && archetype === 'gunship' && i === frontCount - 1);
+      isBoss || (effectiveSquadCount >= 6 && archetype === 'gunship' && i === 2);
     const prefix = randomItem(ENEMY_PREFIXES, rng);
     const baseName = isBoss
       ? randomItem(archDef.bossNames, rng)
@@ -671,14 +708,15 @@ export function createInitialBattleState(
           : Math.floor(rng() * 2) - (effectiveLevelOffset === 0 ? 1 : 0))
     );
 
-    enemyUnits.push(
+    rawEnemyUnits.push(
       buildCombatUnit({
         id: `enemy_${i + 1}`,
         name: `${prefix} ${baseName}`,
         callsign: isBoss ? 'BOSS' : isStructure ? `Turret-${i + 1}` : `Hostile-${i + 1}`,
         side: 'enemy',
-        row: isFront ? 'front' : 'back',
-        formationCol: isFront ? i : i - frontCount,
+        row: 'front',
+        formationCol: 0,
+        hasLongRangeWeapon: archetype === 'sniper',
         isPlayer: false,
         classId: archDef.classId,
         archetype,
@@ -694,9 +732,19 @@ export function createInitialBattleState(
     );
   }
 
+  const enemyUnits: CombatUnit[] = autoPlaceFormation(
+    rawEnemyUnits,
+    formationConfig,
+    { rng, randomVariation: 0.25 }
+  );
+
   const units = [...allyUnits, ...enemyUnits];
   const turnOrder = sortTurnOrder(units);
-  const firstEnemyId = enemyUnits[0]?.id ?? null;
+  const placedPlayer = allyUnits.find((u) => u.isPlayer) ?? allyUnits[0];
+  const initialValidEnemies = placedPlayer
+    ? getValidEnemyTargets(units, placedPlayer, 'attack')
+    : enemyUnits;
+  const firstEnemyId = initialValidEnemies[0]?.id ?? enemyUnits[0]?.id ?? null;
 
   const openingLog: CombatLogEntry = {
     id: nextId('log'),
@@ -720,7 +768,7 @@ export function createInitialBattleState(
     round: 1,
     turnCounter: 0,
     selectedTargetId: firstEnemyId,
-    selectedAllyTargetId: playerUnit.id,
+    selectedAllyTargetId: placedPlayer.id,
     lastPlayerTargetId: null,
     autoStopNotice: null,
     wingmanChat: null,
@@ -775,8 +823,22 @@ function getTargetableOpponents(
 }
 
 /**
- * Returns true if the actor/action can bypass front-row cover to target back-row units directly:
- * - Siege Mode active
+ * Returns true if the unit carries a long-range weapon, is Siege class,
+ * is in Siege Mode, or is a Sniper archetype.
+ */
+export function isRangedUnit(unit: CombatUnit): boolean {
+  return Boolean(
+    unit.hasLongRangeWeapon ||
+      unit.classId === 'siege' ||
+      unit.archetype === 'sniper' ||
+      hasStatus(unit, 'siege_mode')
+  );
+}
+
+/**
+ * Returns true if the actor/action can ignore row targeting order and hit any enemy row:
+ * - Long-range weapon equipped (`hasLongRangeWeapon`)
+ * - Siege class or Siege Mode active
  * - Sniper archetype
  * - Long-range skills (missile/bombing/railgun/multi-enemy/AoE/snipe/scan skills)
  */
@@ -785,8 +847,7 @@ export function isLongRangeAction(
   action: ActionType,
   skillId?: string
 ): boolean {
-  if (hasStatus(actor, 'siege_mode')) return true;
-  if (actor.archetype === 'sniper') return true;
+  if (isRangedUnit(actor)) return true;
   if (action === 'skill' && skillId) {
     const sk = getSkillById(skillId);
     if (!sk) return false;
@@ -801,9 +862,10 @@ export function isLongRangeAction(
 }
 
 /**
- * Returns valid enemy targets respecting Stealth + Front/Back row rules:
- * Basic attacks hit the Front row; Back row is targetable ONLY when Front row is empty
- * OR when the action is long-range (Siege Mode, Sniper, missile/bombing/long-range skills).
+ * Returns valid enemy targets respecting Stealth + 3-row Front -> Middle -> Back targeting:
+ * Standard attacks must target the nearest non-empty enemy row (front, then middle, then back).
+ * If a row is wiped out, the next row becomes exposed automatically.
+ * Long-range weapons, Siege class, Siege Mode, Snipers, and long-range skills may target any row.
  */
 export function getValidEnemyTargets(
   units: CombatUnit[],
@@ -815,8 +877,23 @@ export function getValidEnemyTargets(
   if (isLongRangeAction(actor, action, skillId)) {
     return basePool;
   }
-  const frontTargets = basePool.filter((u) => u.row === 'front');
-  return frontTargets.length > 0 ? frontTargets : basePool;
+  for (const row of FORMATION_ROWS) {
+    const rowTargets = basePool.filter((u) => u.row === row);
+    if (rowTargets.length > 0) {
+      return rowTargets;
+    }
+  }
+  return basePool;
+}
+
+/**
+ * Support abilities (heal, buff) can target any alive ally in any row (front, middle, back).
+ */
+export function getValidAllyTargets(
+  units: CombatUnit[],
+  actor: CombatUnit
+): CombatUnit[] {
+  return units.filter((u) => u.side === actor.side && u.alive);
 }
 
 /**
@@ -1127,6 +1204,8 @@ function applyDamageToUnit(
   );
   const isCrit = isOneHit || rng() * 100 < totalCritChance;
 
+  const formationConfig =
+    options.adminConfig?.formation ?? DEFAULT_FORMATION_CONFIG;
   const ignoreDef = Boolean(options.ignoreDefAndShield);
   const totalPierce = ignoreDef
     ? 1.0
@@ -1136,28 +1215,26 @@ function applyDamageToUnit(
       );
   const effectiveDefense = Math.max(
     0,
-    getEffectiveUnitDefense(curTarget) * (1 - totalPierce)
+    getEffectiveUnitDefense(curTarget, formationConfig) * (1 - totalPierce)
   );
   const mitigation = ignoreDef
     ? 1.0
     : COMBAT_FORMULAS.defenseMitigationDivisor /
       (COMBAT_FORMULAS.defenseMitigationDivisor + effectiveDefense);
 
-  // Back-row cover reduction unless attacker is in Siege Mode or no front-row allies remain
-  const targetSideFrontAlive = unitsContext.some(
-    (u) => u.side === curTarget.side && u.alive && u.row === 'front'
+  // Configurable 3-row attacker damage modifiers (e.g. Front 0%, Middle 0%, Back +10% for ranged weapons)
+  const attackerRowMod = getRowModifier(formationConfig, curAttacker.row);
+  const isRangedAttacker =
+    isRangedUnit(curAttacker) ||
+    (options.tag === 'SKILL' &&
+      Boolean(options.actionMeta.skillId) &&
+      isLongRangeAction(curAttacker, 'skill', options.actionMeta.skillId));
+  const rowDamageMult = Math.max(
+    0.1,
+    1 +
+      attackerRowMod.damagePct +
+      (isRangedAttacker ? attackerRowMod.rangedDamagePct : 0)
   );
-  const backRowRed =
-    typeof options.adminConfig?.backRowDamageReduction === 'number'
-      ? Math.max(0, Math.min(0.85, options.adminConfig.backRowDamageReduction))
-      : BALANCE_CONFIG.backRowDamageReduction;
-  const backRowMult =
-    curTarget.row === 'back' &&
-    targetSideFrontAlive &&
-    !hasStatus(curAttacker, 'siege_mode') &&
-    !ignoreDef
-      ? 1 - backRowRed
-      : 1.0;
 
   // Vulnerable debuff (+15% dmg taken from Scanning)
   const vulnSt = getStatus(curTarget, 'vulnerable');
@@ -1180,7 +1257,7 @@ function applyDamageToUnit(
     : Math.round(
         rawPower *
           mitigation *
-          backRowMult *
+          rowDamageMult *
           vulnMult *
           enrageMult *
           randomVariance(rng)
@@ -2234,10 +2311,26 @@ function resolveUnitActionCore(
         }
 
         case 'retreat_back_eva': {
-          const canMoveRow = !hasStatus(act, 'siege_mode');
+          const formationCfg = adminConfig?.formation ?? DEFAULT_FORMATION_CONFIG;
+          const sameSideAlive = nextUnits.filter(
+            (u) => u.side === act.side && u.alive && u.id !== act.id
+          );
+          const backOccupied = sameSideAlive.filter((u) => u.row === 'back').length;
+          const middleOccupied = sameSideAlive.filter((u) => u.row === 'middle').length;
+          let targetRetreatRow: CombatRow = act.row;
+          if (!hasStatus(act, 'siege_mode')) {
+            if (act.row !== 'back' && backOccupied < formationCfg.rowCapacities.back) {
+              targetRetreatRow = 'back';
+            } else if (
+              act.row === 'front' &&
+              middleOccupied < formationCfg.rowCapacities.middle
+            ) {
+              targetRetreatRow = 'middle';
+            }
+          }
           nextUnits[actorIdx] = {
             ...act,
-            row: canMoveRow ? 'back' : act.row,
+            row: targetRetreatRow,
             statuses: addOrRefreshStatus(act.statuses, {
               type: 'eva_up',
               turnsRemaining: skill.duration ?? 2,

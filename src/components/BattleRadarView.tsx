@@ -235,10 +235,15 @@ function computeUnitPositions(
 ): Map<string, TokenPos> {
   const map = new Map<string, TokenPos>();
 
-  const groups: Array<{ side: 'ally' | 'enemy'; row: 'front' | 'back' }> = [
+  const groups: Array<{
+    side: 'ally' | 'enemy';
+    row: 'front' | 'middle' | 'back';
+  }> = [
     { side: 'enemy', row: 'back' },
+    { side: 'enemy', row: 'middle' },
     { side: 'enemy', row: 'front' },
     { side: 'ally', row: 'front' },
+    { side: 'ally', row: 'middle' },
     { side: 'ally', row: 'back' },
   ];
 
@@ -253,29 +258,37 @@ function computeUnitPositions(
     rowUnits.forEach((unit, idx) => {
       const frac = (idx + 0.5) / count;
       if (isLandscape) {
-        // Horizontal battlefield: Allies on Left (Back -> Front) vs Enemies on Right (Front -> Back)
+        // Horizontal battlefield: Allies on Left (Back -> Middle -> Front) vs Enemies on Right (Front -> Middle -> Back)
         const x =
           g.side === 'ally'
             ? g.row === 'back'
-              ? vw * 0.14
-              : vw * 0.33
+              ? vw * 0.1
+              : g.row === 'middle'
+              ? vw * 0.24
+              : vw * 0.38
             : g.row === 'front'
-            ? vw * 0.67
-            : vw * 0.86;
+            ? vw * 0.62
+            : g.row === 'middle'
+            ? vw * 0.76
+            : vw * 0.9;
         const padY = count >= 4 ? 46 : 58;
         const usableH = vh - padY * 2;
         const y = padY + frac * usableH;
         map.set(unit.id, { x, y });
       } else {
-        // Vertical portrait battlefield: Enemies on Top (Back -> Front) vs Allies on Bottom (Front -> Back)
+        // Vertical portrait battlefield: Enemies on Top (Back -> Middle -> Front) vs Allies on Bottom (Front -> Middle -> Back)
         const y =
           g.side === 'enemy'
             ? g.row === 'back'
-              ? vh * 0.135
-              : vh * 0.345
+              ? vh * 0.11
+              : g.row === 'middle'
+              ? vh * 0.245
+              : vh * 0.38
             : g.row === 'front'
-            ? vh * 0.635
-            : vh * 0.845;
+            ? vh * 0.6
+            : g.row === 'middle'
+            ? vh * 0.74
+            : vh * 0.88;
         const padX = count >= 4 ? 32 : 42;
         const usableW = vw - padX * 2;
         const x = padX + frac * usableW;
@@ -513,31 +526,43 @@ export function BattleRadarView({
         {/* Formation Row Labels */}
         {isLandscape ? (
           <g fill="#64748b" fontSize="9.5" fontFamily="monospace" fontWeight="600">
-            <text x={vw * 0.14} y="18" textAnchor="middle">
+            <text x={vw * 0.1} y="18" textAnchor="middle">
               {t('common.backRow')}
             </text>
-            <text x={vw * 0.33} y="18" textAnchor="middle" fill="#38bdf8">
+            <text x={vw * 0.24} y="18" textAnchor="middle" fill="#94a3b8">
+              {t('common.middleRow')}
+            </text>
+            <text x={vw * 0.38} y="18" textAnchor="middle" fill="#38bdf8">
               {t('common.frontRow')}
             </text>
-            <text x={vw * 0.67} y="18" textAnchor="middle" fill="#f87171">
+            <text x={vw * 0.62} y="18" textAnchor="middle" fill="#f87171">
               {t('common.frontRow')}
             </text>
-            <text x={vw * 0.86} y="18" textAnchor="middle">
+            <text x={vw * 0.76} y="18" textAnchor="middle" fill="#94a3b8">
+              {t('common.middleRow')}
+            </text>
+            <text x={vw * 0.9} y="18" textAnchor="middle">
               {t('common.backRow')}
             </text>
           </g>
         ) : (
           <g fill="#64748b" fontSize="8.5" fontFamily="monospace" fontWeight="700">
-            <text x="10" y={vh * 0.135 - 24} fill="#f87171" opacity="0.7">
+            <text x="10" y={vh * 0.11 - 22} fill="#f87171" opacity="0.65">
               {t('common.backRow')}
             </text>
-            <text x="10" y={vh * 0.345 - 24} fill="#f87171" opacity="0.9">
+            <text x="10" y={vh * 0.245 - 22} fill="#f87171" opacity="0.8">
+              {t('common.middleRow')}
+            </text>
+            <text x="10" y={vh * 0.38 - 22} fill="#f87171" opacity="0.95">
               {t('common.frontRow')}
             </text>
-            <text x="10" y={vh * 0.635 - 24} fill="#38bdf8" opacity="0.9">
+            <text x="10" y={vh * 0.6 - 22} fill="#38bdf8" opacity="0.95">
               {t('common.frontRow')}
             </text>
-            <text x="10" y={vh * 0.845 - 24} fill="#38bdf8" opacity="0.7">
+            <text x="10" y={vh * 0.74 - 22} fill="#38bdf8" opacity="0.8">
+              {t('common.middleRow')}
+            </text>
+            <text x="10" y={vh * 0.88 - 22} fill="#38bdf8" opacity="0.65">
               {t('common.backRow')}
             </text>
           </g>

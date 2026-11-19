@@ -200,7 +200,7 @@ export const ITEM_TEMPLATES: ItemTemplate[] = [
     secondaryStat: 'evasion',
     secondaryRange: [3, 6],
     affixPool: ['attack', 'evasion', 'fuel', 'spirit'],
-    specialTraits: { critBonusPct: 8 },
+    specialTraits: { critBonusPct: 8, longRange: true },
   },
   {
     id: 'tpl_mw_scatter_gun',
@@ -254,7 +254,7 @@ export const ITEM_TEMPLATES: ItemTemplate[] = [
     secondaryStat: 'spirit',
     secondaryRange: [5, 10],
     affixPool: ['attack', 'spirit', 'evasion', 'shield'],
-    specialTraits: { splashPct: 22, critBonusPct: 5 },
+    specialTraits: { splashPct: 22, critBonusPct: 5, longRange: true },
   },
 
   // ================= SUB WEAPONS (5 templates, universal) =================
@@ -328,7 +328,7 @@ export const ITEM_TEMPLATES: ItemTemplate[] = [
     secondaryStat: 'attack',
     secondaryRange: [7, 11],
     affixPool: ['evasion', 'attack', 'fuel', 'spirit'],
-    specialTraits: { critBonusPct: 7 },
+    specialTraits: { critBonusPct: 7, longRange: true },
   },
   {
     id: 'tpl_sw_ion_torpedo',
@@ -346,7 +346,7 @@ export const ITEM_TEMPLATES: ItemTemplate[] = [
     secondaryStat: 'shield',
     secondaryRange: [6, 10],
     affixPool: ['attack', 'shield', 'spirit', 'defense'],
-    specialTraits: { armorPiercePct: 15, splashPct: 15 },
+    specialTraits: { armorPiercePct: 15, splashPct: 15, longRange: true },
   },
 
   // ================= HULL PLATING / ARMOR (8 templates, class-locked: 2 per class) =================

@@ -606,7 +606,9 @@ describe('7. Combat Depth (Status Effects & Enemy Archetypes)', () => {
     );
 
     const player = battle.units.find((u) => u.id === 'ally_player')!;
-    const enemy = battle.units.find((u) => u.side === 'enemy')!;
+    const enemy =
+      getValidEnemyTargets(battle.units, player, 'attack')[0] ??
+      battle.units.find((u) => u.side === 'enemy')!;
 
     const slowedUnit: CombatUnit = {
       ...player,
@@ -1864,15 +1866,15 @@ describe('15. Auto Safety Stops & Auto-Repeat Stop Conditions', () => {
   });
 });
 
-describe('16. Scalable Battle Sizes (4v4, 6v6, 8v8) & 2-Row Formations', () => {
-  it('spawns 4v4, 6v6, and 8v8 battles with balanced 2-row Front/Back formations and sequential columns', () => {
+describe('16. Scalable Battle Sizes (4v4, 6v6, 8v8) & 3-Row Formations', () => {
+  it('spawns 4v4, 6v6, and 8v8 battles with 3-row Front/Middle/Back formations respecting capacities and sequential columns', () => {
     const pilot = createDefaultPilotAccount('Vanguard', 'striker');
     pilot.gears.striker.level = 15;
 
     const sizes = [
-      { size: 4 as const, sectorId: 'border_outpost', expectedPerRow: 2 },
-      { size: 6 as const, sectorId: 'debris_belt', expectedPerRow: 3 },
-      { size: 8 as const, sectorId: 'iron_citadel', expectedPerRow: 4 },
+      { size: 4 as const, sectorId: 'border_outpost' },
+      { size: 6 as const, sectorId: 'debris_belt' },
+      { size: 8 as const, sectorId: 'iron_citadel' },
     ];
 
     for (const cfg of sizes) {
@@ -1889,23 +1891,27 @@ describe('16. Scalable Battle Sizes (4v4, 6v6, 8v8) & 2-Row Formations', () => {
       expect(allies).toHaveLength(cfg.size);
       expect(enemies).toHaveLength(cfg.size);
 
-      // Verify exact 2-row Front/Back split on both sides
-      const allyFront = allies.filter((u) => u.row === 'front');
-      const allyBack = allies.filter((u) => u.row === 'back');
-      const enemyFront = enemies.filter((u) => u.row === 'front');
-      const enemyBack = enemies.filter((u) => u.row === 'back');
+      // Verify 3-row capacities (defaults: front 3, middle 3, back 2) & sequential columns on both sides
+      for (const sideUnits of [allies, enemies]) {
+        const front = sideUnits.filter((u) => u.row === 'front');
+        const middle = sideUnits.filter((u) => u.row === 'middle');
+        const back = sideUnits.filter((u) => u.row === 'back');
 
-      expect(allyFront).toHaveLength(cfg.expectedPerRow);
-      expect(allyBack).toHaveLength(cfg.expectedPerRow);
-      expect(enemyFront).toHaveLength(cfg.expectedPerRow);
-      expect(enemyBack).toHaveLength(cfg.expectedPerRow);
+        expect(front.length + middle.length + back.length).toBe(cfg.size);
+        expect(front.length).toBeLessThanOrEqual(3);
+        expect(middle.length).toBeLessThanOrEqual(3);
+        expect(back.length).toBeLessThanOrEqual(2);
 
-      // Sequential formation columns 0..expectedPerRow-1 in every row
-      const expectedCols = Array.from({ length: cfg.expectedPerRow }, (_, i) => i);
-      expect(allyFront.map((u) => u.formationCol).sort()).toEqual(expectedCols);
-      expect(allyBack.map((u) => u.formationCol).sort()).toEqual(expectedCols);
-      expect(enemyFront.map((u) => u.formationCol).sort()).toEqual(expectedCols);
-      expect(enemyBack.map((u) => u.formationCol).sort()).toEqual(expectedCols);
+        for (const rowUnits of [front, middle, back]) {
+          const expectedCols = Array.from(
+            { length: rowUnits.length },
+            (_, i) => i
+          );
+          expect(
+            rowUnits.map((u) => u.formationCol ?? 0).sort((a, b) => a - b)
+          ).toEqual(expectedCols);
+        }
+      }
 
       // Fortress (6v6) and Capital (8v8) battles feature structure/boss tokens
       if (cfg.size >= 6) {
@@ -1918,8 +1924,8 @@ describe('16. Scalable Battle Sizes (4v4, 6v6, 8v8) & 2-Row Formations', () => {
   });
 });
 
-describe('17. Front/Back Row Targeting, Long-Range Bypass & Adjacent Formation Splash', () => {
-  it('blocks Back-row enemies from basic attacks while Front row lives, unlocks once Front dies, and lets long-range bypass', () => {
+describe('17. 3-Row Targeting, Long-Range Bypass & Adjacent Formation Splash', () => {
+  it('blocks non-front enemy rows from basic attacks while Front lives, unlocks Middle then Back, and lets long-range bypass', () => {
     const pilot = createDefaultPilotAccount('Ace', 'striker');
     pilot.gears.striker.level = 20;
     pilot.gears.striker.skillLevels = { str_carpet_salvo: 1 };
@@ -1932,29 +1938,35 @@ describe('17. Front/Back Row Targeting, Long-Range Bypass & Adjacent Formation S
       6
     );
     const player = battle.units.find((u) => u.isPlayer)!;
-    const frontEnemies = battle.units.filter(
-      (u) => u.side === 'enemy' && u.row === 'front'
-    );
-    const backEnemies = battle.units.filter(
-      (u) => u.side === 'enemy' && u.row === 'back'
-    );
-    expect(frontEnemies).toHaveLength(3);
-    expect(backEnemies).toHaveLength(3);
-
-    // 1) Standard basic attack only sees Front row while Front row lives
-    expect(isLongRangeAction(player, 'attack')).toBe(false);
-    const basicValid = getValidEnemyTargets(battle.units, player, 'attack');
-    expect(basicValid.every((u) => u.row === 'front')).toBe(true);
-    expect(basicValid).toHaveLength(3);
-
-    // Attempting a basic attack aimed at a Back-row enemy redirects to a Front-row enemy
-    const backTarget = backEnemies[0];
+    // Arrange enemies deterministically: 2 front, 2 middle, 2 back
+    const enemies = battle.units.filter((u) => u.side === 'enemy');
+    const rowByEnemyId = new Map<string, 'front' | 'middle' | 'back'>([
+      [enemies[0].id, 'front'],
+      [enemies[1].id, 'front'],
+      [enemies[2].id, 'middle'],
+      [enemies[3].id, 'middle'],
+      [enemies[4].id, 'back'],
+      [enemies[5].id, 'back'],
+    ]);
     const unitsHighHp = battle.units.map((u) => ({
       ...u,
+      row: rowByEnemyId.get(u.id) ?? u.row,
       hp: 1000,
       shield: 0,
       derived: { ...u.derived, maxHp: 1000, dodgeChance: 0 },
     }));
+
+    const backTarget = unitsHighHp.find(
+      (u) => u.side === 'enemy' && u.row === 'back'
+    )!;
+
+    // 1) Standard basic attack only sees Front row while Front row lives
+    expect(isLongRangeAction(player, 'attack')).toBe(false);
+    const basicValid = getValidEnemyTargets(unitsHighHp, player, 'attack');
+    expect(basicValid.every((u) => u.row === 'front')).toBe(true);
+    expect(basicValid).toHaveLength(2);
+
+    // Attempting a basic attack aimed at a Back-row enemy redirects to a Front-row enemy
     const redirected = resolveUnitAction(
       unitsHighHp,
       player.id,
@@ -1964,22 +1976,29 @@ describe('17. Front/Back Row Targeting, Long-Range Bypass & Adjacent Formation S
       undefined,
       () => 0.99
     );
-    expect(redirected.updatedUnits.find((u) => u.id === backTarget.id)!.hp).toBe(1000);
+    expect(
+      redirected.updatedUnits.find((u) => u.id === backTarget.id)!.hp
+    ).toBe(1000);
     expect(
       redirected.updatedUnits.some(
         (u) => u.side === 'enemy' && u.row === 'front' && u.hp < 1000
       )
     ).toBe(true);
 
-    // 2) Long-range Siege Mode bypasses Front row and hits the Back-row target directly
+    // 2) Long-range Siege Mode bypasses Front & Middle and hits the Back-row target directly
     const unitsSiegeMode = unitsHighHp.map((u) =>
       u.id === player.id
-        ? { ...u, statuses: [{ type: 'siege_mode' as const, turnsRemaining: 99 }] }
+        ? {
+            ...u,
+            statuses: [{ type: 'siege_mode' as const, turnsRemaining: 99 }],
+          }
         : u
     );
     const siegePlayer = unitsSiegeMode.find((u) => u.isPlayer)!;
     expect(isLongRangeAction(siegePlayer, 'attack')).toBe(true);
-    expect(getValidEnemyTargets(unitsSiegeMode, siegePlayer, 'attack')).toHaveLength(6);
+    expect(
+      getValidEnemyTargets(unitsSiegeMode, siegePlayer, 'attack')
+    ).toHaveLength(6);
 
     const longRangeHit = resolveUnitAction(
       unitsSiegeMode,
@@ -1997,17 +2016,31 @@ describe('17. Front/Back Row Targeting, Long-Range Bypass & Adjacent Formation S
     // 3) Missile skill (str_carpet_salvo) is long-range and can target Back row
     expect(isLongRangeAction(player, 'skill', 'str_carpet_salvo')).toBe(true);
 
-    // 4) Once all Front-row enemies are destroyed, basic attacks unlock Back row
+    // 4) Once Front-row enemies are destroyed, Middle row becomes exposed
     const frontClearedUnits = unitsHighHp.map((u) =>
       u.side === 'enemy' && u.row === 'front' ? { ...u, hp: 0, alive: false } : u
     );
-    const unlockedTargets = getValidEnemyTargets(
+    const middleTargets = getValidEnemyTargets(
       frontClearedUnits,
       player,
       'attack'
     );
-    expect(unlockedTargets).toHaveLength(3);
-    expect(unlockedTargets.every((u) => u.row === 'back')).toBe(true);
+    expect(middleTargets).toHaveLength(2);
+    expect(middleTargets.every((u) => u.row === 'middle')).toBe(true);
+
+    // 5) Once Middle-row enemies are also destroyed, Back row becomes exposed
+    const frontAndMidCleared = frontClearedUnits.map((u) =>
+      u.side === 'enemy' && u.row === 'middle'
+        ? { ...u, hp: 0, alive: false }
+        : u
+    );
+    const backTargets = getValidEnemyTargets(
+      frontAndMidCleared,
+      player,
+      'attack'
+    );
+    expect(backTargets).toHaveLength(2);
+    expect(backTargets.every((u) => u.row === 'back')).toBe(true);
   });
 
   it('hits only adjacent columns (col - 1, col + 1) in the same formation row on splash attacks', () => {
@@ -2020,28 +2053,59 @@ describe('17. Front/Back Row Targeting, Long-Range Bypass & Adjacent Formation S
       pilot,
       'iron_citadel',
       createSequenceRng([0.2, 0.5, 0.8]),
-      8
+      8,
+      {
+        formation: {
+          rowCapacities: { front: 4, middle: 2, back: 2 },
+          maxUnitsPerSide: 8,
+          rowModifiers: {
+            front: { defensePct: 0.1, damagePct: 0, rangedDamagePct: 0 },
+            middle: { defensePct: 0, damagePct: 0, rangedDamagePct: 0 },
+            back: { defensePct: -0.1, damagePct: 0, rangedDamagePct: 0.1 },
+          },
+        },
+      }
     );
 
-    const units = battle.units.map((u) =>
-      u.isPlayer
-        ? { ...u, sp: 100, derived: { ...u.derived, maxSp: 100 } }
-        : {
-            ...u,
-            hp: 1000,
-            shield: 0,
-            derived: { ...u.derived, maxHp: 1000, dodgeChance: 0 },
-          }
-    );
+    // Put 4 enemies in Front (cols 0..3), 2 in Middle, 2 in Back
+    const enemies = battle.units.filter((u) => u.side === 'enemy');
+    const enemyPlacement = new Map<
+      string,
+      { row: 'front' | 'middle' | 'back'; col: number }
+    >([
+      [enemies[0].id, { row: 'front', col: 0 }],
+      [enemies[1].id, { row: 'front', col: 1 }],
+      [enemies[2].id, { row: 'front', col: 2 }],
+      [enemies[3].id, { row: 'front', col: 3 }],
+      [enemies[4].id, { row: 'middle', col: 0 }],
+      [enemies[5].id, { row: 'middle', col: 1 }],
+      [enemies[6].id, { row: 'back', col: 0 }],
+      [enemies[7].id, { row: 'back', col: 1 }],
+    ]);
 
-    // 8v8 Front row has 4 columns: 0, 1, 2, 3
+    const units = battle.units.map((u) => {
+      const placed = enemyPlacement.get(u.id);
+      if (u.isPlayer) {
+        return { ...u, sp: 100, derived: { ...u.derived, maxSp: 100 } };
+      }
+      return {
+        ...u,
+        ...(placed ? { row: placed.row, formationCol: placed.col } : {}),
+        hp: 1000,
+        shield: 0,
+        derived: { ...u.derived, maxHp: 1000, dodgeChance: 0 },
+      };
+    });
+
     const enemyFront = units
       .filter((u) => u.side === 'enemy' && u.row === 'front')
       .sort((a, b) => (a.formationCol ?? 0) - (b.formationCol ?? 0));
-    const enemyBack = units.filter((u) => u.side === 'enemy' && u.row === 'back');
+    const enemyOtherRows = units.filter(
+      (u) => u.side === 'enemy' && u.row !== 'front'
+    );
     expect(enemyFront).toHaveLength(4);
 
-    // Adjacent to col 1 -> col 0 and col 2 ONLY (not col 3, not Back row)
+    // Adjacent to col 1 -> col 0 and col 2 ONLY (not col 3, not Middle/Back row)
     const adjToCol1 = getAdjacentUnits(units, enemyFront[1]);
     expect(adjToCol1.map((u) => u.id).sort()).toEqual(
       [enemyFront[0].id, enemyFront[2].id].sort()
@@ -2051,7 +2115,7 @@ describe('17. Front/Back Row Targeting, Long-Range Bypass & Adjacent Formation S
     const adjToCol0 = getAdjacentUnits(units, enemyFront[0]);
     expect(adjToCol0.map((u) => u.id)).toEqual([enemyFront[1].id]);
 
-    // Casting splash_attack skill (str_carpet_salvo) on col 1 hits col 1 + col 0 + col 2, NOT col 3 or Back row
+    // Casting splash_attack skill (str_carpet_salvo) on col 1 hits col 1 + col 0 + col 2, NOT col 3 or Middle/Back
     const splashRes = resolveUnitAction(
       units,
       'ally_player',
@@ -2067,10 +2131,10 @@ describe('17. Front/Back Row Targeting, Long-Range Bypass & Adjacent Formation S
     expect(after.find((u) => u.id === enemyFront[1].id)!.hp).toBeLessThan(1000);
     expect(after.find((u) => u.id === enemyFront[0].id)!.hp).toBeLessThan(1000);
     expect(after.find((u) => u.id === enemyFront[2].id)!.hp).toBeLessThan(1000);
-    // Col 3 (non-adjacent) and all Back-row enemies must remain untouched
+    // Col 3 (non-adjacent) and all Middle/Back-row enemies must remain untouched
     expect(after.find((u) => u.id === enemyFront[3].id)!.hp).toBe(1000);
-    for (const backUnit of enemyBack) {
-      expect(after.find((u) => u.id === backUnit.id)!.hp).toBe(1000);
+    for (const otherUnit of enemyOtherRows) {
+      expect(after.find((u) => u.id === otherUnit.id)!.hp).toBe(1000);
     }
   });
 });

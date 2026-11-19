@@ -33,6 +33,7 @@ import { useGameStore } from '../store/useGameStore';
 import type { MechClassId, StatBlock, StatKey } from '../types/game';
 import { soundFx } from '../utils/sound';
 import { FighterSvg } from './FighterSvg';
+import { FormationEditor } from './FormationEditor';
 import { ClassIcon } from './GameIcons';
 import { StatBar } from './StatBar';
 
@@ -400,6 +401,9 @@ export function GarageView() {
           })}
         </div>
       </section>
+
+      {/* 3-ROW SQUAD FORMATION EDITOR */}
+      <FormationEditor />
 
       {/* ACTIVE GEAR STAT ALLOCATION PANEL */}
       <section className="rounded-lg border border-slate-800/90 bg-[#0C121D]/95 p-4 space-y-4">

@@ -1191,13 +1191,15 @@ function pickEnemyBySelector(
 
     case 'front_row_first': {
       const front = enemies.filter((e) => e.row === 'front');
-      const pool = front.length > 0 ? front : enemies;
+      const middle = enemies.filter((e) => e.row === 'middle');
+      const pool = front.length > 0 ? front : middle.length > 0 ? middle : enemies;
       return [...pool].sort((a, b) => a.hp - b.hp || byIdTie(a, b))[0];
     }
 
     case 'back_row_first': {
       const back = enemies.filter((e) => e.row === 'back');
-      const pool = back.length > 0 ? back : enemies;
+      const middle = enemies.filter((e) => e.row === 'middle');
+      const pool = back.length > 0 ? back : middle.length > 0 ? middle : enemies;
       return [...pool].sort((a, b) => a.hp - b.hp || byIdTie(a, b))[0];
     }
 

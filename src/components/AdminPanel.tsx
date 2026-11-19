@@ -22,6 +22,11 @@ import {
 } from 'lucide-react';
 import { BALANCE_CONFIG } from '../data/balance';
 import { MECH_CLASS_LIST } from '../data/classes';
+import {
+  cloneFormationConfig,
+  DEFAULT_FORMATION_CONFIG,
+  FORMATION_ROWS,
+} from '../data/formationConfig';
 import { EQUIPMENT_SLOTS, ITEM_TEMPLATES } from '../data/items';
 import { SECTORS_CATALOG } from '../data/maps';
 import {
@@ -34,6 +39,7 @@ import {
 import { ENABLE_ADMIN_CP, useGameStore } from '../store/useGameStore';
 import type {
   BattleSize,
+  CombatRow,
   EquipmentSlot,
   ItemRarity,
   MechClassId,
@@ -1337,68 +1343,176 @@ export function AdminPanel() {
 
           {/* 7. FORMATION TAB */}
           {tab === 'formation' && (
-            <div className="p-4 rounded-lg border border-slate-800 bg-[#0D1422] grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <label className="space-y-1 block">
-                <span className="text-xs text-slate-300 block">
-                  {t('admin.formationFrontCap')} (1–8)
-                </span>
-                <input
-                  type="number"
-                  min={1}
-                  max={8}
-                  value={adminConfig.formationFrontCapacity}
-                  onChange={(e) =>
-                    adminUpdateConfig({
-                      formationFrontCapacity: Math.max(
-                        1,
-                        Math.min(8, Number(e.target.value) || 4)
-                      ),
-                    })
-                  }
-                  className="w-full h-9 px-2.5 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
-                />
-              </label>
+            <div className="space-y-4">
+              <div className="p-4 rounded-lg border border-slate-800 bg-[#0D1422] space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {(
+                    [
+                      ['front', 'admin.formationFrontCap'],
+                      ['middle', 'admin.formationMiddleCap'],
+                      ['back', 'admin.formationBackCap'],
+                    ] as const
+                  ).map(([row, labelKey]) => (
+                    <label key={row} className="space-y-1 block">
+                      <span className="text-xs text-slate-300 block">
+                        {t(labelKey)} (0–8)
+                      </span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={8}
+                        value={adminConfig.formation.rowCapacities[row]}
+                        onChange={(e) => {
+                          const nextCap = Math.max(
+                            0,
+                            Math.min(8, Math.floor(Number(e.target.value) || 0))
+                          );
+                          const next = cloneFormationConfig(
+                            adminConfig.formation
+                          );
+                          next.rowCapacities[row] = nextCap;
+                          adminUpdateConfig({ formation: next });
+                        }}
+                        className="w-full h-9 px-2.5 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                      />
+                    </label>
+                  ))}
 
-              <label className="space-y-1 block">
-                <span className="text-xs text-slate-300 block">
-                  {t('admin.formationBackCap')} (1–8)
-                </span>
-                <input
-                  type="number"
-                  min={1}
-                  max={8}
-                  value={adminConfig.formationBackCapacity}
-                  onChange={(e) =>
-                    adminUpdateConfig({
-                      formationBackCapacity: Math.max(
-                        1,
-                        Math.min(8, Number(e.target.value) || 4)
-                      ),
-                    })
-                  }
-                  className="w-full h-9 px-2.5 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
-                />
-              </label>
+                  <label className="space-y-1 block">
+                    <span className="text-xs text-slate-300 block">
+                      {t('admin.formationMaxPerSide')} (1–8)
+                    </span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={8}
+                      value={adminConfig.formation.maxUnitsPerSide}
+                      onChange={(e) => {
+                        const nextMax = Math.max(
+                          1,
+                          Math.min(8, Math.floor(Number(e.target.value) || 1))
+                        );
+                        const next = cloneFormationConfig(adminConfig.formation);
+                        next.maxUnitsPerSide = nextMax;
+                        adminUpdateConfig({ formation: next });
+                      }}
+                      className="w-full h-9 px-2.5 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                    />
+                  </label>
+                </div>
 
-              <label className="space-y-1 block">
-                <span className="text-xs text-slate-300 block">
-                  {t('admin.formationBackRed')} (0–85%)
-                </span>
-                <input
-                  type="number"
-                  min={0}
-                  max={85}
-                  value={Math.round(adminConfig.backRowDamageReduction * 100)}
-                  onChange={(e) =>
-                    adminUpdateConfig({
-                      backRowDamageReduction:
-                        Math.max(0, Math.min(85, Number(e.target.value) || 0)) /
-                        100,
-                    })
-                  }
-                  className="w-full h-9 px-2.5 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
-                />
-              </label>
+                {/* Per-Row Stat Modifiers */}
+                <div className="pt-3 border-t border-slate-800 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-amber-300">
+                      {t('admin.formationModifiersTitle')}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        adminUpdateConfig({
+                          formation: cloneFormationConfig(
+                            DEFAULT_FORMATION_CONFIG
+                          ),
+                        })
+                      }
+                      className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-xs font-semibold cursor-pointer"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>{t('admin.formationResetDefaults')}</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {FORMATION_ROWS.map((row: CombatRow) => {
+                      const mod = adminConfig.formation.rowModifiers[row];
+                      const rowLabel =
+                        row === 'front'
+                          ? t('formation.row.front')
+                          : row === 'middle'
+                          ? t('formation.row.middle')
+                          : t('formation.row.back');
+
+                      const updateMod = (
+                        field: 'defensePct' | 'damagePct' | 'rangedDamagePct',
+                        rawPct: number
+                      ) => {
+                        const clamped = Math.max(-80, Math.min(100, rawPct));
+                        const next = cloneFormationConfig(adminConfig.formation);
+                        next.rowModifiers[row][field] = clamped / 100;
+                        adminUpdateConfig({ formation: next });
+                      };
+
+                      return (
+                        <div
+                          key={row}
+                          className="p-3 rounded border border-slate-800 bg-[#080C14] space-y-2"
+                        >
+                          <div className="text-xs font-bold text-slate-200">
+                            {rowLabel}
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            <label className="space-y-1 block">
+                              <span className="text-[11px] text-slate-400 block">
+                                {t('admin.formationDefMod')}
+                              </span>
+                              <input
+                                type="number"
+                                min={-80}
+                                max={100}
+                                value={Math.round(mod.defensePct * 100)}
+                                onChange={(e) =>
+                                  updateMod(
+                                    'defensePct',
+                                    Number(e.target.value) || 0
+                                  )
+                                }
+                                className="w-full h-8 px-2 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                              />
+                            </label>
+                            <label className="space-y-1 block">
+                              <span className="text-[11px] text-slate-400 block">
+                                {t('admin.formationDmgMod')}
+                              </span>
+                              <input
+                                type="number"
+                                min={-80}
+                                max={100}
+                                value={Math.round(mod.damagePct * 100)}
+                                onChange={(e) =>
+                                  updateMod(
+                                    'damagePct',
+                                    Number(e.target.value) || 0
+                                  )
+                                }
+                                className="w-full h-8 px-2 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                              />
+                            </label>
+                            <label className="space-y-1 block">
+                              <span className="text-[11px] text-slate-400 block">
+                                {t('admin.formationRangedDmgMod')}
+                              </span>
+                              <input
+                                type="number"
+                                min={-80}
+                                max={100}
+                                value={Math.round(mod.rangedDamagePct * 100)}
+                                onChange={(e) =>
+                                  updateMod(
+                                    'rangedDamagePct',
+                                    Number(e.target.value) || 0
+                                  )
+                                }
+                                className="w-full h-8 px-2 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 

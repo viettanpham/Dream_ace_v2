@@ -354,6 +354,7 @@ export function sumGearSpecialTraits(
   let splashPct = 0;
   let spRegenPerTurn = 0;
   let evasionMod = 0;
+  let longRange = false;
 
   for (const slot of EQUIPMENT_SLOTS) {
     const inst = equippedMap[slot];
@@ -364,6 +365,7 @@ export function sumGearSpecialTraits(
     splashPct += tr.splashPct ?? 0;
     spRegenPerTurn += tr.spRegenPerTurn ?? 0;
     evasionMod += tr.evasionMod ?? 0;
+    if (tr.longRange) longRange = true;
   }
 
   return {
@@ -372,6 +374,7 @@ export function sumGearSpecialTraits(
     splashPct,
     spRegenPerTurn,
     evasionMod,
+    longRange,
   };
 }
 

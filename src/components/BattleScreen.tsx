@@ -897,7 +897,7 @@ export function BattleScreen() {
                 </span>
               </div>
 
-              {(['front', 'back'] as const).map((row) => {
+              {(['front', 'middle', 'back'] as const).map((row) => {
                 const rowUnits = allies
                   .filter((u) => u.row === row)
                   .sort((a, b) => (a.formationCol ?? 0) - (b.formationCol ?? 0));
@@ -905,7 +905,11 @@ export function BattleScreen() {
                 return (
                   <div key={row} className="space-y-1">
                     <div className="text-[10px] font-mono-nums font-bold uppercase tracking-wider text-sky-400/80 px-1">
-                      {row === 'front' ? t('common.frontRow') : t('common.backRow')}
+                      {row === 'front'
+                        ? t('common.frontRow')
+                        : row === 'middle'
+                        ? t('common.middleRow')
+                        : t('common.backRow')}
                     </div>
                     <div className={`grid ${compactGridCols} gap-2`}>
                       {rowUnits.map((u) => renderCardUnit(u, true))}
@@ -932,7 +936,7 @@ export function BattleScreen() {
                 </span>
               </div>
 
-              {(['front', 'back'] as const).map((row) => {
+              {(['front', 'middle', 'back'] as const).map((row) => {
                 const rowUnits = enemies
                   .filter((u) => u.row === row)
                   .sort((a, b) => (a.formationCol ?? 0) - (b.formationCol ?? 0));
@@ -940,7 +944,11 @@ export function BattleScreen() {
                 return (
                   <div key={row} className="space-y-1">
                     <div className="text-[10px] font-mono-nums font-bold uppercase tracking-wider text-red-400/80 px-1">
-                      {row === 'front' ? t('common.frontRow') : t('common.backRow')}
+                      {row === 'front'
+                        ? t('common.frontRow')
+                        : row === 'middle'
+                        ? t('common.middleRow')
+                        : t('common.backRow')}
                     </div>
                     <div className={`grid ${compactGridCols} gap-2`}>
                       {rowUnits.map((u) => renderCardUnit(u, true))}

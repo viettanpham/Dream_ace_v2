@@ -18,6 +18,7 @@ import type {
   StatBlock,
 } from '../types/game';
 import { sumGearEquipmentStats, sumGearSpecialTraits } from './equipment';
+import { createDefaultSquadFormation } from './formation';
 import { type GearPassiveBonuses, getGearPassiveBonuses } from './skills';
 import { createDefaultTacticsForClass } from './tactics';
 
@@ -255,6 +256,8 @@ export function createDefaultPilotAccount(
     hiredWingman: null,
     engineerShieldBoost: false,
     activeBonusMission: null,
+    squadFormation: createDefaultSquadFormation(name, starterClassId),
+    formationCustomized: false,
   };
 }
 

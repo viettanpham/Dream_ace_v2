@@ -35,7 +35,13 @@ import type {
   ShopItemListing,
   WpMarketOffer,
 } from '../types/game';
+import { cloneFormationConfig, DEFAULT_FORMATION_CONFIG } from '../data/formationConfig';
 import { generateItemInstance } from './equipment';
+import {
+  createDefaultSquadFormation,
+  migrateLegacySquadFormation,
+  sanitizeFormationConfig,
+} from './formation';
 import { getDefaultInventoryFilterState } from './inventory';
 import { DEFAULT_QUICK_SELL_CONFIG } from './quickSell';
 import {
@@ -48,7 +54,7 @@ import { isSkillAllowedForClass, MAX_ACTIVE_SKILL_BAR } from './skills';
 import { createDefaultGearUnit, createDefaultPilotAccount } from './stats';
 import { createDefaultTacticsForClass, sanitizeGearTactics } from './tactics';
 
-export const CURRENT_SAVE_VERSION = 7;
+export const CURRENT_SAVE_VERSION = 8;
 
 export interface PersistedCampaignState {
   pilot: PilotAccount;
@@ -93,9 +99,7 @@ export function createDefaultAdminConfig(): AdminConfig {
     shopMaxStock: SHOP_STOCK_CONFIG.maxStockPerCategory,
     shopRarityWeights: { ...DEFAULT_ADMIN_SHOP_RARITY_WEIGHTS },
     shopPriceMultiplier: 1.0,
-    formationFrontCapacity: 4,
-    formationBackCapacity: 4,
-    backRowDamageReduction: BALANCE_CONFIG.backRowDamageReduction,
+    formation: cloneFormationConfig(DEFAULT_FORMATION_CONFIG),
     showRawI18nKeys: false,
   };
 }
@@ -370,20 +374,7 @@ export function migrateSaveData(
       rawAdmin.shopPriceMultiplier > 0
         ? rawAdmin.shopPriceMultiplier
         : 1.0,
-    formationFrontCapacity: Math.max(
-      1,
-      Math.min(8, Math.floor(Number(rawAdmin.formationFrontCapacity) || 4))
-    ),
-    formationBackCapacity: Math.max(
-      1,
-      Math.min(8, Math.floor(Number(rawAdmin.formationBackCapacity) || 4))
-    ),
-    backRowDamageReduction:
-      typeof rawAdmin.backRowDamageReduction === 'number' &&
-      rawAdmin.backRowDamageReduction >= 0 &&
-      rawAdmin.backRowDamageReduction <= 0.85
-        ? rawAdmin.backRowDamageReduction
-        : BALANCE_CONFIG.backRowDamageReduction,
+    formation: sanitizeFormationConfig(rawAdmin as Record<string, unknown>),
     showRawI18nKeys: Boolean(rawAdmin.showRawI18nKeys),
   };
 
@@ -578,11 +569,24 @@ export function migrateSaveData(
         )
       : [];
 
+    const pilotNameClean =
+      typeof rawPilot.name === 'string' && rawPilot.name.trim().length > 0
+        ? rawPilot.name.slice(0, 18)
+        : 'Vance';
+    const rawLegacyFormation =
+      rawPilot.squadFormation ??
+      (rawPilot as Record<string, unknown>).formation ??
+      (raw as Record<string, unknown>).formation;
+    const { squadFormation, formationCustomized } = migrateLegacySquadFormation(
+      rawLegacyFormation,
+      pilotNameClean,
+      finalActiveGearId,
+      adminConfig.formation,
+      rawPilot.formationCustomized
+    );
+
     const migratedPilot: PilotAccount = {
-      name:
-        typeof rawPilot.name === 'string' && rawPilot.name.trim().length > 0
-          ? rawPilot.name.slice(0, 18)
-          : 'Vance',
+      name: pilotNameClean,
       credits: Math.max(0, Number(rawPilot.credits) || 0),
       warPoints: Math.max(0, Number(rawPilot.warPoints) || 0),
       ownedOpeningCards,
@@ -605,6 +609,8 @@ export function migrateSaveData(
         0,
         Number(rawPilot.activeEnchantBonusPct) || 0
       ),
+      squadFormation,
+      formationCustomized,
     };
 
     const rawWpOffers: WpMarketOffer[] = Array.isArray(raw.wpMarketOffers)
@@ -756,6 +762,15 @@ export function migrateSaveData(
     consumables: [],
     activeExpBoostBattles: 0,
     activeEnchantBonusPct: 0,
+    squadFormation: createDefaultSquadFormation(
+      typeof legacyPlayer.name === 'string' &&
+        legacyPlayer.name.trim().length > 0
+        ? legacyPlayer.name.slice(0, 18)
+        : 'Vance',
+      legacyClass,
+      adminConfig.formation
+    ),
+    formationCustomized: false,
   };
 
   return {

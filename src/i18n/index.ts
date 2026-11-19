@@ -376,6 +376,9 @@ export function formatItemTraitsList(
       })
     );
   }
+  if (tr.longRange) {
+    list.push(translate(lang, 'trait.longRange'));
+  }
   return list;
 }
 

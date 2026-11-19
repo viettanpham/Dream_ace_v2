@@ -268,10 +268,18 @@ describe('Inventory Engine (filter, sort, usability, upgrade, cheats)', () => {
     expect(descPinned[2].item.instanceId).toBe('item_latest_diff_ts');
   });
 
-  it('detects active cheats in AdminConfig including formationBackCapacity', () => {
+  it('detects active cheats in AdminConfig including custom 3-row formation settings', () => {
     const clean = createDefaultAdminConfig();
     expect(isAnyCheatActive(clean)).toBe(false);
-    expect(isAnyCheatActive({ ...clean, formationBackCapacity: 2 })).toBe(true);
+    expect(
+      isAnyCheatActive({
+        ...clean,
+        formation: {
+          ...clean.formation,
+          rowCapacities: { front: 4, middle: 2, back: 2 },
+        },
+      })
+    ).toBe(true);
     expect(isAnyCheatActive({ ...clean, godMode: true })).toBe(true);
   });
 });
@@ -582,7 +590,7 @@ describe('Admin Reducers & Formation Capacity Wiring', () => {
     useGameStore.getState().resetCampaign();
   });
 
-  it('respects both formationFrontCapacity and formationBackCapacity in createInitialBattleState', () => {
+  it('respects 3-row formation capacities and maxUnitsPerSide in createInitialBattleState', () => {
     const pilot = createDefaultPilotAccount('Tactician', 'striker');
     pilot.hiredWingman = {
       sourceSectorId: 'aegis_relay',
@@ -591,29 +599,48 @@ describe('Admin Reducers & Formation Capacity Wiring', () => {
       bonusLevel: 2,
     };
 
-    // 4v4 with backCap = 1, frontCap = 4 -> 3 front + 1 back (plus merc in front since back is full)
-    const b1 = createInitialBattleState(pilot, 'border_outpost', createDeterministicRng(9), 4, {
-      formationFrontCapacity: 4,
-      formationBackCapacity: 1,
-    });
-    const baseAllies = b1.units.filter(
-      (u) => u.side === 'ally' && u.id !== 'ally_hired_merc'
-    );
-    const enemies1 = b1.units.filter((u) => u.side === 'enemy');
-    expect(baseAllies.filter((u) => u.row === 'front')).toHaveLength(3);
-    expect(baseAllies.filter((u) => u.row === 'back')).toHaveLength(1);
-    expect(enemies1.filter((u) => u.row === 'front')).toHaveLength(3);
-    expect(enemies1.filter((u) => u.row === 'back')).toHaveLength(1);
-    expect(b1.units.find((u) => u.id === 'ally_hired_merc')?.row).toBe('front');
+    const customFormation1 = {
+      ...createDefaultAdminConfig().formation,
+      rowCapacities: { front: 2, middle: 2, back: 1 },
+      maxUnitsPerSide: 8,
+    };
 
-    // 6v6 with backCap = 2, frontCap = 4 -> 4 front + 2 back
-    const b2 = createInitialBattleState(pilot, 'border_outpost', createDeterministicRng(9), 6, {
-      formationFrontCapacity: 4,
-      formationBackCapacity: 2,
-    });
+    // 4v4 with capacities front:2, middle:2, back:1 -> neither side exceeds any row capacity
+    const b1 = createInitialBattleState(
+      pilot,
+      'border_outpost',
+      createDeterministicRng(9),
+      4,
+      { formation: customFormation1 }
+    );
+    const allies1 = b1.units.filter((u) => u.side === 'ally');
+    const enemies1 = b1.units.filter((u) => u.side === 'enemy');
+    expect(allies1.filter((u) => u.row === 'front').length).toBeLessThanOrEqual(2);
+    expect(allies1.filter((u) => u.row === 'middle').length).toBeLessThanOrEqual(2);
+    expect(allies1.filter((u) => u.row === 'back').length).toBeLessThanOrEqual(1);
+    expect(enemies1.filter((u) => u.row === 'front').length).toBeLessThanOrEqual(2);
+    expect(enemies1.filter((u) => u.row === 'middle').length).toBeLessThanOrEqual(2);
+    expect(enemies1.filter((u) => u.row === 'back').length).toBeLessThanOrEqual(1);
+    expect(b1.units.some((u) => u.id === 'ally_hired_merc')).toBe(true);
+
+    // 6v6 capped to maxUnitsPerSide = 5 with capacities front:2, middle:2, back:1
+    const customFormation2 = {
+      ...createDefaultAdminConfig().formation,
+      rowCapacities: { front: 2, middle: 2, back: 1 },
+      maxUnitsPerSide: 5,
+    };
+    const b2 = createInitialBattleState(
+      pilot,
+      'border_outpost',
+      createDeterministicRng(9),
+      6,
+      { formation: customFormation2 }
+    );
     const enemies2 = b2.units.filter((u) => u.side === 'enemy');
-    expect(enemies2.filter((u) => u.row === 'front')).toHaveLength(4);
-    expect(enemies2.filter((u) => u.row === 'back')).toHaveLength(2);
+    expect(enemies2).toHaveLength(5);
+    expect(enemies2.filter((u) => u.row === 'front')).toHaveLength(2);
+    expect(enemies2.filter((u) => u.row === 'middle')).toHaveLength(2);
+    expect(enemies2.filter((u) => u.row === 'back')).toHaveLength(1);
   });
 
   it('exercises Admin CP store reducers (Pilot, Items, Shop, Skills, Battle, Campaign, System)', () => {
@@ -704,11 +731,18 @@ describe('Admin Reducers & Formation Capacity Wiring', () => {
     store.adminUnlockAllSectors();
 
     // Config + Export/Import JSON round-trip
+    const nextFormation = {
+      ...useGameStore.getState().adminConfig.formation,
+      rowCapacities: { front: 2, middle: 3, back: 3 },
+    };
     store.adminUpdateConfig({
       godMode: true,
-      formationBackCapacity: 3,
+      formation: nextFormation,
     });
     expect(useGameStore.getState().adminConfig.godMode).toBe(true);
+    expect(
+      useGameStore.getState().adminConfig.formation.rowCapacities.back
+    ).toBe(3);
     const exported = useGameStore.getState().adminExportSaveJson();
     store.adminSetCredits(1);
     const imported = useGameStore.getState().adminImportSaveJson(exported);

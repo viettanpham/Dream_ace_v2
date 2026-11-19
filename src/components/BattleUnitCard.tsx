@@ -451,9 +451,11 @@ export function BattleUnitCard({
                     {t('battle.structureTag')}
                   </span>
                 )}
-                {!compact && unit.row === 'back' && unit.alive && (
+                {!compact && unit.row !== 'front' && unit.alive && (
                   <span className="px-1 py-0.5 rounded bg-sky-500/15 border border-sky-400/40 text-[9px] font-mono-nums font-semibold text-sky-300 shrink-0">
-                    {t('common.backRow')}
+                    {unit.row === 'middle'
+                      ? t('common.middleRow')
+                      : t('common.backRow')}
                   </span>
                 )}
               </div>
