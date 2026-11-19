@@ -9,6 +9,7 @@ import {
   calculateBattleRewards,
   chooseAiDecision,
   createInitialBattleState,
+  createRoundHpSnapshot,
   getValidEnemyTargets,
   reconcileRemainingTurnOrder,
   resolveUnitAction,
@@ -25,6 +26,16 @@ import {
   unequipInstanceFromAnyGear,
   unequipSlotOnGear,
 } from '../engine/equipment';
+import {
+  acceptBaseBonusMission,
+  advanceCampaignMonth,
+  applyBaseEngineerBoost,
+  applyBattleBaseConsequences,
+  type BaseActionResult,
+  hirePilotForNextBattle,
+  type MonthAdvanceSummary,
+  startBaseRepair,
+} from '../engine/mapWorld';
 import {
   createDefaultAdminConfig,
   createFreshCampaignState,
@@ -47,8 +58,11 @@ import {
 import {
   chooseAction,
   createBlankTacticsRule,
+  createDefaultSimpleTactics,
   createPresetTactics,
+  createSimplePresetConfig,
   evaluateAutoSafety,
+  generateTacticsFromSimple,
   sanitizeGearTactics,
   shouldStopAutoRepeat,
 } from '../engine/tactics';
@@ -60,6 +74,8 @@ import type {
   AutoSafetyConfig,
   AutoStopReason,
   BaseTab,
+  BattleEvent,
+  BattleRoundSnapshot,
   BattleSpeed,
   BattleState,
   BattleViewMode,
@@ -75,6 +91,8 @@ import type {
   MechClassId,
   PilotAccount,
   ScreenState,
+  SimpleTacticsConfig,
+  SimpleTacticsPresetId,
   SkillValidationResult,
   StatBlock,
   TacticsPresetId,
@@ -127,6 +145,11 @@ interface GameStoreState {
   commitStatAllocations: (pending: StatBlock) => void;
   resetStatAllocations: () => void;
   selectSector: (sectorId: string) => void;
+  repairBase: (sectorId: string) => BaseActionResult;
+  advanceMonth: () => MonthAdvanceSummary;
+  hireWingmanAtBase: (sectorId: string, classId?: MechClassId) => BaseActionResult;
+  acceptMissionAtBase: (sectorId: string) => BaseActionResult;
+  useEngineerAtBase: (sectorId: string) => BaseActionResult;
 
   // Gear Skill System actions (engine-enforced class locks & per-Gear bars)
   learnOrUpgradeSkill: (
@@ -145,6 +168,9 @@ interface GameStoreState {
   toggleAutoBattle: () => void;
   setTacticsModalOpen: (open: boolean) => void;
   setActiveGearTactics: (tactics: GearTacticsProfile) => void;
+  applySimpleTactics: (patch: Partial<SimpleTacticsConfig>) => void;
+  applySimpleTacticsPreset: (presetId: SimpleTacticsPresetId) => void;
+  resetTacticsToSimple: () => void;
   loadTacticsPreset: (presetId: TacticsPresetId) => void;
   addTacticsRule: () => void;
   updateTacticsRule: (ruleId: string, patch: Partial<TacticsRule>) => void;
@@ -273,6 +299,28 @@ function playCue(
   }
 }
 
+function appendRoundSnapshot(
+  snapshots: BattleRoundSnapshot[],
+  round: number,
+  units: CombatUnit[]
+): BattleRoundSnapshot[] {
+  const snap = createRoundHpSnapshot(round, units);
+  const idx = snapshots.findIndex((s) => s.round === round);
+  if (idx >= 0) {
+    const next = [...snapshots];
+    next[idx] = snap;
+    return next;
+  }
+  return [...snapshots, snap];
+}
+
+function stampTurnEvents(
+  events: BattleEvent[],
+  turnNumber: number
+): BattleEvent[] {
+  return events.map((e) => ({ ...e, turn: turnNumber }));
+}
+
 function finalizeBattleOutcome(
   state: GameStoreState,
   battle: BattleState,
@@ -282,7 +330,9 @@ function finalizeBattleOutcome(
   extraLog = battle.log,
   extraPopups = battle.popups,
   extraFx = battle.fxEvents,
-  extraExploded = battle.explodedUnitIds
+  extraExploded = battle.explodedUnitIds,
+  extraEvents = battle.events,
+  extraTurnCounter = battle.turnCounter
 ): Partial<GameStoreState> {
   const deployedGearId = battle.deployedGearId;
   const deployedGear = state.pilot.gears[deployedGearId];
@@ -324,7 +374,7 @@ function finalizeBattleOutcome(
     }
   }
 
-  const nextPilot: PilotAccount = {
+  const basePilotBeforeConsequences: PilotAccount = {
     ...state.pilot,
     credits: state.pilot.credits + rewards.creditsGained,
     warPoints: state.pilot.warPoints + rewards.warPointsGained,
@@ -336,6 +386,18 @@ function finalizeBattleOutcome(
     unlockedSectorIds: nextUnlockedSectors,
     capturedSectorIds: nextCapturedSectors,
   };
+
+  // Freshly captured bases start Damaged; repelled raids clear alert; hired wingman/engineer boost consumed; bonus missions paid
+  const baseConseq = applyBattleBaseConsequences(
+    basePilotBeforeConsequences,
+    battle.sectorId,
+    won
+  );
+  // Advance campaign calendar 1 month after each completed non-retreat sortie
+  const monthStep = retreated
+    ? { pilot: baseConseq.pilot }
+    : advanceCampaignMonth(baseConseq.pilot);
+  const nextPilot: PilotAccount = monthStep.pilot;
 
   // Auto-refresh randomized shop stock after every battle
   const refreshedShopStock = generateShopStock(
@@ -386,7 +448,14 @@ function finalizeBattleOutcome(
     battle: {
       ...battle,
       units: updatedUnits,
+      turnCounter: extraTurnCounter,
       log: extraLog,
+      events: extraEvents,
+      roundSnapshots: appendRoundSnapshot(
+        battle.roundSnapshots,
+        battle.round,
+        updatedUnits
+      ),
       popups: extraPopups,
       fxEvents: extraFx,
       explodedUnitIds: extraExploded,
@@ -702,6 +771,63 @@ export const useGameStore = create<GameStoreState>()(
         });
       },
 
+      applySimpleTactics: (patch) => {
+        const state = get();
+        const id = state.pilot.activeGearId;
+        const gear = state.pilot.gears[id];
+        const currentSimple =
+          gear.tactics.simple ??
+          createDefaultSimpleTactics(gear.classId, gear.equippedSkillBar);
+        const nextSimple: SimpleTacticsConfig = {
+          ...currentSimple,
+          ...patch,
+        };
+        const generated = generateTacticsFromSimple(
+          gear.classId,
+          nextSimple,
+          gear.equippedSkillBar,
+          gear.tactics.safety
+        );
+        soundFx.playClick();
+        get().setActiveGearTactics(generated);
+      },
+
+      applySimpleTacticsPreset: (presetId) => {
+        const state = get();
+        const id = state.pilot.activeGearId;
+        const gear = state.pilot.gears[id];
+        const presetSimple = createSimplePresetConfig(
+          presetId,
+          gear.classId,
+          gear.equippedSkillBar
+        );
+        const generated = generateTacticsFromSimple(
+          gear.classId,
+          presetSimple,
+          gear.equippedSkillBar,
+          gear.tactics.safety
+        );
+        soundFx.playConfirm();
+        get().setActiveGearTactics(generated);
+      },
+
+      resetTacticsToSimple: () => {
+        const state = get();
+        const id = state.pilot.activeGearId;
+        const gear = state.pilot.gears[id];
+        const baseSimple =
+          gear.tactics.simple ??
+          createDefaultSimpleTactics(gear.classId, gear.equippedSkillBar);
+        const generated = generateTacticsFromSimple(
+          gear.classId,
+          baseSimple,
+          gear.equippedSkillBar,
+          gear.tactics.safety
+        );
+        soundFx.playConfirm();
+        get().setActiveGearTactics(generated);
+      },
+
       loadTacticsPreset: (presetId) => {
         const state = get();
         const id = state.pilot.activeGearId;
@@ -712,7 +838,13 @@ export const useGameStore = create<GameStoreState>()(
           presetId,
           gear.equippedSkillBar
         );
-        get().setActiveGearTactics(preset);
+        get().setActiveGearTactics({
+          ...preset,
+          mode: 'custom',
+          simple:
+            gear.tactics.simple ??
+            createDefaultSimpleTactics(gear.classId, gear.equippedSkillBar),
+        });
       },
 
       addTacticsRule: () => {
@@ -723,6 +855,7 @@ export const useGameStore = create<GameStoreState>()(
         soundFx.playClick();
         get().setActiveGearTactics({
           ...gear.tactics,
+          mode: 'custom',
           rules: [...gear.tactics.rules, createBlankTacticsRule()],
         });
       },
@@ -736,6 +869,7 @@ export const useGameStore = create<GameStoreState>()(
         );
         get().setActiveGearTactics({
           ...gear.tactics,
+          mode: 'custom',
           rules: nextRules,
         });
       },
@@ -747,6 +881,7 @@ export const useGameStore = create<GameStoreState>()(
         soundFx.playClick();
         get().setActiveGearTactics({
           ...gear.tactics,
+          mode: 'custom',
           rules: gear.tactics.rules.filter((r) => r.id !== ruleId),
         });
       },
@@ -770,6 +905,7 @@ export const useGameStore = create<GameStoreState>()(
         soundFx.playClick();
         get().setActiveGearTactics({
           ...gear.tactics,
+          mode: 'custom',
           rules,
         });
       },
@@ -864,6 +1000,54 @@ export const useGameStore = create<GameStoreState>()(
         if (!state.pilot.unlockedSectorIds.includes(sectorId)) return;
         soundFx.playClick();
         set({ selectedSectorId: sectorId, hasSaveData: true });
+      },
+
+      repairBase: (sectorId) => {
+        const state = get();
+        const res = startBaseRepair(state.pilot, sectorId);
+        if (res.ok) {
+          soundFx.playConfirm();
+          set({ pilot: res.pilot, hasSaveData: true });
+        }
+        return res;
+      },
+
+      advanceMonth: () => {
+        const state = get();
+        const summary = advanceCampaignMonth(state.pilot);
+        soundFx.playConfirm();
+        set({ pilot: summary.pilot, hasSaveData: true });
+        return summary;
+      },
+
+      hireWingmanAtBase: (sectorId, classId = 'interceptor') => {
+        const state = get();
+        const res = hirePilotForNextBattle(state.pilot, sectorId, classId);
+        if (res.ok) {
+          soundFx.playConfirm();
+          set({ pilot: res.pilot, hasSaveData: true });
+        }
+        return res;
+      },
+
+      acceptMissionAtBase: (sectorId) => {
+        const state = get();
+        const res = acceptBaseBonusMission(state.pilot, sectorId);
+        if (res.ok) {
+          soundFx.playConfirm();
+          set({ pilot: res.pilot, hasSaveData: true });
+        }
+        return res;
+      },
+
+      useEngineerAtBase: (sectorId) => {
+        const state = get();
+        const res = applyBaseEngineerBoost(state.pilot, sectorId);
+        if (res.ok) {
+          soundFx.playConfirm();
+          set({ pilot: res.pilot, hasSaveData: true });
+        }
+        return res;
       },
 
       equipItem: (instanceId) => {
@@ -1137,6 +1321,11 @@ export const useGameStore = create<GameStoreState>()(
           (u) => u.side === 'ally' && u.alive
         );
 
+        const nextTurnCounter = battle.turnCounter + 1;
+        const nextEvents = [
+          ...battle.events,
+          ...stampTurnEvents(resolution.events, nextTurnCounter),
+        ].slice(-5000);
         const enrichedLogs = enrichLogEntries(resolution.logEntries, activeUnit);
         const nextLog = [...battle.log, ...enrichedLogs].slice(-80);
         const nextPopups = bypassFx
@@ -1163,7 +1352,9 @@ export const useGameStore = create<GameStoreState>()(
               nextLog,
               nextPopups,
               nextFx,
-              nextExploded
+              nextExploded,
+              nextEvents,
+              nextTurnCounter
             )
           );
           return;
@@ -1183,12 +1374,23 @@ export const useGameStore = create<GameStoreState>()(
 
         let nextTurnOrder = reconciledOrder;
         let finalTurnIndex = nextIndex;
+        const nextRound = wrappedRound ? battle.round + 1 : battle.round;
+        let nextSnapshots = appendRoundSnapshot(
+          battle.roundSnapshots,
+          battle.round,
+          resolution.updatedUnits
+        );
         if (wrappedRound) {
           nextTurnOrder = sortTurnOrder(resolution.updatedUnits);
           const firstAliveIdx = nextTurnOrder.findIndex((id) =>
             resolution.updatedUnits.some((u) => u.id === id && u.alive)
           );
           finalTurnIndex = Math.max(0, firstAliveIdx);
+          nextSnapshots = appendRoundSnapshot(
+            nextSnapshots,
+            nextRound,
+            resolution.updatedUnits
+          );
         }
 
         const playerNext = resolution.updatedUnits.find((u) => u.isPlayer);
@@ -1206,13 +1408,16 @@ export const useGameStore = create<GameStoreState>()(
           battle: {
             ...battle,
             units: resolution.updatedUnits,
+            turnCounter: nextTurnCounter,
             log: nextLog,
+            events: nextEvents,
+            roundSnapshots: nextSnapshots,
             popups: nextPopups,
             fxEvents: nextFx,
             explodedUnitIds: nextExploded,
             turnOrder: nextTurnOrder,
             activeTurnIndex: finalTurnIndex,
-            round: wrappedRound ? battle.round + 1 : battle.round,
+            round: nextRound,
             selectedTargetId: currentTargetStillAlive
               ? battle.selectedTargetId
               : validFrontEnemies[0]?.id ?? aliveEnemies[0]?.id ?? null,
@@ -1304,6 +1509,11 @@ export const useGameStore = create<GameStoreState>()(
           (u) => u.side === 'ally' && u.alive
         );
 
+        const nextTurnCounter = battle.turnCounter + 1;
+        const nextEvents = [
+          ...battle.events,
+          ...stampTurnEvents(resolution.events, nextTurnCounter),
+        ].slice(-5000);
         const enrichedLogs = enrichLogEntries(
           resolution.logEntries,
           activeUnit,
@@ -1334,7 +1544,9 @@ export const useGameStore = create<GameStoreState>()(
               nextLog,
               nextPopups,
               nextFx,
-              nextExploded
+              nextExploded,
+              nextEvents,
+              nextTurnCounter
             )
           );
           return;
@@ -1353,12 +1565,23 @@ export const useGameStore = create<GameStoreState>()(
 
         let nextTurnOrder = reconciledOrder;
         let finalTurnIndex = nextIndex;
+        const nextRound = wrappedRound ? battle.round + 1 : battle.round;
+        let nextSnapshots = appendRoundSnapshot(
+          battle.roundSnapshots,
+          battle.round,
+          resolution.updatedUnits
+        );
         if (wrappedRound) {
           nextTurnOrder = sortTurnOrder(resolution.updatedUnits);
           const firstAliveIdx = nextTurnOrder.findIndex((id) =>
             resolution.updatedUnits.some((u) => u.id === id && u.alive)
           );
           finalTurnIndex = Math.max(0, firstAliveIdx);
+          nextSnapshots = appendRoundSnapshot(
+            nextSnapshots,
+            nextRound,
+            resolution.updatedUnits
+          );
         }
 
         const currentTargetStillAlive = aliveEnemies.some(
@@ -1372,13 +1595,16 @@ export const useGameStore = create<GameStoreState>()(
           battle: {
             ...battle,
             units: resolution.updatedUnits,
+            turnCounter: nextTurnCounter,
             log: nextLog,
+            events: nextEvents,
+            roundSnapshots: nextSnapshots,
             popups: nextPopups,
             fxEvents: nextFx,
             explodedUnitIds: nextExploded,
             turnOrder: nextTurnOrder,
             activeTurnIndex: finalTurnIndex,
-            round: wrappedRound ? battle.round + 1 : battle.round,
+            round: nextRound,
             selectedTargetId: currentTargetStillAlive
               ? targetedEnemy ?? battle.selectedTargetId
               : aliveEnemies[0]?.id ?? null,
@@ -1462,6 +1688,11 @@ export const useGameStore = create<GameStoreState>()(
           (u) => u.side === 'ally' && u.alive
         );
 
+        const nextTurnCounter = battle.turnCounter + 1;
+        const nextEvents = [
+          ...battle.events,
+          ...stampTurnEvents(resolution.events, nextTurnCounter),
+        ].slice(-5000);
         const enrichedLogs = enrichLogEntries(resolution.logEntries, activeUnit);
         const nextLog = [...battle.log, ...enrichedLogs].slice(-80);
         const nextPopups = bypassFx
@@ -1488,7 +1719,9 @@ export const useGameStore = create<GameStoreState>()(
               nextLog,
               nextPopups,
               nextFx,
-              nextExploded
+              nextExploded,
+              nextEvents,
+              nextTurnCounter
             )
           );
           return;
@@ -1508,12 +1741,23 @@ export const useGameStore = create<GameStoreState>()(
 
         let nextTurnOrder = reconciledOrder;
         let finalTurnIndex = nextIndex;
+        const nextRound = wrappedRound ? battle.round + 1 : battle.round;
+        let nextSnapshots = appendRoundSnapshot(
+          battle.roundSnapshots,
+          battle.round,
+          resolution.updatedUnits
+        );
         if (wrappedRound) {
           nextTurnOrder = sortTurnOrder(resolution.updatedUnits);
           const firstAliveIdx = nextTurnOrder.findIndex((id) =>
             resolution.updatedUnits.some((u) => u.id === id && u.alive)
           );
           finalTurnIndex = Math.max(0, firstAliveIdx);
+          nextSnapshots = appendRoundSnapshot(
+            nextSnapshots,
+            nextRound,
+            resolution.updatedUnits
+          );
         }
 
         // Occasional AI wingman radio callout (~28% chance when animations are enabled)
@@ -1551,14 +1795,17 @@ export const useGameStore = create<GameStoreState>()(
           battle: {
             ...battle,
             units: resolution.updatedUnits,
+            turnCounter: nextTurnCounter,
             log: nextLog,
+            events: nextEvents,
+            roundSnapshots: nextSnapshots,
             popups: nextPopups,
             fxEvents: nextFx,
             explodedUnitIds: nextExploded,
             wingmanChat: nextWingmanChat,
             turnOrder: nextTurnOrder,
             activeTurnIndex: finalTurnIndex,
-            round: wrappedRound ? battle.round + 1 : battle.round,
+            round: nextRound,
             selectedTargetId: currentTargetStillAlive
               ? battle.selectedTargetId
               : validFrontEnemies[0]?.id ?? aliveEnemies[0]?.id ?? null,

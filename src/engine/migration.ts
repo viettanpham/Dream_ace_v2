@@ -7,7 +7,7 @@ import {
   ITEM_TEMPLATES,
   LEGACY_ITEM_ID_TO_TEMPLATE,
 } from '../data/items';
-import { SECTORS_CATALOG } from '../data/maps';
+import { createInitialBaseStates, SECTORS_CATALOG } from '../data/maps';
 import {
   CLASS_STARTER_SKILLS,
   getOpeningCardById,
@@ -16,6 +16,7 @@ import {
 } from '../data/skills';
 import type {
   AdminConfig,
+  BaseRuntimeState,
   BattleSize,
   BattleSpeed,
   BattleViewMode,
@@ -62,6 +63,7 @@ export function createDefaultAdminConfig(): AdminConfig {
     alwaysWin: false,
     rewardMultiplier: BALANCE_CONFIG.rewardMultDefault,
     battleSizeOverride: null,
+    softEnrageEnabled: true,
   };
 }
 
@@ -267,6 +269,10 @@ export function migrateSaveData(
     battleSizeOverride: VALID_BATTLE_SIZES.has(rawSizeOverride)
       ? rawSizeOverride
       : null,
+    softEnrageEnabled:
+      typeof rawAdmin.softEnrageEnabled === 'boolean'
+        ? rawAdmin.softEnrageEnabled
+        : true,
   };
 
   // Case A: v4 / v5 (`pilot` object present)
@@ -379,6 +385,52 @@ export function migrateSaveData(
 
     const activeGearLevel = gears[finalActiveGearId].level;
 
+    // Sanitize per-base runtime state (allied/hostile, operational/damaged/repairing, under attack)
+    const defaultBases = createInitialBaseStates();
+    const cleanBaseStates: Record<string, BaseRuntimeState> = {};
+    for (const sec of SECTORS_CATALOG) {
+      const rawB = rawPilot.baseStates?.[sec.id];
+      const defB = defaultBases[sec.id];
+      if (rawB && typeof rawB === 'object') {
+        cleanBaseStates[sec.id] = {
+          faction:
+            rawB.faction === 'allied' ||
+            rawB.faction === 'hostile' ||
+            rawB.faction === 'neutral'
+              ? rawB.faction
+              : defB.faction,
+          status:
+            rawB.status === 'operational' ||
+            rawB.status === 'damaged' ||
+            rawB.status === 'repairing'
+              ? rawB.status
+              : defB.status,
+          repairMonthsRemaining: Math.max(
+            0,
+            Math.min(2, Number(rawB.repairMonthsRemaining) || 0)
+          ),
+          underAttack: Boolean(rawB.underAttack),
+          attackCountdownMonths: Math.max(
+            0,
+            Number(rawB.attackCountdownMonths) || 0
+          ),
+          attackFromSectorId:
+            typeof rawB.attackFromSectorId === 'string'
+              ? rawB.attackFromSectorId
+              : null,
+        };
+      } else {
+        cleanBaseStates[sec.id] = {
+          ...defB,
+          faction: capturedSectorIds.includes(sec.id) ? 'allied' : defB.faction,
+        };
+      }
+    }
+
+    const finalUnlockedSectors = Array.from(
+      new Set([...unlockedSectorIds, 'aegis_relay', 'veridian_colony'])
+    );
+
     return {
       pilot: {
         name:
@@ -391,8 +443,13 @@ export function migrateSaveData(
         inventory: rawInventory,
         gears,
         activeGearId: finalActiveGearId,
-        unlockedSectorIds,
+        unlockedSectorIds: finalUnlockedSectors,
         capturedSectorIds,
+        campaignMonth: Math.max(1, Number(rawPilot.campaignMonth) || 1),
+        baseStates: cleanBaseStates,
+        hiredWingman: rawPilot.hiredWingman ?? null,
+        engineerShieldBoost: Boolean(rawPilot.engineerShieldBoost),
+        activeBonusMission: rawPilot.activeBonusMission ?? null,
       },
       shopStock:
         rawShop.length > 0
@@ -508,8 +565,15 @@ export function migrateSaveData(
       inventory: migratedInventory,
       gears,
       activeGearId: legacyClass,
-      unlockedSectorIds,
-      capturedSectorIds: [],
+      unlockedSectorIds: Array.from(
+        new Set([...unlockedSectorIds, 'aegis_relay', 'veridian_colony'])
+      ),
+      capturedSectorIds: ['aegis_relay'],
+      campaignMonth: 1,
+      baseStates: createInitialBaseStates(),
+      hiredWingman: null,
+      engineerShieldBoost: false,
+      activeBonusMission: null,
     },
     shopStock: generateShopStock(
       migratedLevel,

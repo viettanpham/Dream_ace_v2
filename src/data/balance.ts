@@ -152,6 +152,10 @@ export const BALANCE_CONFIG = {
     5: 120,
     10: 40,
   } as Record<BattleSpeed, number>,
+  // Anti-Stalemate (Soft Enrage): after round 20, enemies deal +10% damage per round, capped at +200%
+  enrageStartRound: 20,
+  enrageStepPct: 0.1,
+  enrageMaxBonusPct: 2.0,
 } as const;
 
 export const COMBAT_FORMULAS = {

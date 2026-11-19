@@ -6,7 +6,7 @@ import {
   STAT_KEYS,
 } from '../data/classes';
 import { EMPTY_EQUIPPED_SLOT_IDS } from '../data/items';
-import { SECTORS_CATALOG } from '../data/maps';
+import { createInitialBaseStates, SECTORS_CATALOG } from '../data/maps';
 import { CLASS_STARTER_SKILLS } from '../data/skills';
 import type {
   DerivedStats,
@@ -244,8 +244,17 @@ export function createDefaultPilotAccount(
     inventory: starterItems,
     gears,
     activeGearId: starterClassId,
-    unlockedSectorIds: [SECTORS_CATALOG[0].id],
-    capturedSectorIds: [],
+    unlockedSectorIds: [
+      SECTORS_CATALOG[0].id,
+      'aegis_relay',
+      'veridian_colony',
+    ],
+    capturedSectorIds: ['aegis_relay'],
+    campaignMonth: 1,
+    baseStates: createInitialBaseStates(),
+    hiredWingman: null,
+    engineerShieldBoost: false,
+    activeBonusMission: null,
   };
 }
 

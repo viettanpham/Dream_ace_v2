@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { BALANCE_CONFIG } from '../../data/balance';
 import { EMPTY_STAT_BLOCK, MECH_CLASSES } from '../../data/classes';
 import { EQUIPMENT_SLOTS, ITEM_TEMPLATES } from '../../data/items';
-import { SECTORS_CATALOG } from '../../data/maps';
+import {
+  getBattleSizeForBaseType,
+  getSectorById,
+  getTokenShapeForBaseType,
+  SECTORS_CATALOG,
+} from '../../data/maps';
 import {
   getScaledSkillStats,
   getSkillById,
@@ -16,14 +21,17 @@ import type {
   GearTacticsProfile,
   ItemRarity,
 } from '../../types/game';
+import { aggregateBattleStats } from '../battleStats';
 import {
   buildTurnQueue,
   calculateBattleRewards,
   calculateSingleEnemyReward,
   chooseAiDecision,
   createInitialBattleState,
+  createRoundHpSnapshot,
   getAdjacentUnits,
   getEffectiveUnitSpeed,
+  getEnemyEnrageBonusPct,
   getValidEnemyTargets,
   hasStatus,
   isLongRangeAction,
@@ -42,7 +50,16 @@ import {
   unequipSlotOnGear,
   validateEquipOnGear,
 } from '../equipment';
-import { migrateSaveData } from '../migration';
+import {
+  advanceCampaignMonth,
+  applyBattleBaseConsequences,
+  getBaseMonthlyIncome,
+  getBaseState,
+  hirePilotForNextBattle,
+  isBaseServicesAvailable,
+  startBaseRepair,
+} from '../mapWorld';
+import { createDefaultAdminConfig, migrateSaveData } from '../migration';
 import {
   buyOpeningCard,
   canUnitUseSkill,
@@ -70,7 +87,9 @@ import {
   chooseAction,
   createDefaultAutoSafety,
   createPresetTactics,
+  createSimplePresetConfig,
   evaluateAutoSafety,
+  generateTacticsFromSimple,
   sanitizeGearTactics,
   shouldStopAutoRepeat,
 } from '../tactics';
@@ -1273,6 +1292,7 @@ describe('12. Turn Queue Ordering & Mid-Round Speed Changes', () => {
       deployedGearId: 'striker',
       squadSize: 4,
       round: 2,
+      turnCounter: 1,
       turnOrder: reconciled,
       activeTurnIndex: 1,
       units: updatedUnits,
@@ -1282,6 +1302,8 @@ describe('12. Turn Queue Ordering & Mid-Round Speed Changes', () => {
       autoStopNotice: null,
       wingmanChat: null,
       log: [],
+      events: [],
+      roundSnapshots: [],
       fxEvents: [],
       popups: [],
       explodedUnitIds: [],
@@ -2052,5 +2074,379 @@ describe('17. Front/Back Row Targeting, Long-Range Bypass & Adjacent Formation S
     }
   });
 });
+
+describe('18. Conveyor Turn Queue (Dead Removal, Summon/Revive Insertion & Round Boundary)', () => {
+  it('excludes dead units from upcoming/nextRound and cleanly inserts newly spawned/revived units in Speed order', () => {
+    const pilot = createDefaultPilotAccount('Ace', 'striker');
+    const battle = createInitialBattleState(
+      pilot,
+      'border_outpost',
+      createSequenceRng([0.2, 0.5, 0.8])
+    );
+
+    const aliveOrder = sortTurnOrder(battle.units);
+    const deadId = aliveOrder[2];
+    const unitsWithDeath = battle.units.map((u) =>
+      u.id === deadId ? { ...u, hp: 0, alive: false } : u
+    );
+
+    // Reconcile while unit 0 is acting
+    const reconciled = reconcileRemainingTurnOrder(aliveOrder, 0, unitsWithDeath);
+    expect(reconciled.includes(deadId)).toBe(false);
+
+    // Spawn a brand-new reinforcement unit mid-round with high speed
+    const templateUnit = battle.units.find((u) => u.side === 'ally')!;
+    const reinforcement: CombatUnit = {
+      ...templateUnit,
+      id: 'ally_reinforce_1',
+      name: 'Reinforce-1',
+      callsign: 'Reinforce-1',
+      isPlayer: false,
+      alive: true,
+      hp: 200,
+      derived: { ...templateUnit.derived, speed: 999 },
+    };
+    const unitsWithReinforce = [...unitsWithDeath, reinforcement];
+    const reconciledWithReinforce = reconcileRemainingTurnOrder(
+      reconciled,
+      0,
+      unitsWithReinforce
+    );
+
+    // Active unit remains at index 0; reinforcement inserts immediately at index 1 due to SPD 999
+    expect(reconciledWithReinforce[0]).toBe(aliveOrder[0]);
+    expect(reconciledWithReinforce[1]).toBe('ally_reinforce_1');
+
+    const queue = buildTurnQueue({
+      ...battle,
+      round: 3,
+      turnOrder: reconciledWithReinforce,
+      activeTurnIndex: 0,
+      units: unitsWithReinforce,
+    });
+
+    expect(queue.current?.unitId).toBe(aliveOrder[0]);
+    expect(queue.upcoming[0]?.unitId).toBe('ally_reinforce_1');
+    expect(queue.upcoming.some((e) => e.unitId === deadId)).toBe(false);
+    expect(queue.nextRound.some((e) => e.unitId === deadId)).toBe(false);
+    // Next round strictly sorted by speed DESC, so SPD 999 reinforcement is first in Round 4
+    expect(queue.nextRound[0]?.unitId).toBe('ally_reinforce_1');
+  });
+});
+
+describe('19. Structured Battle Events & Battle Statistics Aggregation', () => {
+  it('aggregates damage, shield vs HP split, crits, dodges, heals, kills, SP spent, per-skill breakdown, round curves, and MVPs', () => {
+    const pilot = createDefaultPilotAccount('Ace', 'striker');
+    pilot.gears.striker.level = 15;
+    pilot.gears.striker.skillLevels = { str_viper_sweep: 2 };
+    pilot.gears.striker.equippedSkillBar = ['str_viper_sweep'];
+
+    const battle = createInitialBattleState(
+      pilot,
+      'border_outpost',
+      createSequenceRng([0.2, 0.5, 0.8])
+    );
+    const enemy = battle.units.find((u) => u.side === 'enemy' && u.row === 'front')!;
+
+    // Set up deterministic stats so attacks land cleanly
+    let units = battle.units.map((u) =>
+      u.isPlayer
+        ? {
+            ...u,
+            sp: 100,
+            derived: { ...u.derived, maxSp: 100, attackPower: 120, critChance: 0 },
+          }
+        : u.id === enemy.id
+        ? {
+            ...u,
+            hp: 500,
+            shield: 60,
+            derived: { ...u.derived, maxHp: 500, maxShield: 60, dodgeChance: 0 },
+          }
+        : u
+    );
+
+    const res1 = resolveUnitAction(
+      units,
+      'ally_player',
+      'skill',
+      enemy.id,
+      1,
+      undefined,
+      () => 0.99,
+      'str_viper_sweep'
+    );
+    units = res1.updatedUnits;
+
+    const snap1 = createRoundHpSnapshot(1, units);
+    const summary = aggregateBattleStats(
+      units,
+      res1.events,
+      [...battle.roundSnapshots, snap1],
+      1
+    );
+
+    const playerRow = summary.units.find((u) => u.unitId === 'ally_player')!;
+    const enemyRow = summary.units.find((u) => u.unitId === enemy.id)!;
+
+    expect(playerRow.turnsTaken).toBe(1);
+    expect(playerRow.spSpent).toBeGreaterThan(0);
+    expect(playerRow.damageDealt).toBeGreaterThan(0);
+    expect(playerRow.hits).toBeGreaterThan(0);
+    expect(playerRow.skills['str_viper_sweep']?.uses).toBe(1);
+
+    // Enemy absorbed some damage on shield and took the rest on HP
+    expect(enemyRow.damageTakenTotal).toBe(
+      enemyRow.damageTakenHp + enemyRow.damageTakenShield
+    );
+    expect(enemyRow.shieldAbsorbed).toBeGreaterThan(0);
+
+    // Team totals match sum of units
+    expect(summary.ally.damageDealt).toBeGreaterThan(0);
+    expect(summary.roundDamageSeries.length).toBeGreaterThanOrEqual(1);
+    expect(summary.roundHpSeries.length).toBeGreaterThanOrEqual(1);
+    expect(summary.mvps.mostDamage?.unitId).toBe('ally_player');
+  });
+});
+
+describe('20. Simple Auto Tactics Compiler & Presets', () => {
+  it('compiles all 5 Simple presets and custom 5-control configs into strictly class-legal rules + safety config', () => {
+    const pilot = createDefaultPilotAccount('Ace', 'support');
+    pilot.gears.support.level = 30;
+    pilot.gears.support.skillLevels = {
+      sup_nanite_mend: 2,
+      sup_war_hymn: 1,
+      sup_genesis_wave: 1, // Elite
+      gen_hull_brace: 1,
+    };
+    pilot.gears.support.equippedSkillBar = [
+      'sup_nanite_mend',
+      'sup_war_hymn',
+      'sup_genesis_wave',
+      'gen_hull_brace',
+    ];
+
+    const presets = [
+      'balanced',
+      'aggressive',
+      'defensive',
+      'support_team',
+      'save_sp',
+    ] as const;
+
+    for (const presetId of presets) {
+      const cfg = createSimplePresetConfig(
+        presetId,
+        'support',
+        pilot.gears.support.equippedSkillBar
+      );
+      const compiled = generateTacticsFromSimple(
+        'support',
+        cfg,
+        pilot.gears.support.equippedSkillBar
+      );
+      expect(compiled.rules.length).toBeGreaterThan(0);
+      expect(compiled.rules.length).toBeLessThanOrEqual(
+        BALANCE_CONFIG.maxTacticsRules
+      );
+      // Every generated skill rule must belong to support or general
+      for (const r of compiled.rules) {
+        if (r.action.type === 'skill' && r.action.skillId) {
+          const sk = getSkillById(r.action.skillId)!;
+          expect(['support', 'general']).toContain(sk.classScope);
+        }
+      }
+    }
+
+    // Specific controls: save_sp_50 uses my_sp_pct_gte 50, retreat enables autoRetreatLowHpEnabled, boss_only Elite uses boss_present
+    const customSimple = {
+      presetId: 'balanced' as const,
+      preferredTarget: 'sniper_first' as const,
+      skillUsage: 'save_sp_50' as const,
+      lowHpThresholdPct: 30,
+      lowHpAction: 'retreat' as const,
+      elitePolicy: 'boss_only' as const,
+      prioritySkillIds: ['sup_war_hymn'],
+    };
+    const compiledCustom = generateTacticsFromSimple(
+      'support',
+      customSimple,
+      pilot.gears.support.equippedSkillBar
+    );
+
+    expect(compiledCustom.safety.autoRetreatLowHpEnabled).toBe(true);
+    expect(compiledCustom.safety.autoRetreatLowHpPct).toBe(30);
+    expect(
+      compiledCustom.rules.some(
+        (r) =>
+          r.action.type === 'skill' &&
+          r.action.skillId === 'sup_genesis_wave' &&
+          r.condition.kind === 'boss_present'
+      )
+    ).toBe(true);
+    expect(
+      compiledCustom.rules.some(
+        (r) =>
+          r.action.type === 'skill' &&
+          r.action.skillId === 'sup_war_hymn' &&
+          r.condition.kind === 'my_sp_pct_gte' &&
+          r.condition.value === 50
+      )
+    ).toBe(true);
+    expect(
+      compiledCustom.rules.some(
+        (r) =>
+          r.action.type === 'attack' &&
+          r.targetSelector === 'enemy_sniper_first'
+      )
+    ).toBe(true);
+  });
+});
+
+describe('21. Anti-Stalemate Soft Enrage (Round 20+)', () => {
+  it('computes +10%/round after Round 20 capped at +200%, respects Admin toggle, and scales enemy damage in combat', () => {
+    expect(getEnemyEnrageBonusPct(1, true)).toBe(0);
+    expect(getEnemyEnrageBonusPct(20, true)).toBe(0);
+    expect(getEnemyEnrageBonusPct(21, true)).toBeCloseTo(0.1, 5);
+    expect(getEnemyEnrageBonusPct(25, true)).toBeCloseTo(0.5, 5);
+    expect(getEnemyEnrageBonusPct(40, true)).toBeCloseTo(2.0, 5);
+    expect(getEnemyEnrageBonusPct(99, true)).toBeCloseTo(2.0, 5);
+    // Admin disable -> 0 even at Round 50
+    expect(getEnemyEnrageBonusPct(50, false)).toBe(0);
+
+    // Combat check: enemy attack deals higher damage at Round 35 than Round 1
+    const pilot = createDefaultPilotAccount('Ace', 'siege');
+    const battle = createInitialBattleState(pilot, 'border_outpost');
+    const enemy = battle.units.find((u) => u.side === 'enemy')!;
+    const baseUnits = battle.units.map((u) =>
+      u.isPlayer
+        ? {
+            ...u,
+            hp: 5000,
+            shield: 0,
+            derived: { ...u.derived, maxHp: 5000, dodgeChance: 0, defenseRating: 5 },
+          }
+        : u.id === enemy.id
+        ? { ...u, derived: { ...u.derived, attackPower: 100, critChance: 0 } }
+        : u
+    );
+
+    const enrageOnCfg = { ...createDefaultAdminConfig(), softEnrageEnabled: true };
+    const enrageOffCfg = { ...createDefaultAdminConfig(), softEnrageEnabled: false };
+
+    const hitR1 = resolveUnitAction(
+      baseUnits,
+      enemy.id,
+      'attack',
+      'ally_player',
+      1,
+      enrageOnCfg,
+      () => 0.99
+    );
+    const hitR35 = resolveUnitAction(
+      baseUnits,
+      enemy.id,
+      'attack',
+      'ally_player',
+      35,
+      enrageOnCfg,
+      () => 0.99
+    );
+    const hitR35Disabled = resolveUnitAction(
+      baseUnits,
+      enemy.id,
+      'attack',
+      'ally_player',
+      35,
+      enrageOffCfg,
+      () => 0.99
+    );
+
+    const dmgR1 = 5000 - hitR1.updatedUnits.find((u) => u.isPlayer)!.hp;
+    const dmgR35 = 5000 - hitR35.updatedUnits.find((u) => u.isPlayer)!.hp;
+    const dmgR35Disabled =
+      5000 - hitR35Disabled.updatedUnits.find((u) => u.isPlayer)!.hp;
+
+    expect(dmgR35).toBeGreaterThan(dmgR1 * 2); // Round 35 = +150% = 2.5x damage
+    expect(dmgR35Disabled).toBe(dmgR1);
+  });
+});
+
+describe('22. Map UI World Rules (Base Shapes, Battle Sizes, Damaged Capture, Repair & Pilot-for-Hire)', () => {
+  it('maps base types to round/square tokens and 4v4 / 6v6 / 8v8+Boss battle sizes', () => {
+    expect(getTokenShapeForBaseType('outpost')).toBe('round');
+    expect(getTokenShapeForBaseType('colony')).toBe('round');
+    expect(getTokenShapeForBaseType('relay')).toBe('round');
+    expect(getTokenShapeForBaseType('fortress')).toBe('square');
+    expect(getTokenShapeForBaseType('shipyard')).toBe('square');
+    expect(getTokenShapeForBaseType('capital')).toBe('square');
+
+    expect(getBattleSizeForBaseType('outpost')).toBe(4);
+    expect(getBattleSizeForBaseType('colony')).toBe(4);
+    expect(getBattleSizeForBaseType('relay')).toBe(4);
+    expect(getBattleSizeForBaseType('fortress')).toBe(6);
+    expect(getBattleSizeForBaseType('shipyard')).toBe(6);
+    expect(getBattleSizeForBaseType('capital')).toBe(8);
+    expect(getSectorById('iron_citadel').hasBoss).toBe(true);
+  });
+
+  it('marks freshly captured bases as Damaged (0 income, services offline) until repaired over 1-2 months, and deploys hired wingmen', () => {
+    let pilot = createDefaultPilotAccount('Commander', 'striker');
+    pilot.credits = 5000;
+
+    // Hire Pilot-for-Hire at Aegis Relay while operational -> spawns +1 extra allied wingman in next battle
+    const hireOk = hirePilotForNextBattle(pilot, 'aegis_relay', 'siege');
+    expect(hireOk.ok).toBe(true);
+    pilot = hireOk.pilot;
+    expect(pilot.hiredWingman?.classId).toBe('siege');
+
+    const battle = createInitialBattleState(pilot, 'border_outpost');
+    const allies = battle.units.filter((u) => u.side === 'ally');
+    expect(allies).toHaveLength(battle.squadSize + 1);
+    expect(allies.some((a) => a.id === 'ally_hired_merc')).toBe(true);
+
+    // Freshly capture hostile Fortress (debris_belt, 2 months repair)
+    const capture = applyBattleBaseConsequences(pilot, 'debris_belt', true);
+    pilot = capture.pilot;
+    expect(capture.capturedFreshly).toBe(true);
+
+    const damagedState = getBaseState(pilot, 'debris_belt');
+    expect(damagedState.faction).toBe('allied');
+    expect(damagedState.status).toBe('damaged');
+    expect(getBaseMonthlyIncome(getSectorById('debris_belt'), damagedState)).toEqual({
+      credits: 0,
+      warPoints: 0,
+    });
+    expect(isBaseServicesAvailable(damagedState)).toBe(false);
+
+    // Hiring a wingman at a Damaged base is rejected
+    const hireBlocked = hirePilotForNextBattle(pilot, 'debris_belt', 'interceptor');
+    expect(hireBlocked.ok).toBe(false);
+    expect(hireBlocked.reason).toBe('not_operational');
+
+    // Pay Credits to begin 2-month repair
+    const repairRes = startBaseRepair(pilot, 'debris_belt');
+    expect(repairRes.ok).toBe(true);
+    pilot = repairRes.pilot;
+    expect(getBaseState(pilot, 'debris_belt').status).toBe('repairing');
+    expect(getBaseState(pilot, 'debris_belt').repairMonthsRemaining).toBe(2);
+
+    // Month +1 -> still repairing (1 month left)
+    const m1 = advanceCampaignMonth(pilot);
+    pilot = m1.pilot;
+    expect(getBaseState(pilot, 'debris_belt').status).toBe('repairing');
+    expect(getBaseState(pilot, 'debris_belt').repairMonthsRemaining).toBe(1);
+
+    // Month +2 -> debris_belt completes repair to Operational; unanswered raid damages aegis_relay
+    const m2 = advanceCampaignMonth(pilot);
+    pilot = m2.pilot;
+    const opState = getBaseState(pilot, 'debris_belt');
+    expect(opState.status).toBe('operational');
+    expect(isBaseServicesAvailable(opState)).toBe(true);
+    expect(getBaseMonthlyIncome(getSectorById('debris_belt'), opState).credits).toBeGreaterThan(0);
+    expect(getBaseState(pilot, 'aegis_relay').status).toBe('damaged');
+  });
+});
+
 
 

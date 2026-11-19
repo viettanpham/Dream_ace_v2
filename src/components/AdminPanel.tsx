@@ -437,6 +437,25 @@ export function AdminPanel() {
                 <span className="text-slate-100 font-medium">Always Win</span>
               </label>
 
+              <label
+                className="inline-flex items-center gap-2 px-3 py-2 rounded border border-amber-500/40 bg-amber-500/10 cursor-pointer"
+                title={t('admin.softEnrageDesc')}
+              >
+                <input
+                  type="checkbox"
+                  checked={adminConfig.softEnrageEnabled}
+                  onChange={(e) => {
+                    adminUpdateConfig({ softEnrageEnabled: e.target.checked });
+                    flash(
+                      `Soft Enrage ${e.target.checked ? 'ENABLED' : 'DISABLED'}`
+                    );
+                  }}
+                />
+                <span className="text-amber-200 font-medium">
+                  {t('admin.softEnrage')}
+                </span>
+              </label>
+
               <div className="flex items-center gap-2 px-3 py-1.5 rounded border border-slate-700 bg-slate-900">
                 <span className="text-slate-400">REWARD_MULT:</span>
                 <input

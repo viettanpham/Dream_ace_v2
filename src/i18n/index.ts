@@ -14,6 +14,7 @@ import type {
   Language,
   MechClassId,
   SectorDifficulty,
+  SimpleTacticsConfig,
   SkillCategory,
   SkillTargetType,
   StatKey,
@@ -222,6 +223,86 @@ export function formatTacticsRuleSentence(
       : translate(lang, 'auto.actionAttack');
   const targetStr = getTacticsTargetLabel(lang, rule.targetSelector);
   return `${ifWord} ${condStr} → ${actionStr} → ${targetStr}`;
+}
+
+export function getStatsSkillLabel(lang: Language, skillKey: string): string {
+  if (skillKey === 'basic_attack' || !skillKey) {
+    return translate(lang, 'stats.basicAttack');
+  }
+  if (skillKey === 'defend') {
+    return translate(lang, 'stats.defendAction');
+  }
+  if (skillKey === 'regen_hp') {
+    return translate(lang, 'stats.regenTick');
+  }
+  return getSkillName(lang, skillKey);
+}
+
+/**
+ * Generates a natural plain-language sentence describing what Simple Auto will do.
+ */
+export function formatSimpleTacticsSummary(
+  lang: Language,
+  config: SimpleTacticsConfig
+): string {
+  const targetLabel = translate(
+    lang,
+    `auto.simple.target.${config.preferredTarget}` as TranslationKey
+  ).toLowerCase();
+  const firstSkill = config.prioritySkillIds[0]
+    ? getSkillName(lang, config.prioritySkillIds[0])
+    : null;
+  const skillUsageClauseEn =
+    config.skillUsage === 'save_sp_50'
+      ? 'only cast skills above 50% SP'
+      : config.skillUsage === 'needed_only'
+      ? 'only cast skills when needed'
+      : firstSkill
+      ? `prioritize ${firstSkill}`
+      : 'use equipped skills whenever ready';
+  const skillUsageClauseVi =
+    config.skillUsage === 'save_sp_50'
+      ? 'chỉ dùng kỹ năng khi trên 50% SP'
+      : config.skillUsage === 'needed_only'
+      ? 'chỉ dùng kỹ năng khi thật sự cần'
+      : firstSkill
+      ? `ưu tiên tung ${firstSkill}`
+      : 'dùng kỹ năng ngay khi sẵn sàng';
+
+  const lowHpClauseEn =
+    config.lowHpAction === 'defend'
+      ? `defend below ${config.lowHpThresholdPct}% HP`
+      : config.lowHpAction === 'heal'
+      ? `heal itself below ${config.lowHpThresholdPct}% HP`
+      : config.lowHpAction === 'retreat'
+      ? `auto-retreat below ${config.lowHpThresholdPct}% HP`
+      : 'keep attacking even at low HP';
+  const lowHpClauseVi =
+    config.lowHpAction === 'defend'
+      ? `phòng thủ khi HP dưới ${config.lowHpThresholdPct}%`
+      : config.lowHpAction === 'heal'
+      ? `tự hồi phục khi HP dưới ${config.lowHpThresholdPct}%`
+      : config.lowHpAction === 'retreat'
+      ? `tự rút lui khi HP dưới ${config.lowHpThresholdPct}%`
+      : 'tiếp tục tấn công dù HP thấp';
+
+  const eliteClauseEn =
+    config.elitePolicy === 'boss_only'
+      ? 'save Elite skills for bosses'
+      : config.elitePolicy === 'immediate'
+      ? 'fire Elite skills immediately'
+      : 'leave Elite skills for manual use';
+  const eliteClauseVi =
+    config.elitePolicy === 'boss_only'
+      ? 'để dành kỹ năng Tinh Anh cho Boss'
+      : config.elitePolicy === 'immediate'
+      ? 'tung kỹ năng Tinh Anh ngay khi sẵn sàng'
+      : 'không tự động dùng kỹ năng Tinh Anh';
+
+  if (lang === 'vi') {
+    return `Auto sẽ ưu tiên mục tiêu ${targetLabel}, ${skillUsageClauseVi}, ${lowHpClauseVi}, và ${eliteClauseVi}.`;
+  }
+  return `Auto will focus the ${targetLabel} enemy, ${skillUsageClauseEn}, ${lowHpClauseEn}, and ${eliteClauseEn}.`;
 }
 
 /**

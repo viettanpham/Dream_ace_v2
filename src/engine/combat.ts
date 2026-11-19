@@ -16,6 +16,8 @@ import type {
   ActionType,
   ActiveStatusEffect,
   AdminConfig,
+  BattleEvent,
+  BattleRoundSnapshot,
   BattleSize,
   BattleState,
   CombatFxEvent,
@@ -313,10 +315,54 @@ export function sortTurnOrder(units: CombatUnit[]): string[] {
 }
 
 /**
+ * Anti-Stalemate (Soft Enrage): after round 20, enemies deal +10% damage per round,
+ * capped at +200% (3.0x total enemy damage). Returns fractional bonus (0..2.0).
+ */
+export function getEnemyEnrageBonusPct(
+  round: number,
+  enabled = true
+): number {
+  if (!enabled || round <= BALANCE_CONFIG.enrageStartRound) return 0;
+  const extraRounds = round - BALANCE_CONFIG.enrageStartRound;
+  return Math.min(
+    BALANCE_CONFIG.enrageMaxBonusPct,
+    Math.round(extraRounds * BALANCE_CONFIG.enrageStepPct * 1000) / 1000
+  );
+}
+
+export function createRoundHpSnapshot(
+  round: number,
+  units: CombatUnit[]
+): BattleRoundSnapshot {
+  let allyHp = 0;
+  let allyMaxHp = 0;
+  let enemyHp = 0;
+  let enemyMaxHp = 0;
+  for (const u of units) {
+    if (u.side === 'ally') {
+      allyMaxHp += u.derived.maxHp;
+      if (u.alive) allyHp += u.hp;
+    } else {
+      enemyMaxHp += u.derived.maxHp;
+      if (u.alive) enemyHp += u.hp;
+    }
+  }
+  return {
+    round,
+    allyHp,
+    allyMaxHp,
+    allyHpPct: allyMaxHp > 0 ? Math.round((allyHp / allyMaxHp) * 1000) / 10 : 0,
+    enemyHp,
+    enemyMaxHp,
+    enemyHpPct:
+      enemyMaxHp > 0 ? Math.round((enemyHp / enemyMaxHp) * 1000) / 10 : 0,
+  };
+}
+
+/**
  * Re-sorts ONLY the units that have NOT YET ACTED in the current round
  * (indices > activeTurnIndex) by current effective Speed descending,
- * so mid-round Slow / Speed-Up buffs immediately keep the upcoming queue
- * strictly ordered by Speed without shifting already-acted units.
+ * and cleanly inserts any newly summoned/revived alive units into the upcoming queue.
  */
 export function reconcileRemainingTurnOrder(
   turnOrder: string[],
@@ -325,7 +371,17 @@ export function reconcileRemainingTurnOrder(
 ): string[] {
   const unitMap = new Map(units.map((u) => [u.id, u]));
   const actedAndCurrent = turnOrder.slice(0, activeTurnIndex + 1);
-  const remaining = turnOrder.slice(activeTurnIndex + 1);
+  const existingIds = new Set(turnOrder);
+  const remaining = turnOrder
+    .slice(activeTurnIndex + 1)
+    .filter((id) => Boolean(unitMap.get(id)?.alive));
+
+  // Include newly summoned alive units that are not yet in turnOrder
+  for (const u of units) {
+    if (u.alive && !existingIds.has(u.id)) {
+      remaining.push(u.id);
+    }
+  }
 
   const sortedRemaining = [...remaining].sort((idA, idB) => {
     const a = unitMap.get(idA);
@@ -362,15 +418,20 @@ function toTurnQueueEntry(
 /**
  * Builds the exact structured Turn Queue for the current round (acted / current / upcoming)
  * plus a clean Round N+1 preview sorted strictly by Speed descending.
+ * Dead units are excluded; newly summoned or revived alive units not yet in turnOrder
+ * are inserted cleanly into upcoming and nextRound in Speed DESC order.
  */
 export function buildTurnQueue(battle: BattleState): TurnQueueView {
   const unitMap = new Map(battle.units.map((u) => [u.id, u]));
   const acted: TurnQueueEntry[] = [];
   let current: TurnQueueEntry | null = null;
   const upcomingUnits: CombatUnit[] = [];
+  const seenIds = new Set<string>();
 
   for (let i = 0; i < battle.turnOrder.length; i++) {
-    const u = unitMap.get(battle.turnOrder[i]);
+    const id = battle.turnOrder[i];
+    seenIds.add(id);
+    const u = unitMap.get(id);
     if (!u || !u.alive) continue;
     if (i < battle.activeTurnIndex) {
       acted.push(toTurnQueueEntry(u, 'acted'));
@@ -381,10 +442,22 @@ export function buildTurnQueue(battle: BattleState): TurnQueueView {
     }
   }
 
+  // Insert newly summoned/revived alive units not yet present in turnOrder
+  for (const u of battle.units) {
+    if (u.alive && !seenIds.has(u.id)) {
+      upcomingUnits.push(u);
+    }
+  }
+
   // Upcoming units in current round always ordered by live effective Speed DESC
-  const upcoming = [...upcomingUnits]
-    .sort(compareUnitTurnPriority)
-    .map((u) => toTurnQueueEntry(u, 'upcoming'));
+  const sortedUpcomingUnits = [...upcomingUnits].sort(compareUnitTurnPriority);
+  if (!current && sortedUpcomingUnits.length > 0) {
+    const promoted = sortedUpcomingUnits.shift()!;
+    current = toTurnQueueEntry(promoted, 'current');
+  }
+  const upcoming = sortedUpcomingUnits.map((u) =>
+    toTurnQueueEntry(u, 'upcoming')
+  );
 
   // Next round preview: all alive units sorted by live effective Speed DESC
   const aliveUnits = battle.units.filter((u) => u.alive);
@@ -483,6 +556,42 @@ export function createInitialBattleState(
     );
   }
 
+  // Optional Pilot-for-Hire: joins as an EXTRA veteran wingman for this battle!
+  if (pilot.hiredWingman) {
+    const hiredLv = Math.max(1, activeGear.level + pilot.hiredWingman.bonusLevel);
+    allyUnits.push(
+      buildCombatUnit({
+        id: 'ally_hired_merc',
+        name: pilot.hiredWingman.callsign,
+        callsign: 'MERC',
+        side: 'ally',
+        row: 'back',
+        formationCol: Math.max(0, squadSize - frontCount),
+        isPlayer: false,
+        classId: pilot.hiredWingman.classId,
+        level: hiredLv,
+        allocatedPoints: generateNpcAllocations(
+          pilot.hiredWingman.classId,
+          hiredLv,
+          rng
+        ),
+      })
+    );
+  }
+
+  // Optional Engineer Field Overcharge: +25% starting Shield on Allied wing for this battle
+  if (pilot.engineerShieldBoost) {
+    for (let i = 0; i < allyUnits.length; i++) {
+      const u = allyUnits[i];
+      const boostedMax = Math.round(u.derived.maxShield * 1.25);
+      allyUnits[i] = {
+        ...u,
+        derived: { ...u.derived, maxShield: boostedMax },
+        shield: boostedMax,
+      };
+    }
+  }
+
   // 3. Hostile Squadron (matching squadSize with mixed archetypes; Front/Back formation)
   const archetypeRosterBySize: Record<BattleSize, EnemyArchetype[]> = {
     4: ['gunship', 'drone', 'sniper', 'repair_ship'],
@@ -573,12 +682,15 @@ export function createInitialBattleState(
     turnOrder,
     activeTurnIndex: 0,
     round: 1,
+    turnCounter: 0,
     selectedTargetId: firstEnemyId,
     selectedAllyTargetId: playerUnit.id,
     lastPlayerTargetId: null,
     autoStopNotice: null,
     wingmanChat: null,
     log: [openingLog],
+    events: [],
+    roundSnapshots: [createRoundHpSnapshot(1, units)],
     popups: [],
     fxEvents: [],
     explodedUnitIds: [],
@@ -590,6 +702,7 @@ export function createInitialBattleState(
 export interface ActionResolution {
   updatedUnits: CombatUnit[];
   logEntries: CombatLogEntry[];
+  events: BattleEvent[];
   popups: FloatingPopup[];
   fxEvent: CombatFxEvent | null;
   destroyedUnitIds: string[];
@@ -727,8 +840,10 @@ function applyDamageToUnit(
     actionMeta: { skillId: string; hitIndex: number; totalHits: number };
     tag: 'ATTACK' | 'SKILL';
     isCounter?: boolean;
+    isSplash?: boolean;
     adminConfig?: AdminConfig;
     rng?: () => number;
+    events?: BattleEvent[];
   }
 ): {
   attackerAfter: CombatUnit;
@@ -785,6 +900,19 @@ function applyDamageToUnit(
       templateKey: 'log.invincibleBlock',
       params: { target: curTarget.name, actor: curAttacker.name },
     });
+    options.events?.push({
+      id: nextId('ev'),
+      round: options.round,
+      turn: 0,
+      actorId: curAttacker.id,
+      targetId: curTarget.id,
+      type: 'damage',
+      amount: 0,
+      shieldAbsorbed: 0,
+      hpDamage: 0,
+      skillId: options.actionMeta.skillId || undefined,
+      flags: { invincible: true },
+    });
     return {
       attackerAfter: curAttacker,
       targetAfter: { ...curTarget, animState: 'shielded' },
@@ -820,6 +948,17 @@ function applyDamageToUnit(
       tone: 'evade',
     });
 
+    options.events?.push({
+      id: nextId('ev'),
+      round: options.round,
+      turn: 0,
+      actorId: curAttacker.id,
+      targetId: curTarget.id,
+      type: 'dodge',
+      skillId: options.actionMeta.skillId || undefined,
+      flags: { dodge: true, counter: true },
+    });
+
     const counterMult = counterSt.magnitude ?? 1.0;
     const counterRaw = curTarget.derived.attackPower * 2.15 * counterMult;
     const counterRes = applyDamageToUnit(
@@ -838,6 +977,7 @@ function applyDamageToUnit(
         isCounter: true,
         adminConfig: options.adminConfig,
         rng,
+        events: options.events,
       }
     );
 
@@ -922,6 +1062,16 @@ function applyDamageToUnit(
         totalHits: options.actionMeta.totalHits,
       },
     });
+    options.events?.push({
+      id: nextId('ev'),
+      round: options.round,
+      turn: 0,
+      actorId: curAttacker.id,
+      targetId: curTarget.id,
+      type: 'dodge',
+      skillId: options.actionMeta.skillId || undefined,
+      flags: { dodge: true },
+    });
     return {
       attackerAfter: curAttacker,
       targetAfter: { ...curTarget, animState: 'evaded' },
@@ -973,9 +1123,26 @@ function applyDamageToUnit(
   const vulnSt = getStatus(curTarget, 'vulnerable');
   const vulnMult = vulnSt ? 1 + (vulnSt.magnitude ?? 0.15) : 1.0;
 
+  // Anti-Stalemate (Soft Enrage): enemy outgoing damage scales +10%/round after round 20 (cap +200%)
+  const enrageBonus =
+    curAttacker.side === 'enemy'
+      ? getEnemyEnrageBonusPct(
+          options.round,
+          options.adminConfig?.softEnrageEnabled ?? true
+        )
+      : 0;
+  const enrageMult = 1 + enrageBonus;
+
   let finalDamage = isOneHit
     ? 99999
-    : Math.round(rawPower * mitigation * backRowMult * vulnMult * randomVariance(rng));
+    : Math.round(
+        rawPower *
+          mitigation *
+          backRowMult *
+          vulnMult *
+          enrageMult *
+          randomVariance(rng)
+      );
   if (!isOneHit && isCrit) {
     finalDamage = Math.round(finalDamage * COMBAT_FORMULAS.critDamageMultiplier);
   }
@@ -1040,7 +1207,37 @@ function applyDamageToUnit(
     },
   });
 
+  options.events?.push({
+    id: nextId('ev'),
+    round: options.round,
+    turn: 0,
+    actorId: curAttacker.id,
+    targetId: curTarget.id,
+    type: 'damage',
+    amount: finalDamage,
+    shieldAbsorbed,
+    hpDamage: hullDamage,
+    skillId: options.actionMeta.skillId || undefined,
+    flags: {
+      crit: isCrit,
+      shieldAbsorbed: shieldAbsorbed > 0,
+      kill: destroyed,
+      splash: Boolean(options.isSplash),
+      counter: Boolean(options.isCounter),
+    },
+  });
+
   if (destroyed) {
+    options.events?.push({
+      id: nextId('ev'),
+      round: options.round,
+      turn: 0,
+      actorId: curAttacker.id,
+      targetId: curTarget.id,
+      type: 'kill',
+      skillId: options.actionMeta.skillId || undefined,
+      flags: { kill: true },
+    });
     logs.push({
       id: nextId('log'),
       round: options.round,
@@ -1088,7 +1285,9 @@ function tryInflictStatus(
   chance: number,
   actorName: string,
   round: number,
-  rng: () => number
+  rng: () => number,
+  events?: BattleEvent[],
+  actorId?: string
 ): {
   targetAfter: CombatUnit;
   logs: CombatLogEntry[];
@@ -1097,6 +1296,18 @@ function tryInflictStatus(
   if (!target.alive || rng() > chance) {
     return { targetAfter: target, logs: [], popups: [] };
   }
+
+  events?.push({
+    id: nextId('ev'),
+    round,
+    turn: 0,
+    actorId: actorId ?? '',
+    targetId: target.id,
+    type: 'status_applied',
+    statusId: entry.type,
+    skillId: entry.sourceSkillId,
+    flags: { isDebuff: DEBUFF_TYPES.has(entry.type) },
+  });
 
   const popupMap: Partial<Record<StatusEffectType, string>> = {
     burn: 'BURN',
@@ -1158,18 +1369,55 @@ export function resolveUnitAction(
   rng: () => number = Math.random,
   skillId?: string
 ): ActionResolution {
+  const events: BattleEvent[] = [];
   const result = resolveUnitActionCore(
     units,
     actorId,
     action,
     targetId,
     round,
+    events,
     adminConfig,
     rng,
     skillId
   );
+
+  // Automatically record any buffs applied/refreshed during this turn
+  const beforeMap = new Map(units.map((u) => [u.id, u]));
+  const alreadyRecordedStatusKeys = new Set(
+    events
+      .filter((e) => e.type === 'status_applied')
+      .map((e) => `${e.targetId}:${e.statusId}`)
+  );
+  for (const afterUnit of result.updatedUnits) {
+    const beforeUnit = beforeMap.get(afterUnit.id);
+    if (!beforeUnit) continue;
+    for (const st of afterUnit.statuses) {
+      if (DEBUFF_TYPES.has(st.type)) continue;
+      const prevSt = beforeUnit.statuses.find((s) => s.type === st.type);
+      const isAddedOrRefreshed =
+        !prevSt || st.turnsRemaining > prevSt.turnsRemaining;
+      const key = `${afterUnit.id}:${st.type}`;
+      if (isAddedOrRefreshed && !alreadyRecordedStatusKeys.has(key)) {
+        alreadyRecordedStatusKeys.add(key);
+        events.push({
+          id: nextId('ev'),
+          round,
+          turn: 0,
+          actorId,
+          targetId: afterUnit.id,
+          type: 'status_applied',
+          statusId: st.type,
+          skillId: st.sourceSkillId ?? skillId,
+          flags: { isDebuff: false },
+        });
+      }
+    }
+  }
+
   return {
     ...result,
+    events,
     fxEvent: hydrateFxUnits(result.fxEvent, units, actorId),
   };
 }
@@ -1180,10 +1428,11 @@ function resolveUnitActionCore(
   action: ActionType,
   targetId: string | null,
   round: number,
+  events: BattleEvent[],
   adminConfig?: AdminConfig,
   rng: () => number = Math.random,
   skillId?: string
-): ActionResolution {
+): Omit<ActionResolution, 'events'> {
   const originalActor = units.find((u) => u.id === actorId);
   if (!originalActor || !originalActor.alive) {
     return {
@@ -1195,6 +1444,14 @@ function resolveUnitActionCore(
       soundCue: 'laser',
     };
   }
+
+  events.push({
+    id: nextId('ev'),
+    round,
+    turn: 0,
+    actorId,
+    type: 'turn_start',
+  });
 
   const cls = MECH_CLASSES[originalActor.classId];
   const fromSlotIndex = getSlotIndex(units, originalActor.id);
@@ -1233,6 +1490,17 @@ function resolveUnitActionCore(
     );
     if (healAmt > 0) {
       actor = { ...actor, hp: actor.hp + healAmt };
+      events.push({
+        id: nextId('ev'),
+        round,
+        turn: 0,
+        actorId: actor.id,
+        targetId: actor.id,
+        type: 'heal',
+        amount: healAmt,
+        skillId: regenSt.sourceSkillId,
+        flags: { isRegen: true },
+      });
       popups.push({
         id: nextId('pop'),
         unitId: actor.id,
@@ -1269,6 +1537,18 @@ function resolveUnitActionCore(
       animState: burnedOut ? 'destroyed' : 'hit',
     };
     if (burnDmg > 0) {
+      events.push({
+        id: nextId('ev'),
+        round,
+        turn: 0,
+        actorId: actor.id,
+        targetId: actor.id,
+        type: 'damage',
+        amount: burnDmg,
+        shieldAbsorbed: 0,
+        hpDamage: burnDmg,
+        flags: { isBurn: true, kill: burnedOut },
+      });
       popups.push({
         id: nextId('pop'),
         unitId: actor.id,
@@ -1287,6 +1567,15 @@ function resolveUnitActionCore(
     }
     if (burnedOut) {
       destroyedUnitIds.push(actor.id);
+      events.push({
+        id: nextId('ev'),
+        round,
+        turn: 0,
+        actorId: actor.id,
+        targetId: actor.id,
+        type: 'kill',
+        flags: { isBurn: true, kill: true },
+      });
       logs.push({
         id: nextId('log'),
         round,
@@ -1373,6 +1662,7 @@ function resolveUnitActionCore(
           tag: 'SKILL',
           adminConfig,
           rng,
+          events,
         }
       );
       nextUnits[actorIdx] = res.attackerAfter;
@@ -1435,6 +1725,26 @@ function resolveUnitActionCore(
       tone: 'buff',
     });
 
+    events.push({
+      id: nextId('ev'),
+      round,
+      turn: 0,
+      actorId: actor.id,
+      targetId: actor.id,
+      type: 'defend',
+    });
+    if (shieldRecovered > 0) {
+      events.push({
+        id: nextId('ev'),
+        round,
+        turn: 0,
+        actorId: actor.id,
+        targetId: actor.id,
+        type: 'shield_grant',
+        amount: shieldRecovered,
+      });
+    }
+
     logs.push({
       id: nextId('log'),
       round,
@@ -1492,6 +1802,16 @@ function resolveUnitActionCore(
       };
 
       const act = nextUnits[actorIdx];
+
+      events.push({
+        id: nextId('ev'),
+        round,
+        turn: 0,
+        actorId: act.id,
+        type: 'skill_cast',
+        skillId: skill.id,
+        spSpent: usability.spCost,
+      });
 
       // Handle each skill effect kind
       switch (skill.effectKind) {
@@ -2084,6 +2404,7 @@ function resolveUnitActionCore(
                 tag: 'SKILL',
                 adminConfig,
                 rng,
+                events,
               }
             );
             nextUnits[actorIdx] = res.attackerAfter;
@@ -2133,6 +2454,7 @@ function resolveUnitActionCore(
                 tag: 'SKILL',
                 adminConfig,
                 rng,
+                events,
               }
             );
             nextUnits[actorIdx] = res.attackerAfter;
@@ -2159,8 +2481,10 @@ function resolveUnitActionCore(
                   round,
                   actionMeta: { skillId: skill.id, hitIndex: 1, totalHits: 1 },
                   tag: 'SKILL',
+                  isSplash: true,
                   adminConfig,
                   rng,
+                  events,
                 }
               );
               nextUnits[actorIdx] = sRes.attackerAfter;
@@ -2212,6 +2536,7 @@ function resolveUnitActionCore(
                 tag: 'SKILL',
                 adminConfig,
                 rng,
+                events,
               }
             );
             nextUnits[actorIdx] = res.attackerAfter;
@@ -2267,6 +2592,7 @@ function resolveUnitActionCore(
                 tag: 'SKILL',
                 adminConfig,
                 rng,
+                events,
               }
             );
             nextUnits[actorIdx] = res.attackerAfter;
@@ -2287,7 +2613,9 @@ function resolveUnitActionCore(
                   1.0,
                   act.name,
                   round,
-                  rng
+                  rng,
+                  events,
+                  act.id
                 );
                 targetAfter = st.targetAfter;
                 logs.push(...st.logs);
@@ -2303,7 +2631,9 @@ function resolveUnitActionCore(
                   1.0,
                   act.name,
                   round,
-                  rng
+                  rng,
+                  events,
+                  act.id
                 );
                 targetAfter = st.targetAfter;
                 logs.push(...st.logs);
@@ -2349,7 +2679,9 @@ function resolveUnitActionCore(
               1.0,
               act.name,
               round,
-              rng
+              rng,
+              events,
+              act.id
             );
             nextUnits[cIdx] = st.targetAfter;
             logs.push(...st.logs);
@@ -2458,6 +2790,18 @@ function resolveUnitActionCore(
               hp: chosenAlly.hp + healAmt,
               animState: 'shielded',
             };
+            if (healAmt > 0) {
+              events.push({
+                id: nextId('ev'),
+                round,
+                turn: 0,
+                actorId: act.id,
+                targetId: chosenAlly.id,
+                type: 'heal',
+                amount: healAmt,
+                skillId: skill.id,
+              });
+            }
             popups.push({
               id: nextId('pop'),
               unitId: chosenAlly.id,
@@ -2626,6 +2970,18 @@ function resolveUnitActionCore(
               shield: ally.shield + shdGain,
               animState: ally.id === act.id ? 'casting' : 'shielded',
             };
+            if (shdGain > 0) {
+              events.push({
+                id: nextId('ev'),
+                round,
+                turn: 0,
+                actorId: act.id,
+                targetId: ally.id,
+                type: 'shield_grant',
+                amount: shdGain,
+                skillId: skill.id,
+              });
+            }
             popups.push({
               id: nextId('pop'),
               unitId: ally.id,
@@ -2784,11 +3140,23 @@ function resolveUnitActionCore(
             const ally = nextUnits[i];
             if (ally.side !== act.side || !ally.alive) continue;
             slotIndices.push(getSlotIndex(units, ally.id));
+            const hadDebuff = ally.statuses.some((s) => DEBUFF_TYPES.has(s.type));
             nextUnits[i] = {
               ...ally,
               statuses: ally.statuses.filter((s) => !DEBUFF_TYPES.has(s.type)),
               animState: ally.id === act.id ? 'casting' : 'shielded',
             };
+            if (hadDebuff) {
+              events.push({
+                id: nextId('ev'),
+                round,
+                turn: 0,
+                actorId: act.id,
+                targetId: ally.id,
+                type: 'cleanse',
+                skillId: skill.id,
+              });
+            }
             popups.push({
               id: nextId('pop'),
               unitId: ally.id,
@@ -2832,6 +3200,7 @@ function resolveUnitActionCore(
             slotIndices.push(getSlotIndex(units, ally.id));
             const hpGain = ally.derived.maxHp - ally.hp;
             const shdGain = ally.derived.maxShield - ally.shield;
+            const hadDebuff = ally.statuses.some((s) => DEBUFF_TYPES.has(s.type));
             totalRestored += hpGain + shdGain;
             nextUnits[i] = {
               ...ally,
@@ -2840,6 +3209,41 @@ function resolveUnitActionCore(
               statuses: ally.statuses.filter((s) => !DEBUFF_TYPES.has(s.type)),
               animState: ally.id === act.id ? 'casting' : 'shielded',
             };
+            if (hpGain > 0) {
+              events.push({
+                id: nextId('ev'),
+                round,
+                turn: 0,
+                actorId: act.id,
+                targetId: ally.id,
+                type: 'heal',
+                amount: hpGain,
+                skillId: skill.id,
+              });
+            }
+            if (shdGain > 0) {
+              events.push({
+                id: nextId('ev'),
+                round,
+                turn: 0,
+                actorId: act.id,
+                targetId: ally.id,
+                type: 'shield_grant',
+                amount: shdGain,
+                skillId: skill.id,
+              });
+            }
+            if (hadDebuff) {
+              events.push({
+                id: nextId('ev'),
+                round,
+                turn: 0,
+                actorId: act.id,
+                targetId: ally.id,
+                type: 'cleanse',
+                skillId: skill.id,
+              });
+            }
             popups.push({
               id: nextId('pop'),
               unitId: ally.id,
@@ -2922,6 +3326,15 @@ function resolveUnitActionCore(
   const dmgMult = getEffectiveAttackDamageMult(nextUnits[actorIdx], false);
   const rawAttackPower = actor.derived.attackPower * 2.15 * dmgMult;
 
+  events.push({
+    id: nextId('ev'),
+    round,
+    turn: 0,
+    actorId: actor.id,
+    targetId: chosenTarget.id,
+    type: 'attack',
+  });
+
   const res = applyDamageToUnit(
     nextUnits,
     nextUnits[actorIdx],
@@ -2933,6 +3346,7 @@ function resolveUnitActionCore(
       tag: 'ATTACK',
       adminConfig,
       rng,
+      events,
     }
   );
   nextUnits[actorIdx] = res.attackerAfter;
@@ -2956,7 +3370,9 @@ function resolveUnitActionCore(
         archDef.statusChance * 0.55,
         actor.name,
         round,
-        rng
+        rng,
+        events,
+        actor.id
       );
       nextUnits[targetIdx] = st.targetAfter;
       logs.push(...st.logs);
@@ -2984,12 +3400,16 @@ function resolveUnitActionCore(
           : splashDmg;
       let nextShd = otherOpponent.shield;
       let nextHp = otherOpponent.hp;
+      let splashAbsorbed = 0;
+      let splashHpDmg = 0;
       if (!shieldDisabled && nextShd > 0) {
-        const abs = Math.min(nextShd, actualSplash);
-        nextShd -= abs;
-        nextHp = Math.max(0, nextHp - (actualSplash - abs));
+        splashAbsorbed = Math.min(nextShd, actualSplash);
+        nextShd -= splashAbsorbed;
+        splashHpDmg = actualSplash - splashAbsorbed;
+        nextHp = Math.max(0, nextHp - splashHpDmg);
       } else {
-        nextHp = Math.max(0, nextHp - actualSplash);
+        splashHpDmg = actualSplash;
+        nextHp = Math.max(0, nextHp - splashHpDmg);
       }
       const splashKo = nextHp <= 0;
       nextUnits[oIdx] = {
@@ -3000,6 +3420,22 @@ function resolveUnitActionCore(
         animState: splashKo ? 'destroyed' : 'hit',
       };
       if (actualSplash > 0) {
+        events.push({
+          id: nextId('ev'),
+          round,
+          turn: 0,
+          actorId: actor.id,
+          targetId: otherOpponent.id,
+          type: 'damage',
+          amount: actualSplash,
+          shieldAbsorbed: splashAbsorbed,
+          hpDamage: splashHpDmg,
+          flags: {
+            splash: true,
+            shieldAbsorbed: splashAbsorbed > 0,
+            kill: splashKo,
+          },
+        });
         popups.push({
           id: nextId('pop'),
           unitId: otherOpponent.id,
@@ -3022,6 +3458,15 @@ function resolveUnitActionCore(
       }
       if (splashKo) {
         destroyedUnitIds.push(otherOpponent.id);
+        events.push({
+          id: nextId('ev'),
+          round,
+          turn: 0,
+          actorId: actor.id,
+          targetId: otherOpponent.id,
+          type: 'kill',
+          flags: { splash: true, kill: true },
+        });
         logs.push({
           id: nextId('log'),
           round,

@@ -248,10 +248,73 @@ export type BattleSize = 4 | 6 | 8;
 
 export type BattleViewMode = 'card' | 'radar';
 
+export type BaseType =
+  | 'outpost'
+  | 'colony'
+  | 'relay'
+  | 'fortress'
+  | 'shipyard'
+  | 'capital';
+
+export type BaseTokenShape = 'round' | 'square';
+
+export type BaseFaction = 'allied' | 'hostile' | 'neutral';
+
+export type BaseStatus = 'operational' | 'damaged' | 'repairing';
+
+export type BaseNpcRole =
+  | 'quartermaster'
+  | 'mission_officer'
+  | 'pilot_for_hire'
+  | 'engineer';
+
+export interface GarrisonShipSpec {
+  classId: MechClassId;
+  count: number;
+  isBoss?: boolean;
+  isStructure?: boolean;
+}
+
+export interface MapLaneDefinition {
+  id: string;
+  from: string;
+  to: string;
+}
+
+export interface BaseRuntimeState {
+  faction: BaseFaction;
+  status: BaseStatus;
+  repairMonthsRemaining: number; // 0 when operational/damaged, 1..2 when repairing
+  underAttack: boolean;
+  attackCountdownMonths: number; // >0 when underAttack
+  attackFromSectorId: string | null;
+}
+
+export interface HiredWingmanBuff {
+  callsign: string;
+  classId: MechClassId;
+  bonusLevel: number;
+  sourceSectorId: string;
+}
+
+export interface BonusMissionState {
+  id: string;
+  sourceSectorId: string;
+  targetSectorId: string;
+  rewardCredits: number;
+  rewardWarPoints: number;
+  completed: boolean;
+}
+
 export interface SectorDefinition {
   id: string;
   name: string;
   regionCode: string;
+  baseType: BaseType;
+  tokenShape: BaseTokenShape;
+  baseLevel: number;
+  initialFaction: BaseFaction;
+  mapPos: { x: number; y: number };
   difficulty: SectorDifficulty;
   levelOffset: number;
   squadSize: BattleSize;
@@ -259,6 +322,13 @@ export interface SectorDefinition {
   hasBoss: boolean;
   expMultiplier: number;
   creditsMultiplier: number;
+  monthlyCredits: number;
+  monthlyWarPoints: number;
+  repairCost: number;
+  repairMonths: 1 | 2;
+  npcs: BaseNpcRole[];
+  alliedGarrison: GarrisonShipSpec[];
+  hostileGarrison: GarrisonShipSpec[];
   description: string;
 }
 
@@ -354,6 +424,7 @@ export type TacticsConditionKind =
   | 'my_hp_below'
   | 'my_shield_zero'
   | 'my_sp_gte'
+  | 'my_sp_pct_gte'
   | 'my_sp_lt'
   | 'any_ally_hp_below'
   | 'any_ally_has_debuff'
@@ -417,7 +488,41 @@ export type TacticsPresetId =
   | 'focus_weak'
   | 'defensive';
 
+export type SimpleTacticsPresetId =
+  | 'balanced'
+  | 'aggressive'
+  | 'defensive'
+  | 'support_team'
+  | 'save_sp';
+
+export type SimpleTargetPref =
+  | 'weakest'
+  | 'strongest'
+  | 'support_first'
+  | 'sniper_first'
+  | 'front_row';
+
+export type SimpleSkillUsage = 'always' | 'save_sp_50' | 'needed_only';
+
+export type SimpleLowHpAction = 'defend' | 'heal' | 'retreat' | 'nothing';
+
+export type SimpleElitePolicy = 'immediate' | 'boss_only' | 'off';
+
+export interface SimpleTacticsConfig {
+  presetId: SimpleTacticsPresetId;
+  preferredTarget: SimpleTargetPref;
+  skillUsage: SimpleSkillUsage;
+  lowHpThresholdPct: number; // default 35 (10..80)
+  lowHpAction: SimpleLowHpAction;
+  elitePolicy: SimpleElitePolicy;
+  prioritySkillIds: string[]; // up to 3 skill IDs from equipped bar (A > B > C)
+}
+
+export type TacticsMode = 'simple' | 'custom';
+
 export interface GearTacticsProfile {
+  mode?: TacticsMode;
+  simple?: SimpleTacticsConfig;
   rules: TacticsRule[];
   safety: AutoSafetyConfig;
 }
@@ -498,6 +603,11 @@ export interface PilotAccount {
   activeGearId: MechClassId;
   unlockedSectorIds: string[];
   capturedSectorIds: string[];
+  campaignMonth: number;
+  baseStates: Record<string, BaseRuntimeState>;
+  hiredWingman: HiredWingmanBuff | null;
+  engineerShieldBoost: boolean;
+  activeBonusMission: BonusMissionState | null;
 }
 
 export type EnemyArchetype = 'drone' | 'gunship' | 'sniper' | 'repair_ship';
@@ -654,6 +764,152 @@ export interface WingmanChatter {
   textKey: string;
 }
 
+export type BattleEventType =
+  | 'turn_start'
+  | 'attack'
+  | 'skill_cast'
+  | 'damage'
+  | 'dodge'
+  | 'heal'
+  | 'shield_grant'
+  | 'defend'
+  | 'status_applied'
+  | 'cleanse'
+  | 'kill';
+
+export interface BattleEventFlags {
+  crit?: boolean;
+  dodge?: boolean;
+  shieldAbsorbed?: boolean;
+  kill?: boolean;
+  splash?: boolean;
+  counter?: boolean;
+  isDebuff?: boolean;
+  isBurn?: boolean;
+  isRegen?: boolean;
+  invincible?: boolean;
+}
+
+export interface BattleEvent {
+  id: string;
+  round: number;
+  turn: number;
+  actorId: string;
+  targetId?: string;
+  type: BattleEventType;
+  amount?: number;
+  shieldAbsorbed?: number;
+  hpDamage?: number;
+  spSpent?: number;
+  skillId?: string;
+  statusId?: StatusEffectType;
+  flags?: BattleEventFlags;
+}
+
+export interface BattleRoundSnapshot {
+  round: number;
+  allyHp: number;
+  allyMaxHp: number;
+  allyHpPct: number;
+  enemyHp: number;
+  enemyMaxHp: number;
+  enemyHpPct: number;
+}
+
+export interface SkillBreakdownStats {
+  skillId: string; // 'basic_attack' or actual skillId
+  uses: number;
+  damage: number;
+  healing: number;
+  shieldGranted: number;
+  crits: number;
+}
+
+export interface UnitBattleStats {
+  unitId: string;
+  name: string;
+  classId: MechClassId;
+  side: CombatSide;
+  isPlayer: boolean;
+  isBoss: boolean;
+  alive: boolean;
+  hp: number;
+  maxHp: number;
+  damageDealt: number;
+  damageTakenHp: number;
+  damageTakenShield: number;
+  damageTakenTotal: number;
+  healingDone: number;
+  shieldGranted: number;
+  shieldAbsorbed: number;
+  hits: number;
+  crits: number;
+  critRate: number; // 0..100
+  dodges: number;
+  kills: number;
+  deaths: number;
+  turnsTaken: number;
+  spSpent: number;
+  buffsApplied: number;
+  debuffsApplied: number;
+  buffsReceived: number;
+  debuffsReceived: number;
+  damagePerTurn: number;
+  skills: Record<string, SkillBreakdownStats>;
+}
+
+export interface TeamBattleStats {
+  side: CombatSide;
+  damageDealt: number;
+  damageTakenHp: number;
+  damageTakenShield: number;
+  damageTakenTotal: number;
+  healingDone: number;
+  shieldGranted: number;
+  shieldAbsorbed: number;
+  hits: number;
+  crits: number;
+  critRate: number;
+  dodges: number;
+  kills: number;
+  deaths: number;
+  turnsTaken: number;
+  spSpent: number;
+  buffsApplied: number;
+  debuffsApplied: number;
+  aliveCount: number;
+  totalCount: number;
+  remainingHp: number;
+  totalMaxHp: number;
+  remainingHpPct: number;
+}
+
+export interface RoundDamagePoint {
+  round: number;
+  allyCumulativeDamage: number;
+  enemyCumulativeDamage: number;
+}
+
+export interface BattleMvpAward {
+  unitId: string;
+  value: number;
+}
+
+export interface BattleStatsSummary {
+  rounds: number;
+  ally: TeamBattleStats;
+  enemy: TeamBattleStats;
+  units: UnitBattleStats[];
+  roundDamageSeries: RoundDamagePoint[];
+  roundHpSeries: BattleRoundSnapshot[];
+  mvps: {
+    mostDamage: BattleMvpAward | null;
+    mostHealing: BattleMvpAward | null;
+    mostDamageTaken: BattleMvpAward | null;
+    mostDodges: BattleMvpAward | null;
+  };
+}
+
 export interface BattleState {
   sectorId: string;
   deployedGearId: MechClassId;
@@ -662,12 +918,15 @@ export interface BattleState {
   turnOrder: string[];
   activeTurnIndex: number;
   round: number;
+  turnCounter: number;
   selectedTargetId: string | null;
   selectedAllyTargetId: string | null;
   lastPlayerTargetId: string | null;
   autoStopNotice: AutoStopReason | null;
   wingmanChat?: WingmanChatter | null;
   log: CombatLogEntry[];
+  events: BattleEvent[];
+  roundSnapshots: BattleRoundSnapshot[];
   popups: FloatingPopup[];
   fxEvents: CombatFxEvent[];
   explodedUnitIds: string[];
@@ -683,6 +942,7 @@ export interface AdminConfig {
   alwaysWin: boolean;
   rewardMultiplier: number;
   battleSizeOverride: BattleSize | null;
+  softEnrageEnabled: boolean;
 }
 
 export type BaseTab = 'gear' | 'garage' | 'skill' | 'shop' | 'map';

@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Award,
   Backpack,
+  BarChart3,
   ChevronUp,
   Crosshair,
   Flag,
@@ -25,6 +26,7 @@ import { STAT_KEYS } from '../data/classes';
 import { RARITY_META } from '../data/items';
 import { getScaledSkillStats, getSkillById } from '../data/skills';
 import {
+  getEnemyEnrageBonusPct,
   getValidEnemyTargets,
   hasStatus,
   isLongRangeAction,
@@ -55,6 +57,7 @@ import type {
   CombatLogEntry,
 } from '../types/game';
 import { BattleRadarView } from './BattleRadarView';
+import { BattleStatsModal } from './BattleStatsModal';
 import { BattleUnitCard } from './BattleUnitCard';
 import { BottomSheet } from './BottomSheet';
 import { SkillIcon } from './SkillIcon';
@@ -260,6 +263,7 @@ function BattleFxOverlay({ fxEvents }: { fxEvents: CombatFxEvent[] }) {
 export function BattleScreen() {
   const { lang, t } = useI18n();
   const battle = useGameStore((s) => s.battle);
+  const adminConfig = useGameStore((s) => s.adminConfig);
   const battleSpeed = useGameStore((s) => s.battleSpeed);
   const skipAnimations = useGameStore((s) => s.skipAnimations);
   const autoBattleEnabled = useGameStore((s) => s.autoBattleEnabled);
@@ -295,6 +299,7 @@ export function BattleScreen() {
   const [inspectedUnitId, setInspectedUnitId] = useState<string | null>(null);
   const [logSheetOpen, setLogSheetOpen] = useState(false);
   const [suppliesSheetOpen, setSuppliesSheetOpen] = useState(false);
+  const [statsModalOpen, setStatsModalOpen] = useState(false);
   const [mobileSkillsExpanded, setMobileSkillsExpanded] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState<boolean>(() =>
     typeof window !== 'undefined' ? window.innerWidth < 768 : false
@@ -626,9 +631,17 @@ export function BattleScreen() {
 
   return (
     <div className="relative flex-1 min-h-0 flex flex-col bg-tactical-grid overflow-hidden">
-      {/* TOP BAR: TURN QUEUE + VIEW MODE + MANUAL/AUTO + TACTICS + AUTO-REPEAT + SPEED + SKIP + RETREAT */}
+      {/* TOP BAR: TURN QUEUE + VIEW MODE + MANUAL/AUTO + TACTICS + AUTO-REPEAT + SPEED + SKIP + STATS + RETREAT */}
       <div className="shrink-0 border-b border-slate-800/80 bg-[#0A0F18]/95 px-2.5 sm:px-6 py-2 flex flex-col xl:flex-row xl:items-center justify-between gap-2">
-        <TurnQueueBar battle={battle} bypassFx={bypassFx} />
+        <TurnQueueBar
+          battle={battle}
+          battleSpeed={battleSpeed}
+          skipAnimations={skipAnimations}
+          enrageBonusPct={getEnemyEnrageBonusPct(
+            battle.round,
+            adminConfig.softEnrageEnabled
+          )}
+        />
 
         {/* Battle Controls Cluster */}
         <div className="flex flex-wrap items-center gap-1.5 shrink-0">
@@ -800,6 +813,17 @@ export function BattleScreen() {
           >
             <ZapOff className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">{t('battle.skipAnim')}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setStatsModalOpen(true)}
+            title={t('stats.title')}
+            aria-label={t('stats.title')}
+            className="min-h-[36px] px-2.5 inline-flex items-center gap-1 rounded border border-sky-500/45 bg-sky-500/12 hover:bg-sky-500/22 text-sky-200 text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap"
+          >
+            <BarChart3 className="w-3.5 h-3.5 text-sky-400" />
+            <span>{t('stats.btn')}</span>
           </button>
 
           {!battle.summary && (
@@ -1602,24 +1626,34 @@ export function BattleScreen() {
               )}
             </div>
 
-            <div className="flex items-center gap-3 pt-1">
+            <div className="space-y-2 pt-1">
               <button
                 type="button"
-                onClick={returnToHangar}
-                className="flex-1 h-11 px-4 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-sm transition-colors cursor-pointer"
+                onClick={() => setStatsModalOpen(true)}
+                className="w-full min-h-[44px] px-4 rounded border border-sky-500/50 bg-sky-500/12 hover:bg-sky-500/22 text-sky-200 font-semibold text-sm inline-flex items-center justify-center gap-2 transition-colors cursor-pointer"
               >
-                {t('nav.returnHangar')}
+                <BarChart3 className="w-4 h-4 text-sky-400" />
+                <span>{t('stats.title')}</span>
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  clearAutoRepeatSummary();
-                  startAutoRepeat(autoRepeatLimit, battle.sectorId);
-                }}
-                className="flex-1 h-11 px-4 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-100 font-medium text-sm transition-colors cursor-pointer"
-              >
-                {t('auto.repeatStart')}
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={returnToHangar}
+                  className="flex-1 h-11 px-4 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-sm transition-colors cursor-pointer"
+                >
+                  {t('nav.returnHangar')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearAutoRepeatSummary();
+                    startAutoRepeat(autoRepeatLimit, battle.sectorId);
+                  }}
+                  className="flex-1 h-11 px-4 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-100 font-medium text-sm transition-colors cursor-pointer"
+                >
+                  {t('auto.repeatStart')}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1815,21 +1849,32 @@ export function BattleScreen() {
               )}
             </div>
 
-            <div className="flex items-center gap-3 pt-1">
+            <div className="space-y-2 pt-1">
               <button
                 type="button"
-                onClick={returnToHangar}
-                className="flex-1 min-h-[44px] px-4 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-sm transition-colors cursor-pointer whitespace-nowrap"
+                onClick={() => setStatsModalOpen(true)}
+                className="w-full min-h-[44px] px-4 rounded border border-sky-500/50 bg-sky-500/12 hover:bg-sky-500/22 text-sky-200 font-semibold text-sm inline-flex items-center justify-center gap-2 transition-colors cursor-pointer"
               >
-                {t('nav.returnHangar')}
+                <BarChart3 className="w-4 h-4 text-sky-400" />
+                <span>{t('stats.title')}</span>
               </button>
-              <button
-                type="button"
-                onClick={() => startBattle()}
-                className="flex-1 min-h-[44px] px-4 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-100 font-medium text-sm transition-colors cursor-pointer whitespace-nowrap"
-              >
-                {t('summary.nextSortie')}
-              </button>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={returnToHangar}
+                  className="flex-1 min-h-[44px] px-4 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-sm transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  {t('nav.returnHangar')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => startBattle()}
+                  className="flex-1 min-h-[44px] px-4 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-100 font-medium text-sm transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  {t('summary.nextSortie')}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1926,6 +1971,17 @@ export function BattleScreen() {
           {t('battle.noConsumables')}
         </div>
       </BottomSheet>
+
+      {/* BATTLE STATISTICS MODAL (OVERVIEW / UNITS / CHARTS) */}
+      <BattleStatsModal
+        open={statsModalOpen}
+        onClose={() => setStatsModalOpen(false)}
+        battle={battle}
+        enrageBonusPct={getEnemyEnrageBonusPct(
+          battle.round,
+          adminConfig.softEnrageEnabled
+        )}
+      />
     </div>
   );
 }
