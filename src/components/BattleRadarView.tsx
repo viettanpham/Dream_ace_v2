@@ -1,16 +1,25 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef } from 'react';
 import { Radio } from 'lucide-react';
 import { getTeamColorRole, hasStatus } from '../engine/combat';
-import { useI18n } from '../i18n';
+import { getClassName, getStatusLabel, useI18n } from '../i18n';
 import type {
   ActiveStatusEffect,
   BattleState,
   CombatFxEvent,
+  CombatRow,
   CombatUnit,
   FloatingPopup,
   MechClassId,
   TeamColorRole,
 } from '../types/game';
+import {
+  computeRowExposure,
+  formatShortUnitName,
+  layoutStaggeredPopups,
+  useBattleLayoutMode,
+  type BattleLayoutMode,
+  type RowExposureState,
+} from '../utils/battleDisplay';
 
 interface BattleRadarViewProps {
   battle: BattleState;
@@ -20,6 +29,7 @@ interface BattleRadarViewProps {
   hasSingleAllySkill: boolean;
   autoBattleEnabled: boolean;
   skipAnimations: boolean;
+  layoutMode?: BattleLayoutMode;
   onSelectEnemy: (unitId: string) => void;
   onSelectAlly: (unitId: string) => void;
   onInspectUnit: (unit: CombatUnit) => void;
@@ -28,6 +38,21 @@ interface BattleRadarViewProps {
 interface TokenPos {
   x: number;
   y: number;
+}
+
+interface RowLaneRect {
+  side: 'ally' | 'enemy';
+  row: CombatRow;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  labelX: number;
+  labelY: number;
+  labelAnchor: 'start' | 'middle' | 'end';
+  badgeX: number;
+  badgeY: number;
+  badgeAnchor: 'start' | 'middle' | 'end';
 }
 
 const STAR_DOTS = [
@@ -39,8 +64,6 @@ const STAR_DOTS = [
   { x: 91, y: 64, r: 1.0, delay: '3.1s' },
   { x: 18, y: 48, r: 1.0, delay: '2.8s' },
   { x: 74, y: 51, r: 1.2, delay: '0.4s' },
-  { x: 54, y: 62, r: 0.9, delay: '1.5s' },
-  { x: 37, y: 89, r: 1.1, delay: '2.1s' },
 ];
 
 const SPARK_VECTORS = [
@@ -66,7 +89,7 @@ function getTeamHex(role: TeamColorRole): string {
   }
 }
 
-function getStatusDotColor(st: ActiveStatusEffect): string {
+function getStatusColor(st: ActiveStatusEffect): string {
   switch (st.type) {
     case 'burn':
       return '#fb923c';
@@ -90,6 +113,33 @@ function getStatusDotColor(st: ActiveStatusEffect): string {
       return '#34d399';
     default:
       return '#38bdf8';
+  }
+}
+
+function getStatusGlyph(st: ActiveStatusEffect): string {
+  switch (st.type) {
+    case 'burn':
+      return 'F';
+    case 'shield_break':
+    case 'def_down':
+    case 'vulnerable':
+      return '!';
+    case 'slow':
+      return 'S';
+    case 'silence':
+      return 'X';
+    case 'stealth':
+      return 'H';
+    case 'siege_mode':
+    case 'siege_defense':
+    case 'charging':
+      return '⚡';
+    case 'invincible':
+    case 'evade_all':
+    case 'regen_hp':
+      return '+';
+    default:
+      return '▲';
   }
 }
 
@@ -126,14 +176,13 @@ function ClassCenterIcon({
   facingAngle: number;
 }) {
   if (isStructure || isBoss) {
-    // Turret / Flagship Fortress emblem
     return (
       <g transform={`rotate(${facingAngle})`}>
         <rect
-          x="-6.5"
-          y="-6.5"
-          width="13"
-          height="13"
+          x="-6"
+          y="-6"
+          width="12"
+          height="12"
           rx="1.5"
           fill={color}
           fillOpacity="0.28"
@@ -144,112 +193,207 @@ function ClassCenterIcon({
           x1="0"
           y1="-2"
           x2="0"
-          y2="-11"
+          y2="-10"
           stroke="#f8fafc"
-          strokeWidth="2.2"
+          strokeWidth="2"
           strokeLinecap="round"
         />
-        <circle cx="0" cy="0" r="2.8" fill="#f8fafc" />
+        <circle cx="0" cy="0" r="2.6" fill="#f8fafc" />
       </g>
     );
   }
 
   switch (classId) {
     case 'interceptor':
-      // Sleek fast dart fighter
       return (
         <g transform={`rotate(${facingAngle})`}>
           <polygon
-            points="0,-10.5 7.5,7.5 0,4 -7.5,7.5"
+            points="0,-9.5 7,7 0,3.6 -7,7"
             fill={color}
             fillOpacity="0.3"
             stroke={color}
-            strokeWidth="1.5"
+            strokeWidth="1.4"
             strokeLinejoin="round"
           />
-          <polygon points="0,-7 2.4,2.5 0,1 -2.4,2.5" fill="#f8fafc" />
+          <polygon points="0,-6.5 2.2,2.2 0,1 -2.2,2.2" fill="#f8fafc" />
         </g>
       );
     case 'siege':
-      // Bulky gunship with long forward rail cannon
       return (
         <g transform={`rotate(${facingAngle})`}>
           <polygon
-            points="-2,-11 2,-11 3.5,-3 8,-1 8,7.5 -8,7.5 -8,-1 -3.5,-3"
+            points="-2,-10 2,-10 3.2,-2.5 7.5,-1 7.5,7 -7.5,7 -7.5,-1 -3.2,-2.5"
             fill={color}
             fillOpacity="0.32"
             stroke={color}
-            strokeWidth="1.5"
+            strokeWidth="1.4"
             strokeLinejoin="round"
           />
-          <rect x="-1.4" y="-10" width="2.8" height="9" fill="#f8fafc" />
+          <rect x="-1.3" y="-9.2" width="2.6" height="8.2" fill="#f8fafc" />
         </g>
       );
     case 'support':
-      // Rounded cruiser with side pods & repair cross core
       return (
         <g transform={`rotate(${facingAngle})`}>
           <circle
             cx="0"
             cy="0"
-            r="7.5"
+            r="7"
             fill={color}
             fillOpacity="0.24"
             stroke={color}
-            strokeWidth="1.5"
+            strokeWidth="1.4"
           />
-          <rect x="-10" y="-3" width="2.5" height="6" rx="1" fill={color} />
-          <rect x="7.5" y="-3" width="2.5" height="6" rx="1" fill={color} />
+          <rect x="-9.2" y="-2.8" width="2.2" height="5.6" rx="1" fill={color} />
+          <rect x="7" y="-2.8" width="2.2" height="5.6" rx="1" fill={color} />
           <path
-            d="M 0 -4.2 V 4.2 M -4.2 0 H 4.2"
+            d="M 0 -3.8 V 3.8 M -3.8 0 H 3.8"
             stroke="#f8fafc"
-            strokeWidth="2"
+            strokeWidth="1.8"
             strokeLinecap="round"
           />
         </g>
       );
     case 'striker':
     default:
-      // Wide-winged heavy bomber
       return (
         <g transform={`rotate(${facingAngle})`}>
           <polygon
-            points="0,-9.5 3.5,-2 10.5,3.5 9.5,7.5 2.5,5 0,8.5 -2.5,5 -9.5,7.5 -10.5,3.5 -3.5,-2"
+            points="0,-9 3.2,-2 9.5,3.2 8.8,7 2.2,4.5 0,7.8 -2.2,4.5 -8.8,7 -9.5,3.2 -3.2,-2"
             fill={color}
             fillOpacity="0.3"
             stroke={color}
-            strokeWidth="1.45"
+            strokeWidth="1.4"
             strokeLinejoin="round"
           />
-          <circle cx="0" cy="-1.5" r="2" fill="#f8fafc" />
+          <circle cx="0" cy="-1.2" r="1.9" fill="#f8fafc" />
         </g>
       );
   }
 }
 
-function computeUnitPositions(
-  units: CombatUnit[],
+function buildRowLanes(
   isLandscape: boolean,
   vw: number,
   vh: number
+): RowLaneRect[] {
+  if (isLandscape) {
+    // 6 vertical columns: Ally Back | Ally Middle | Ally Front || Enemy Front | Enemy Middle | Enemy Back
+    const padX = 12;
+    const centerGap = 20;
+    const laneGap = 6;
+    const halfW = (vw - padX * 2 - centerGap) / 2;
+    const colW = (halfW - laneGap * 2) / 3;
+    const y = 10;
+    const h = vh - 20;
+
+    const allyRows: CombatRow[] = ['back', 'middle', 'front'];
+    const enemyRows: CombatRow[] = ['front', 'middle', 'back'];
+
+    const lanes: RowLaneRect[] = [];
+    allyRows.forEach((row, i) => {
+      const x = padX + i * (colW + laneGap);
+      lanes.push({
+        side: 'ally',
+        row,
+        x,
+        y,
+        w: colW,
+        h,
+        labelX: x + colW / 2,
+        labelY: y + 15,
+        labelAnchor: 'middle',
+        badgeX: x + colW / 2,
+        badgeY: y + 29,
+        badgeAnchor: 'middle',
+      });
+    });
+
+    const rightStart = padX + halfW + centerGap;
+    enemyRows.forEach((row, i) => {
+      const x = rightStart + i * (colW + laneGap);
+      lanes.push({
+        side: 'enemy',
+        row,
+        x,
+        y,
+        w: colW,
+        h,
+        labelX: x + colW / 2,
+        labelY: y + 15,
+        labelAnchor: 'middle',
+        badgeX: x + colW / 2,
+        badgeY: y + 29,
+        badgeAnchor: 'middle',
+      });
+    });
+
+    return lanes;
+  }
+
+  // Portrait 6 horizontal bands: Enemy Back -> Middle -> Front || Ally Front -> Middle -> Back
+  const padX = 8;
+  const padY = 8;
+  const centerGap = 14;
+  const laneGap = 5;
+  const halfH = (vh - padY * 2 - centerGap) / 2;
+  const rowH = (halfH - laneGap * 2) / 3;
+  const w = vw - padX * 2;
+
+  const enemyRows: CombatRow[] = ['back', 'middle', 'front'];
+  const allyRows: CombatRow[] = ['front', 'middle', 'back'];
+
+  const lanes: RowLaneRect[] = [];
+  enemyRows.forEach((row, i) => {
+    const y = padY + i * (rowH + laneGap);
+    lanes.push({
+      side: 'enemy',
+      row,
+      x: padX,
+      y,
+      w,
+      h: rowH,
+      labelX: padX + 8,
+      labelY: y + 13,
+      labelAnchor: 'start',
+      badgeX: padX + w - 8,
+      badgeY: y + 13,
+      badgeAnchor: 'end',
+    });
+  });
+
+  const bottomStart = padY + halfH + centerGap;
+  allyRows.forEach((row, i) => {
+    const y = bottomStart + i * (rowH + laneGap);
+    lanes.push({
+      side: 'ally',
+      row,
+      x: padX,
+      y,
+      w,
+      h: rowH,
+      labelX: padX + 8,
+      labelY: y + 13,
+      labelAnchor: 'start',
+      badgeX: padX + w - 8,
+      badgeY: y + 13,
+      badgeAnchor: 'end',
+    });
+  });
+
+  return lanes;
+}
+
+function computeUnitPositions(
+  units: CombatUnit[],
+  lanes: RowLaneRect[],
+  isLandscape: boolean
 ): Map<string, TokenPos> {
   const map = new Map<string, TokenPos>();
 
-  const groups: Array<{
-    side: 'ally' | 'enemy';
-    row: 'front' | 'middle' | 'back';
-  }> = [
-    { side: 'enemy', row: 'back' },
-    { side: 'enemy', row: 'middle' },
-    { side: 'enemy', row: 'front' },
-    { side: 'ally', row: 'front' },
-    { side: 'ally', row: 'middle' },
-    { side: 'ally', row: 'back' },
-  ];
-
-  for (const g of groups) {
+  for (const lane of lanes) {
     const rowUnits = units
-      .filter((u) => u.side === g.side && u.row === g.row)
+      .filter((u) => u.side === lane.side && u.row === lane.row)
       .sort((a, b) => (a.formationCol ?? 0) - (b.formationCol ?? 0));
 
     const count = rowUnits.length;
@@ -258,40 +402,16 @@ function computeUnitPositions(
     rowUnits.forEach((unit, idx) => {
       const frac = (idx + 0.5) / count;
       if (isLandscape) {
-        // Horizontal battlefield: Allies on Left (Back -> Middle -> Front) vs Enemies on Right (Front -> Middle -> Back)
-        const x =
-          g.side === 'ally'
-            ? g.row === 'back'
-              ? vw * 0.1
-              : g.row === 'middle'
-              ? vw * 0.24
-              : vw * 0.38
-            : g.row === 'front'
-            ? vw * 0.62
-            : g.row === 'middle'
-            ? vw * 0.76
-            : vw * 0.9;
-        const padY = count >= 4 ? 46 : 58;
-        const usableH = vh - padY * 2;
-        const y = padY + frac * usableH;
+        const topSafe = lane.y + 42;
+        const bottomSafe = lane.y + lane.h - 28;
+        const x = lane.x + lane.w / 2;
+        const y = topSafe + frac * Math.max(20, bottomSafe - topSafe);
         map.set(unit.id, { x, y });
       } else {
-        // Vertical portrait battlefield: Enemies on Top (Back -> Middle -> Front) vs Allies on Bottom (Front -> Middle -> Back)
-        const y =
-          g.side === 'enemy'
-            ? g.row === 'back'
-              ? vh * 0.11
-              : g.row === 'middle'
-              ? vh * 0.245
-              : vh * 0.38
-            : g.row === 'front'
-            ? vh * 0.6
-            : g.row === 'middle'
-            ? vh * 0.74
-            : vh * 0.88;
-        const padX = count >= 4 ? 32 : 42;
-        const usableW = vw - padX * 2;
-        const x = padX + frac * usableW;
+        const leftSafe = lane.x + 34;
+        const rightSafe = lane.x + lane.w - 34;
+        const x = leftSafe + frac * Math.max(20, rightSafe - leftSafe);
+        const y = lane.y + lane.h * 0.54;
         map.set(unit.id, { x, y });
       }
     });
@@ -333,41 +453,56 @@ export function BattleRadarView({
   hasSingleAllySkill,
   autoBattleEnabled,
   skipAnimations,
+  layoutMode: layoutModeProp,
   onSelectEnemy,
   onSelectAlly,
   onInspectUnit,
 }: BattleRadarViewProps) {
-  const { t } = useI18n();
-  const [isLandscape, setIsLandscape] = useState<boolean>(() =>
-    typeof window !== 'undefined' ? window.innerWidth >= 1024 : false
-  );
+  const { lang, t } = useI18n();
+  const detectedMode = useBattleLayoutMode();
+  const layoutMode = layoutModeProp ?? detectedMode;
+  const isLandscape = layoutMode !== 'phone-portrait';
+
   const longPressTimerRef = useRef<number | null>(null);
   const longPressFiredRef = useRef(false);
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const mq = window.matchMedia('(min-width: 1024px)');
-    const onChange = (e: MediaQueryListEvent) => setIsLandscape(e.matches);
-    setIsLandscape(mq.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
-
-  const vw = isLandscape ? 820 : 360;
-  const vh = isLandscape ? 430 : 440;
+  const vw = isLandscape ? 820 : 380;
+  const vh = isLandscape ? 460 : 520;
   const cx = vw / 2;
   const cy = vh / 2;
 
-  const posMap = useMemo(
-    () => computeUnitPositions(battle.units, isLandscape, vw, vh),
-    [battle.units, isLandscape, vw, vh]
+  const lanes = useMemo(
+    () => buildRowLanes(isLandscape, vw, vh),
+    [isLandscape, vw, vh]
   );
 
-  const tokenRadius = battle.squadSize >= 8 && !isLandscape ? 19 : 22;
-  const hpRingR = tokenRadius + 3.5;
-  const shdRingR = tokenRadius + 6.8;
-  const hpCirc = 2 * Math.PI * hpRingR;
-  const shdCirc = 2 * Math.PI * shdRingR;
+  const posMap = useMemo(
+    () => computeUnitPositions(battle.units, lanes, isLandscape),
+    [battle.units, lanes, isLandscape]
+  );
+
+  const enemyExposure = useMemo(
+    () => computeRowExposure(battle.units, 'enemy'),
+    [battle.units]
+  );
+  const allyExposure = useMemo(
+    () => computeRowExposure(battle.units, 'ally'),
+    [battle.units]
+  );
+
+  const staggeredPopups = useMemo(
+    () =>
+      layoutStaggeredPopups(battle.popups, posMap, vw, vh, {
+        maxVisible: 6,
+        verticalStepPct: 7.5,
+        staggerDelayMs: 110,
+        durationMs: 800,
+      }),
+    [battle.popups, posMap, vw, vh]
+  );
+
+  const tokenRadius = isLandscape ? 20 : battle.squadSize >= 8 ? 16 : 18;
+  const barW = isLandscape ? 54 : 50;
 
   const handleTokenTap = (unit: CombatUnit) => {
     if (longPressFiredRef.current) {
@@ -380,7 +515,13 @@ export function BattleRadarView({
     const isEnemySelected = battle.selectedTargetId === unit.id;
     const isAllySelected = battle.selectedAllyTargetId === unit.id;
 
-    if (unit.alive && isEnemy && !isStealthed && canPlayerManualAct && !isEnemySelected) {
+    if (
+      unit.alive &&
+      isEnemy &&
+      !isStealthed &&
+      canPlayerManualAct &&
+      !isEnemySelected
+    ) {
       onSelectEnemy(unit.id);
       return;
     }
@@ -422,24 +563,44 @@ export function BattleRadarView({
     battle.units.find((u) => u.id === battle.wingmanChat?.unitId);
   const chatterPos = chatterUnit ? posMap.get(chatterUnit.id) : null;
 
+  const getRowLabel = (row: CombatRow) =>
+    row === 'front'
+      ? t('common.frontRow')
+      : row === 'middle'
+      ? t('common.middleRow')
+      : t('common.backRow');
+
+  const getExposureLabel = (state: RowExposureState) =>
+    state === 'exposed'
+      ? t('battle.rowExposed')
+      : state === 'protected'
+      ? t('battle.rowProtected')
+      : t('battle.rowEmpty');
+
   return (
-    <div className="relative w-full h-full min-h-[340px] flex items-center justify-center overflow-hidden rounded-xl border border-slate-800/90 bg-[#050A12] select-none">
-      {/* Main Tactical Radar SVG */}
+    <div
+      data-testid="battle-radar-container"
+      style={{ touchAction: 'pan-y' }}
+      className="relative flex-1 min-h-0 w-full h-full flex items-center justify-center overflow-hidden rounded-lg border border-slate-800/90 bg-[#050A12] select-none touch-pan-y"
+    >
+      {/* Main Tactical 3-Row Radar SVG — scales to fit with zero inner scroll & zero clipping */}
       <svg
         viewBox={`0 0 ${vw} ${vh}`}
-        className="w-full h-full max-h-[560px]"
+        preserveAspectRatio="xMidYMid meet"
+        style={{ touchAction: 'pan-y' }}
+        className="w-full h-full touch-pan-y"
         role="img"
         aria-label={t('battle.viewRadar')}
       >
         <defs>
           <radialGradient id="radarBgGlow" cx="50%" cy="50%" r="60%">
-            <stop offset="0%" stopColor="#0f2538" stopOpacity="0.65" />
+            <stop offset="0%" stopColor="#0f2538" stopOpacity="0.6" />
             <stop offset="55%" stopColor="#07111d" stopOpacity="0.88" />
             <stop offset="100%" stopColor="#04080f" stopOpacity="1" />
           </radialGradient>
           <linearGradient id="radarSweepGrad" x1="0%" y1="0%" x2="100%" y2="0%">
             <stop offset="0%" stopColor="#38bdf8" stopOpacity="0" />
-            <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.22" />
+            <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.16" />
           </linearGradient>
         </defs>
 
@@ -454,48 +615,26 @@ export function BattleRadarView({
             cy={(st.y / 100) * vh}
             r={st.r}
             fill="#bae6fd"
-            opacity="0.45"
+            opacity="0.35"
             className={skipAnimations ? undefined : 'anim-radar-star'}
             style={skipAnimations ? undefined : { animationDelay: st.delay }}
           />
         ))}
 
         {/* Concentric tactical range rings */}
-        {[0.24, 0.48, 0.72, 0.96].map((scale, i) => (
+        {[0.32, 0.64, 0.96].map((scale, i) => (
           <circle
             key={i}
             cx={cx}
             cy={cy}
-            r={Math.min(vw, vh) * 0.48 * scale}
+            r={Math.min(vw, vh) * 0.46 * scale}
             fill="none"
             stroke="#38bdf8"
-            strokeOpacity={i === 1 ? '0.16' : '0.09'}
+            strokeOpacity="0.09"
             strokeWidth="1"
-            strokeDasharray={i % 2 === 1 ? '4 5' : undefined}
+            strokeDasharray={i === 1 ? '4 5' : undefined}
           />
         ))}
-
-        {/* Crosshairs */}
-        <line
-          x1="0"
-          y1={cy}
-          x2={vw}
-          y2={cy}
-          stroke={isLandscape ? '#38bdf8' : '#f59e0b'}
-          strokeOpacity={isLandscape ? '0.1' : '0.24'}
-          strokeWidth={isLandscape ? '1' : '1.2'}
-          strokeDasharray={isLandscape ? '3 6' : '6 5'}
-        />
-        <line
-          x1={cx}
-          y1="0"
-          x2={cx}
-          y2={vh}
-          stroke={isLandscape ? '#f59e0b' : '#38bdf8'}
-          strokeOpacity={isLandscape ? '0.24' : '0.1'}
-          strokeWidth={isLandscape ? '1.2' : '1'}
-          strokeDasharray={isLandscape ? '6 5' : '3 6'}
-        />
 
         {/* Rotating radar sweep wedge */}
         {!skipAnimations && (
@@ -504,68 +643,122 @@ export function BattleRadarView({
             style={{ transformOrigin: `${cx}px ${cy}px` }}
           >
             <path
-              d={`M ${cx} ${cy} L ${cx} ${cy - Math.max(vw, vh) * 0.55} A ${
-                Math.max(vw, vh) * 0.55
-              } ${Math.max(vw, vh) * 0.55} 0 0 1 ${
-                cx + Math.max(vw, vh) * 0.25
-              } ${cy - Math.max(vw, vh) * 0.49} Z`}
+              d={`M ${cx} ${cy} L ${cx} ${cy - Math.max(vw, vh) * 0.52} A ${
+                Math.max(vw, vh) * 0.52
+              } ${Math.max(vw, vh) * 0.52} 0 0 1 ${
+                cx + Math.max(vw, vh) * 0.22
+              } ${cy - Math.max(vw, vh) * 0.46} Z`}
               fill="url(#radarSweepGrad)"
-            />
-            <line
-              x1={cx}
-              y1={cy}
-              x2={cx}
-              y2={cy - Math.max(vw, vh) * 0.55}
-              stroke="#38bdf8"
-              strokeOpacity="0.28"
-              strokeWidth="1.2"
             />
           </g>
         )}
 
-        {/* Formation Row Labels */}
+        {/* 3-ROW SEPARATED TACTICAL LANE BANDS (EXPOSED vs PROTECTED vs EMPTY) */}
+        {lanes.map((lane) => {
+          const exposure =
+            lane.side === 'enemy'
+              ? enemyExposure[lane.row]
+              : allyExposure[lane.row];
+          const isEnemySide = lane.side === 'enemy';
+          const isExposed = exposure === 'exposed';
+          const isProtected = exposure === 'protected';
+
+          const fillColor = isExposed
+            ? isEnemySide
+              ? 'rgba(239, 68, 68, 0.11)'
+              : 'rgba(56, 189, 248, 0.11)'
+            : isProtected
+            ? 'rgba(15, 23, 42, 0.62)'
+            : 'rgba(15, 23, 42, 0.28)';
+
+          const strokeColor = isExposed
+            ? isEnemySide
+              ? 'rgba(248, 113, 113, 0.55)'
+              : 'rgba(56, 189, 248, 0.55)'
+            : isProtected
+            ? 'rgba(100, 116, 139, 0.42)'
+            : 'rgba(51, 65, 85, 0.28)';
+
+          const labelFill = isExposed
+            ? isEnemySide
+              ? '#fca5a5'
+              : '#7dd3fc'
+            : '#94a3b8';
+
+          const badgeFill = isExposed
+            ? isEnemySide
+              ? '#f87171'
+              : '#38bdf8'
+            : isProtected
+            ? '#fbbf24'
+            : '#64748b';
+
+          return (
+            <g
+              key={`${lane.side}-${lane.row}`}
+              data-row-band={`${lane.side}-${lane.row}`}
+              data-row-state={exposure}
+            >
+              <rect
+                x={lane.x}
+                y={lane.y}
+                width={lane.w}
+                height={lane.h}
+                rx="6"
+                fill={fillColor}
+                stroke={strokeColor}
+                strokeWidth={isExposed ? '1.4' : '1'}
+                strokeDasharray={isProtected || exposure === 'empty' ? '4 4' : undefined}
+              />
+              <text
+                x={lane.labelX}
+                y={lane.labelY}
+                textAnchor={lane.labelAnchor}
+                fontSize={isLandscape ? '10.5' : '9.5'}
+                fontFamily="monospace"
+                fontWeight="700"
+                fill={labelFill}
+              >
+                {getRowLabel(lane.row)}
+              </text>
+              <text
+                x={lane.badgeX}
+                y={lane.badgeY}
+                textAnchor={lane.badgeAnchor}
+                fontSize={isLandscape ? '9.5' : '8.5'}
+                fontFamily="monospace"
+                fontWeight="700"
+                fill={badgeFill}
+              >
+                {getExposureLabel(exposure)}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* Center Frontline Divider */}
         {isLandscape ? (
-          <g fill="#64748b" fontSize="9.5" fontFamily="monospace" fontWeight="600">
-            <text x={vw * 0.1} y="18" textAnchor="middle">
-              {t('common.backRow')}
-            </text>
-            <text x={vw * 0.24} y="18" textAnchor="middle" fill="#94a3b8">
-              {t('common.middleRow')}
-            </text>
-            <text x={vw * 0.38} y="18" textAnchor="middle" fill="#38bdf8">
-              {t('common.frontRow')}
-            </text>
-            <text x={vw * 0.62} y="18" textAnchor="middle" fill="#f87171">
-              {t('common.frontRow')}
-            </text>
-            <text x={vw * 0.76} y="18" textAnchor="middle" fill="#94a3b8">
-              {t('common.middleRow')}
-            </text>
-            <text x={vw * 0.9} y="18" textAnchor="middle">
-              {t('common.backRow')}
-            </text>
-          </g>
+          <line
+            x1={cx}
+            y1="8"
+            x2={cx}
+            y2={vh - 8}
+            stroke="#f59e0b"
+            strokeOpacity="0.45"
+            strokeWidth="1.5"
+            strokeDasharray="6 5"
+          />
         ) : (
-          <g fill="#64748b" fontSize="8.5" fontFamily="monospace" fontWeight="700">
-            <text x="10" y={vh * 0.11 - 22} fill="#f87171" opacity="0.65">
-              {t('common.backRow')}
-            </text>
-            <text x="10" y={vh * 0.245 - 22} fill="#f87171" opacity="0.8">
-              {t('common.middleRow')}
-            </text>
-            <text x="10" y={vh * 0.38 - 22} fill="#f87171" opacity="0.95">
-              {t('common.frontRow')}
-            </text>
-            <text x="10" y={vh * 0.6 - 22} fill="#38bdf8" opacity="0.95">
-              {t('common.frontRow')}
-            </text>
-            <text x="10" y={vh * 0.74 - 22} fill="#38bdf8" opacity="0.8">
-              {t('common.middleRow')}
-            </text>
-            <text x="10" y={vh * 0.88 - 22} fill="#38bdf8" opacity="0.65">
-              {t('common.backRow')}
-            </text>
-          </g>
+          <line
+            x1="8"
+            y1={cy}
+            x2={vw - 8}
+            y2={cy}
+            stroke="#f59e0b"
+            strokeOpacity="0.45"
+            strokeWidth="1.5"
+            strokeDasharray="6 5"
+          />
         )}
 
         {/* UNIT TOKENS */}
@@ -597,12 +790,8 @@ export function BattleRadarView({
             0,
             Math.min(1, unit.shield / Math.max(1, unit.derived.maxShield))
           );
-          const spPipsTotal = 4;
-          const spPipsFilled = Math.round(
-            (unit.sp / Math.max(1, unit.derived.maxSp)) * spPipsTotal
-          );
 
-          const hpStrokeColor =
+          const hpFillColor =
             hpRatio <= 0.25 ? '#ef4444' : hpRatio <= 0.55 ? '#fb923c' : '#22c55e';
           const facingAngle = isLandscape
             ? isEnemy
@@ -612,23 +801,40 @@ export function BattleRadarView({
             ? 180
             : 0;
 
-          const visibleStatuses = unit.statuses.slice(0, 3);
-          const overflowStatusCount = Math.max(0, unit.statuses.length - 3);
-          const shortName =
-            unit.name.length > 10 ? `${unit.name.slice(0, 9)}…` : unit.name;
+          const shortName = formatShortUnitName(unit.name, 10);
+          const primaryStatus = unit.statuses[0] ?? null;
+          const extraStatuses = Math.max(0, unit.statuses.length - 1);
 
-          const sq = tokenRadius * 1.92;
+          const hoverTooltip = `${unit.name} (${getClassName(
+            lang,
+            unit.classId
+          )}) · ${getRowLabel(unit.row)} · HP ${unit.hp}/${
+            unit.derived.maxHp
+          } · SHD ${unit.shield}/${unit.derived.maxShield}${
+            unit.statuses.length > 0
+              ? ` · ${unit.statuses
+                  .map((s) => getStatusLabel(lang, s.type))
+                  .join(', ')}`
+              : ''
+          }`;
+
+          const sq = tokenRadius * 1.85;
           const halfSq = sq / 2;
-          const cham = 5;
+          const cham = 4;
           const squarePoints = `${-halfSq + cham},${-halfSq} ${halfSq - cham},${-halfSq} ${halfSq},${-halfSq + cham} ${halfSq},${halfSq - cham} ${halfSq - cham},${halfSq} ${-halfSq + cham},${halfSq} ${-halfSq},${halfSq - cham} ${-halfSq},${-halfSq + cham}`;
 
           return (
             <g
               key={unit.id}
+              data-testid={`radar-unit-${unit.id}`}
+              data-unit-row={unit.row}
+              data-unit-side={unit.side}
+              data-acting={isActive ? 'true' : 'false'}
+              data-targeted={isTargeted ? 'true' : 'false'}
               transform={`translate(${pos.x}, ${pos.y})`}
               role="button"
               tabIndex={0}
-              aria-label={`${unit.name} HP ${unit.hp}/${unit.derived.maxHp}`}
+              aria-label={hoverTooltip}
               onClick={() => handleTokenTap(unit)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
@@ -643,16 +849,18 @@ export function BattleRadarView({
               className="cursor-pointer focus:outline-none"
               opacity={
                 !unit.alive
-                  ? 0.34
+                  ? 0.32
                   : isStealthed
                   ? 0.58
                   : isBlockedByFront
-                  ? 0.8
+                  ? 0.78
                   : 1
               }
             >
-              {/* Generous invisible touch target (>= 48px on mobile) */}
-              <circle cx="0" cy="0" r={tokenRadius + 12} fill="transparent" />
+              <title>{hoverTooltip}</title>
+
+              {/* Generous transparent hit target (>= 44px on phone) */}
+              <circle cx="0" cy="0" r={tokenRadius + 14} fill="transparent" />
 
               <g
                 className={
@@ -660,163 +868,70 @@ export function BattleRadarView({
                 }
                 style={
                   unit.alive && !skipAnimations
-                    ? { animationDelay: `${(idx % 5) * 0.45}s` }
+                    ? { animationDelay: `${(idx % 5) * 0.4}s` }
                     : undefined
                 }
               >
-                {/* Active Turn Gold-White Glow */}
+                {/* Acting Unit Gold-White Highlight Halo */}
                 {isActive && unit.alive && (
                   <circle
                     cx="0"
                     cy="0"
-                    r={shdRingR + 5}
-                    fill="rgba(254, 240, 138, 0.14)"
+                    r={tokenRadius + 7}
+                    fill="rgba(254, 240, 138, 0.16)"
                     stroke="#fef08a"
-                    strokeWidth="2.2"
+                    strokeWidth="2.4"
                   />
                 )}
 
-                {/* Pulsing Target Reticle Brackets */}
+                {/* Target Lock Reticle Brackets */}
                 {isTargeted && (
                   <g className={skipAnimations ? undefined : 'anim-reticle-pulse'}>
                     <path
-                      d={`M ${-shdRingR - 5} ${-shdRingR + 3} V ${-shdRingR - 5} H ${-shdRingR + 3}
-                          M ${shdRingR - 3} ${-shdRingR - 5} H ${shdRingR + 5} V ${-shdRingR + 3}
-                          M ${shdRingR + 5} ${shdRingR - 3} V ${shdRingR + 5} H ${shdRingR - 3}
-                          M ${-shdRingR + 3} ${shdRingR + 5} H ${-shdRingR - 5} V ${shdRingR - 3}`}
+                      d={`M ${-tokenRadius - 7} ${-tokenRadius + 2} V ${-tokenRadius - 7} H ${-tokenRadius + 2}
+                          M ${tokenRadius - 2} ${-tokenRadius - 7} H ${tokenRadius + 7} V ${-tokenRadius + 2}
+                          M ${tokenRadius + 7} ${tokenRadius - 2} V ${tokenRadius + 7} H ${tokenRadius - 2}
+                          M ${-tokenRadius + 2} ${tokenRadius + 7} H ${-tokenRadius - 7} V ${tokenRadius - 2}`}
                       fill="none"
                       stroke={isEnemy ? '#ef4444' : '#22c55e'}
-                      strokeWidth="2"
+                      strokeWidth="2.2"
                       strokeLinecap="round"
                     />
                   </g>
                 )}
 
-                {/* Shield Bubble when Defending / Invincible */}
+                {/* Defending / Invincible Shield Aura */}
                 {unit.alive &&
                   (unit.isDefending || hasStatus(unit, 'invincible')) && (
                     <circle
                       cx="0"
                       cy="0"
-                      r={shdRingR + 2.5}
-                      fill="rgba(56, 189, 248, 0.12)"
+                      r={tokenRadius + 4}
+                      fill="rgba(56, 189, 248, 0.14)"
                       stroke="#38bdf8"
-                      strokeWidth="1.2"
+                      strokeWidth="1.4"
                       strokeDasharray="3 3"
                     />
                   )}
 
-                {/* Token Body: Square for Structures/Bosses, Circle for Ships */}
+                {/* Token Body */}
                 {isSquare ? (
-                  <>
-                    <polygon
-                      points={squarePoints}
-                      fill="#0b1320"
-                      stroke={isActive ? '#fef08a' : teamHex}
-                      strokeWidth={isActive ? '2.2' : '1.8'}
-                    />
-                    {/* Horizontal HP bar along bottom edge of square */}
-                    <rect
-                      x={-halfSq + 4}
-                      y={halfSq - 5}
-                      width={sq - 8}
-                      height="3"
-                      rx="1"
-                      fill="#1e293b"
-                    />
-                    <rect
-                      x={-halfSq + 4}
-                      y={halfSq - 5}
-                      width={Math.max(0, (sq - 8) * hpRatio)}
-                      height="3"
-                      rx="1"
-                      fill={hpStrokeColor}
-                    />
-                    {/* Thin Shield bar along top edge of square */}
-                    {unit.derived.maxShield > 0 && (
-                      <>
-                        <rect
-                          x={-halfSq + 4}
-                          y={-halfSq + 2}
-                          width={sq - 8}
-                          height="2.2"
-                          rx="1"
-                          fill="#1e293b"
-                        />
-                        <rect
-                          x={-halfSq + 4}
-                          y={-halfSq + 2}
-                          width={Math.max(0, (sq - 8) * shdRatio)}
-                          height="2.2"
-                          rx="1"
-                          fill="#38bdf8"
-                        />
-                      </>
-                    )}
-                  </>
+                  <polygon
+                    points={squarePoints}
+                    fill="#0b1320"
+                    stroke={isActive ? '#fef08a' : teamHex}
+                    strokeWidth={isActive ? '2.2' : '1.8'}
+                  />
                 ) : (
-                  <>
-                    {/* Outer Shield Arc Track + Fill */}
-                    {unit.derived.maxShield > 0 && (
-                      <>
-                        <circle
-                          cx="0"
-                          cy="0"
-                          r={shdRingR}
-                          fill="none"
-                          stroke="#1e293b"
-                          strokeWidth="1.8"
-                        />
-                        <circle
-                          cx="0"
-                          cy="0"
-                          r={shdRingR}
-                          fill="none"
-                          stroke={
-                            hasStatus(unit, 'shield_break') ? '#ef4444' : '#38bdf8'
-                          }
-                          strokeWidth="1.8"
-                          strokeDasharray={shdCirc}
-                          strokeDashoffset={shdCirc * (1 - shdRatio)}
-                          strokeLinecap="round"
-                          transform="rotate(-90)"
-                        />
-                      </>
-                    )}
-
-                    {/* HP Progress Arc Track + Fill */}
-                    <circle
-                      cx="0"
-                      cy="0"
-                      r={hpRingR}
-                      fill="none"
-                      stroke="#1e293b"
-                      strokeWidth="2.8"
-                    />
-                    <circle
-                      cx="0"
-                      cy="0"
-                      r={hpRingR}
-                      fill="none"
-                      stroke={hpStrokeColor}
-                      strokeWidth="2.8"
-                      strokeDasharray={hpCirc}
-                      strokeDashoffset={hpCirc * (1 - hpRatio)}
-                      strokeLinecap="round"
-                      transform="rotate(-90)"
-                    />
-
-                    {/* Inner Ship Core Circle */}
-                    <circle
-                      cx="0"
-                      cy="0"
-                      r={tokenRadius - 1}
-                      fill="#0b1320"
-                      stroke={isActive ? '#fef08a' : teamHex}
-                      strokeWidth={isActive ? '2' : '1.4'}
-                      strokeDasharray={isStealthed ? '3 2' : undefined}
-                    />
-                  </>
+                  <circle
+                    cx="0"
+                    cy="0"
+                    r={tokenRadius}
+                    fill="#0b1320"
+                    stroke={isActive ? '#fef08a' : teamHex}
+                    strokeWidth={isActive ? '2.2' : '1.6'}
+                    strokeDasharray={isStealthed ? '3 2' : undefined}
+                  />
                 )}
 
                 {/* Center Class Silhouette */}
@@ -830,57 +945,48 @@ export function BattleRadarView({
                   />
                 ) : (
                   <path
-                    d="M -6 -6 L 6 6 M 6 -6 L -6 6"
+                    d="M -5.5 -5.5 L 5.5 5.5 M 5.5 -5.5 L -5.5 5.5"
                     stroke="#64748b"
                     strokeWidth="2.2"
                     strokeLinecap="round"
                   />
                 )}
 
-                {/* SP Pips underneath icon */}
-                {unit.alive && (
-                  <g transform={`translate(0, ${tokenRadius - 6})`}>
-                    {Array.from({ length: spPipsTotal }).map((_, pIdx) => {
-                      const px = (pIdx - (spPipsTotal - 1) / 2) * 4.5;
-                      return (
-                        <circle
-                          key={pIdx}
-                          cx={px}
-                          cy="0"
-                          r="1.4"
-                          fill={pIdx < spPipsFilled ? '#c084fc' : '#334155'}
-                        />
-                      );
-                    })}
-                  </g>
-                )}
-
-                {/* Up to 3 Status Mini-Badges + Overflow */}
-                {unit.alive && visibleStatuses.length > 0 && (
+                {/* Status Icon Badge (top-right of token) */}
+                {unit.alive && primaryStatus && (
                   <g
-                    transform={`translate(${tokenRadius - 2}, ${-tokenRadius - 4})`}
+                    data-testid={`radar-status-${unit.id}`}
+                    transform={`translate(${tokenRadius - 1}, ${-tokenRadius + 1})`}
                   >
-                    {visibleStatuses.map((st, sIdx) => (
-                      <circle
-                        key={st.type}
-                        cx={sIdx * 6.5 - 6}
-                        cy="0"
-                        r="3"
-                        fill={getStatusDotColor(st)}
-                        stroke="#050a12"
-                        strokeWidth="1"
-                      />
-                    ))}
-                    {overflowStatusCount > 0 && (
+                    <circle
+                      cx="0"
+                      cy="0"
+                      r="6.5"
+                      fill="#050a12"
+                      stroke={getStatusColor(primaryStatus)}
+                      strokeWidth="1.4"
+                    />
+                    <text
+                      x="0"
+                      y="3"
+                      textAnchor="middle"
+                      fontSize="8"
+                      fontFamily="monospace"
+                      fontWeight="800"
+                      fill={getStatusColor(primaryStatus)}
+                    >
+                      {getStatusGlyph(primaryStatus)}
+                    </text>
+                    {extraStatuses > 0 && (
                       <text
-                        x={visibleStatuses.length * 6.5 - 3}
+                        x="9.5"
                         y="3"
-                        fontSize="8"
+                        fontSize="7.5"
                         fontFamily="monospace"
-                        fontWeight="700"
+                        fontWeight="800"
                         fill="#e2e8f0"
                       >
-                        +{overflowStatusCount}
+                        +{extraStatuses}
                       </text>
                     )}
                   </g>
@@ -888,7 +994,7 @@ export function BattleRadarView({
 
                 {/* AUTO Badge on Player Token */}
                 {unit.isPlayer && autoBattleEnabled && unit.alive && (
-                  <g transform={`translate(0, ${-shdRingR - 9})`}>
+                  <g transform={`translate(0, ${-tokenRadius - 9})`}>
                     <rect
                       x="-15"
                       y="-6"
@@ -911,13 +1017,13 @@ export function BattleRadarView({
                   </g>
                 )}
 
-                {/* Explosion Particle Burst on Destruction */}
+                {/* Explosion Particle Burst */}
                 {!skipAnimations && exploding && (
                   <g>
                     <circle
                       cx="0"
                       cy="0"
-                      r="20"
+                      r="18"
                       fill="none"
                       stroke="#fb923c"
                       strokeWidth="3"
@@ -928,7 +1034,7 @@ export function BattleRadarView({
                         key={sIdx}
                         cx="0"
                         cy="0"
-                        r="3"
+                        r="2.8"
                         fill={sIdx % 2 === 0 ? '#fde047' : '#ef4444'}
                         className="anim-explosion-spark"
                         style={
@@ -943,23 +1049,63 @@ export function BattleRadarView({
                 )}
               </g>
 
-              {/* Short Name Label Below Token */}
-              <g transform={`translate(0, ${shdRingR + 12})`}>
+              {/* HP + Shield Linear Bars + Short Name Plate (directly below token, fixed width = zero shift) */}
+              <g transform={`translate(0, ${tokenRadius + 5})`}>
+                {/* HP Bar */}
                 <rect
-                  x="-32"
-                  y="-7.5"
-                  width="64"
+                  x={-barW / 2}
+                  y="0"
+                  width={barW}
+                  height="3.6"
+                  rx="1.5"
+                  fill="#1e293b"
+                />
+                <rect
+                  x={-barW / 2}
+                  y="0"
+                  width={Math.max(0, barW * hpRatio)}
+                  height="3.6"
+                  rx="1.5"
+                  fill={hpFillColor}
+                />
+
+                {/* Shield Bar */}
+                <rect
+                  x={-barW / 2}
+                  y="4.6"
+                  width={barW}
+                  height="2.4"
+                  rx="1"
+                  fill="#1e293b"
+                />
+                {unit.derived.maxShield > 0 && (
+                  <rect
+                    x={-barW / 2}
+                    y="4.6"
+                    width={Math.max(0, barW * shdRatio)}
+                    height="2.4"
+                    rx="1"
+                    fill={hasStatus(unit, 'shield_break') ? '#ef4444' : '#38bdf8'}
+                  />
+                )}
+
+                {/* Short Name (max 10 chars, no wrap) */}
+                <rect
+                  x={-barW / 2 - 4}
+                  y="8.5"
+                  width={barW + 8}
                   height="12"
                   rx="3"
-                  fill="rgba(5, 10, 18, 0.82)"
+                  fill="rgba(5, 10, 18, 0.88)"
                 />
                 <text
+                  data-testid="radar-unit-name"
                   x="0"
-                  y="1.5"
+                  y="17.2"
                   textAnchor="middle"
                   fontSize="9"
                   fontWeight="700"
-                  fill={isActive ? '#fef08a' : unit.alive ? '#e2e8f0' : '#64748b'}
+                  fill={isActive ? '#fef08a' : unit.alive ? '#f1f5f9' : '#64748b'}
                 >
                   {shortName}
                 </text>
@@ -995,10 +1141,10 @@ export function BattleRadarView({
                         <circle
                           cx={to.x}
                           cy={to.y}
-                          r="16"
+                          r="14"
                           fill="none"
                           stroke="#34d399"
-                          strokeWidth="2.5"
+                          strokeWidth="2.4"
                           className="anim-radar-impact"
                         />
                       </g>
@@ -1014,7 +1160,7 @@ export function BattleRadarView({
                           x2={to.x}
                           y2={to.y}
                           stroke={fx.accentHex}
-                          strokeWidth="6"
+                          strokeWidth="5.5"
                           opacity="0.4"
                           className="anim-beam"
                         />
@@ -1024,13 +1170,13 @@ export function BattleRadarView({
                           x2={to.x}
                           y2={to.y}
                           stroke="#fef9c3"
-                          strokeWidth="2.2"
+                          strokeWidth="2"
                           className="anim-beam"
                         />
                         <circle
                           cx={to.x}
                           cy={to.y}
-                          r="15"
+                          r="14"
                           fill="none"
                           stroke={fx.accentHex}
                           strokeWidth="2.4"
@@ -1061,14 +1207,14 @@ export function BattleRadarView({
                           } ${to.x} ${to.y}`}
                           fill="none"
                           stroke="#fde047"
-                          strokeWidth="1.8"
+                          strokeWidth="1.6"
                           strokeLinecap="round"
                           className="anim-missile"
                         />
                         <circle
                           cx={to.x}
                           cy={to.y}
-                          r="14"
+                          r="13"
                           fill="none"
                           stroke="#fb923c"
                           strokeWidth="2.2"
@@ -1078,7 +1224,6 @@ export function BattleRadarView({
                     );
                   }
 
-                  // Default laser bolt
                   return (
                     <g key={tIdx}>
                       <line
@@ -1087,7 +1232,7 @@ export function BattleRadarView({
                         x2={to.x}
                         y2={to.y}
                         stroke={fx.accentHex}
-                        strokeWidth="3.2"
+                        strokeWidth="3"
                         strokeLinecap="round"
                         className="anim-bolt"
                       />
@@ -1104,7 +1249,7 @@ export function BattleRadarView({
                       <circle
                         cx={to.x}
                         cy={to.y}
-                        r="12"
+                        r="11"
                         fill="none"
                         stroke={fx.accentHex}
                         strokeWidth="2"
@@ -1118,26 +1263,26 @@ export function BattleRadarView({
           })}
       </svg>
 
-      {/* Floating Damage / Status Popups Overlay (aligned to token percentages) */}
-      {!skipAnimations && battle.popups.length > 0 && (
+      {/* Staggered Floating Damage / Status Popups Overlay (vertical + time staggered, capped, 800ms fade) */}
+      {!skipAnimations && staggeredPopups.length > 0 && (
         <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          {battle.popups.map((pop, idx) => {
-            const pos = posMap.get(pop.unitId);
-            if (!pos) return null;
-            const leftPct = (pos.x / vw) * 100;
-            const topPct = Math.max(4, (pos.y / vh) * 100 - 4 - (idx % 3) * 3.5);
-            return (
-              <div
-                key={pop.id}
-                style={{ left: `${leftPct}%`, top: `${topPct}%` }}
-                className={`absolute z-20 font-display text-base sm:text-lg font-bold tracking-wider drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)] whitespace-nowrap anim-popup ${getPopupColorClass(
-                  pop.tone
-                )}`}
-              >
-                {pop.text}
-              </div>
-            );
-          })}
+          {staggeredPopups.map((item) => (
+            <div
+              key={item.popup.id}
+              data-testid="damage-popup"
+              style={{
+                left: `${item.leftPct}%`,
+                top: `${item.topPct}%`,
+                animationDelay: `${item.delayMs}ms`,
+                animationDuration: `${item.durationMs}ms`,
+              }}
+              className={`absolute z-20 font-display text-[20px] font-bold tracking-wider drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)] whitespace-nowrap anim-popup ${getPopupColorClass(
+                item.popup.tone
+              )}`}
+            >
+              {item.popup.text}
+            </div>
+          ))}
         </div>
       )}
 
@@ -1146,22 +1291,19 @@ export function BattleRadarView({
         <div
           style={{
             left: `${Math.min(78, Math.max(22, (chatterPos.x / vw) * 100))}%`,
-            top: `${Math.max(6, (chatterPos.y / vh) * 100 - 11)}%`,
+            top: `${Math.max(6, (chatterPos.y / vh) * 100 - 12)}%`,
           }}
-          className="pointer-events-none absolute z-30 -translate-x-1/2 max-w-[200px] rounded-lg border border-sky-400/70 bg-[#071322]/95 px-2.5 py-1.5 shadow-lg flex items-start gap-1.5"
+          className="pointer-events-none absolute z-30 -translate-x-1/2 max-w-[210px] rounded-lg border border-sky-400/70 bg-[#071322]/95 px-2.5 py-1.5 shadow-lg flex items-start gap-1.5"
         >
           <Radio className="w-3.5 h-3.5 text-sky-400 shrink-0 mt-0.5" />
-          <div className="min-w-0 text-[11px] leading-tight text-sky-100">
-            <span className="font-bold text-sky-300">{chatterUnit.name}: </span>
+          <div className="min-w-0 text-[12px] leading-tight text-sky-100">
+            <span className="font-bold text-sky-300">
+              {formatShortUnitName(chatterUnit.name, 10)}:{' '}
+            </span>
             <span>{t(battle.wingmanChat.textKey as Parameters<typeof t>[0])}</span>
           </div>
         </div>
       )}
-
-      {/* Bottom Corner Hint */}
-      <div className="pointer-events-none absolute bottom-2 right-2.5 text-[10px] font-mono-nums text-slate-400/80 bg-slate-950/75 px-2 py-0.5 rounded border border-slate-800/80">
-        {t('mobile.tapInspect')}
-      </div>
     </div>
   );
 }

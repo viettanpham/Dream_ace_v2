@@ -2,6 +2,8 @@ import { useRef, useState, type PointerEvent, type WheelEvent } from 'react';
 import {
   AlertTriangle,
   Calendar,
+  ChevronDown,
+  ChevronUp,
   Coins,
   FastForward,
   Lock,
@@ -160,6 +162,7 @@ export function MapView() {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [mobileBriefingOpen, setMobileBriefingOpen] = useState(false);
+  const [preBattleDetailsOpen, setPreBattleDetailsOpen] = useState(false);
   const [hireClass, setHireClass] = useState<MechClassId>('interceptor');
 
   // Pointer drag-to-pan & 2-finger pinch-to-zoom state
@@ -218,6 +221,7 @@ export function MapView() {
     if (!pilot.unlockedSectorIds.includes(sectorId)) return;
     soundFx.playClick();
     selectSector(sectorId);
+    setPreBattleDetailsOpen(false);
     setMobileBriefingOpen(true);
   };
 
@@ -523,9 +527,48 @@ export function MapView() {
           </div>
         )}
 
-        <p className="text-sm lg:text-xs text-slate-300 leading-relaxed">
-          {getSectorDesc(lang, selectedSector.id)}
-        </p>
+        {/* Pre-battle intro: single short line + collapsible Details section */}
+        <div
+          data-testid="prebattle-intro"
+          className="rounded-lg border border-slate-800/90 bg-[#080C15] p-2.5 space-y-2"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[13px] text-slate-200 font-medium truncate">
+              {t('battle.preBattleSummary', {
+                region: getSectorRegion(lang, selectedSector.id),
+                difficulty: getDifficultyLabel(lang, selectedSector.difficulty),
+                size: effectiveSquadSize,
+                level: estimatedEnemyLevel,
+              })}
+            </p>
+            <button
+              type="button"
+              data-testid="prebattle-details-toggle"
+              aria-expanded={preBattleDetailsOpen}
+              onClick={() => setPreBattleDetailsOpen((v) => !v)}
+              className="min-h-[44px] px-3 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-sky-300 text-[13px] font-semibold inline-flex items-center gap-1 shrink-0 cursor-pointer"
+            >
+              <span>
+                {preBattleDetailsOpen
+                  ? t('battle.detailsHide')
+                  : t('battle.detailsShow')}
+              </span>
+              {preBattleDetailsOpen ? (
+                <ChevronUp className="w-4 h-4 shrink-0" />
+              ) : (
+                <ChevronDown className="w-4 h-4 shrink-0" />
+              )}
+            </button>
+          </div>
+          {preBattleDetailsOpen && (
+            <p
+              data-testid="prebattle-details-content"
+              className="text-[13px] text-slate-300 leading-relaxed pt-2 border-t border-slate-800/80"
+            >
+              {getSectorDesc(lang, selectedSector.id)}
+            </p>
+          )}
+        </div>
 
         {/* Stationed Fleet (Garrison) as small ship icons */}
         <div className="rounded-lg border border-slate-800 bg-[#080C15] p-3 space-y-2">

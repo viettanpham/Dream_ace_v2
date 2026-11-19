@@ -1225,5 +1225,30 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'admin.battleSizeOverride': 'Ghi đè Quy mô Trận',
   'admin.rewardMult': 'Hệ số phần thưởng',
   'admin.unlockAllSectors': 'Mở khóa tất cả Khu vực',
+
+  // Battle Screen Redesign (Phone / Tablet / PC + Exit Confirm + 3-Row Exposure + Pre-Battle Details)
+  'battle.leaveTitle': 'Rời trận chiến?',
+  'battle.leaveMessage':
+    'Rời lúc này sẽ thoát khỏi trận đang đánh và quay về căn cứ. Tiến trình trận này sẽ bị hủy.',
+  'battle.leaveConfirm': 'Rời trận',
+  'battle.leaveCancel': 'Ở lại trận',
+  'battle.moreActions': 'Thêm thao tác',
+  'battle.autoCollapsedBar': 'AUTO đang chạy · Đã mở rộng chiến trường',
+  'battle.switchManual': 'Thủ công',
+  'battle.speedCycleTooltip': 'Đổi tốc độ trận (x1 / x2 / x3)',
+  'battle.rowExposed': 'Lộ diện',
+  'battle.rowProtected': 'Được che',
+  'battle.rowEmpty': 'Trống',
+  'battle.selectedUnitTitle': 'Đơn vị đang chọn',
+  'battle.noUnitSelected': 'Chọn một đơn vị trên chiến trường để xem chỉ số và hiệu ứng.',
+  'battle.viewSwitchTooltip': 'Chuyển giữa chế độ Radar và Thẻ',
+  'battle.menuTitle': 'Menu trận chiến',
+  'battle.detailsShow': 'Chi tiết',
+  'battle.detailsHide': 'Ẩn chi tiết',
+  'battle.preBattleSummary': '{region} · {difficulty} · {size}v{size} · ~Lv.{level}',
+  'battle.yourTurnShort': 'Lượt của bạn',
+  'battle.aiTurnShort': 'Lượt {name}',
+  'battle.targetShort': 'Mục tiêu',
+  'battle.skillsSheetTitle': 'Kỹ năng chủ động',
 };
 

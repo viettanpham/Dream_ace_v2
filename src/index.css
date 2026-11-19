@@ -214,19 +214,38 @@
 @keyframes float-popup {
   0% {
     opacity: 0;
-    transform: translate(-50%, 6px) scale(0.88);
+    transform: translate(-50%, 4px) scale(0.92);
   }
   18% {
     opacity: 1;
-    transform: translate(-50%, -8px) scale(1.04);
+    transform: translate(-50%, -6px) scale(1.03);
   }
-  80% {
+  78% {
     opacity: 1;
-    transform: translate(-50%, -26px) scale(1);
+    transform: translate(-50%, -22px) scale(1);
   }
   100% {
     opacity: 0;
-    transform: translate(-50%, -36px) scale(0.95);
+    transform: translate(-50%, -30px) scale(0.96);
+  }
+}
+
+@keyframes float-popup-reduced {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 0);
+  }
+  15% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  80% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, 0);
   }
 }
 
@@ -312,7 +331,7 @@
 }
 
 .anim-popup {
-  animation: float-popup 950ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: float-popup 800ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @keyframes radar-sweep {
@@ -449,6 +468,19 @@
   .meter-trail {
     transition: none;
   }
+  .anim-popup {
+    animation: float-popup-reduced 800ms linear both;
+  }
+}
+
+/* Horizontal strip scrollbar (phone turn queue inner scroll only) */
+.battle-strip-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.battle-strip-scroll::-webkit-scrollbar {
+  display: none;
 }
 
 /* Custom sleek dark scrollbar for combat log */

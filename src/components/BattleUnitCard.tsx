@@ -42,6 +42,7 @@ import type {
   StatusEffectType,
   TeamColorRole,
 } from '../types/game';
+import { formatShortUnitName } from '../utils/battleDisplay';
 import { FighterSvg } from './FighterSvg';
 import { StatBar } from './StatBar';
 
@@ -359,13 +360,18 @@ export function BattleUnitCard({
         skipAnimations
       )}`}
     >
-      {/* Floating Popups (skipped when skipAnimations active) */}
+      {/* Staggered Floating Popups (max 3 per card, 800ms fade, vertical + time staggered) */}
       {!skipAnimations &&
-        popups.map((pop, idx) => (
+        popups.slice(-3).map((pop, idx) => (
           <div
             key={pop.id}
-            style={{ top: `${10 + idx * 18}px` }}
-            className={`pointer-events-none absolute left-1/2 z-20 font-display text-lg font-bold tracking-wider drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] whitespace-nowrap anim-popup ${getPopupColor(
+            data-testid="damage-popup"
+            style={{
+              top: `${-6 - idx * 22}px`,
+              animationDelay: `${idx * 110}ms`,
+              animationDuration: '800ms',
+            }}
+            className={`pointer-events-none absolute left-1/2 z-20 font-display text-[20px] font-bold tracking-wider drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)] whitespace-nowrap anim-popup ${getPopupColor(
               pop.tone
             )}`}
           >
@@ -412,7 +418,7 @@ export function BattleUnitCard({
             <div className="min-w-0 flex-1">
               <div
                 className={`font-display ${
-                  compact ? 'text-sm' : 'text-lg'
+                  compact ? 'text-[15px]' : 'text-[15px]'
                 } font-bold leading-tight text-slate-100 truncate flex items-center gap-1 ${
                   isEnemy && !compact ? 'justify-end' : 'justify-start'
                 }`}
@@ -425,7 +431,7 @@ export function BattleUnitCard({
                 )}
                 {!compact && (
                   <span
-                    className="text-[9px] font-mono-nums font-bold px-1 py-0.5 rounded border shrink-0"
+                    className="text-[12px] font-mono-nums font-bold px-1 rounded border shrink-0"
                     style={{
                       color: teamVars.accent,
                       borderColor: teamVars.border,
@@ -436,43 +442,37 @@ export function BattleUnitCard({
                   </span>
                 )}
                 <span
-                  className="truncate"
+                  className="truncate whitespace-nowrap"
+                  title={unit.name}
                   style={{ color: unit.alive ? teamVars.accent : undefined }}
                 >
-                  {unit.name}
+                  {compact ? formatShortUnitName(unit.name, 10) : unit.name}
                 </span>
                 {unit.isPlayer && autoActive && unit.alive && (
-                  <span className="px-1 py-0.5 rounded bg-emerald-500 text-slate-950 text-[9px] font-mono-nums font-extrabold tracking-wider shrink-0">
+                  <span className="px-1 rounded bg-emerald-500 text-slate-950 text-[12px] font-mono-nums font-extrabold tracking-wider shrink-0">
                     {t('auto.badge')}
                   </span>
                 )}
                 {unit.isStructure && unit.alive && (
-                  <span className="px-1 py-0.5 rounded bg-orange-500/20 border border-orange-400/50 text-[9px] font-mono-nums font-bold text-orange-300 shrink-0">
+                  <span className="px-1 rounded bg-orange-500/20 border border-orange-400/50 text-[12px] font-mono-nums font-bold text-orange-300 shrink-0">
                     {t('battle.structureTag')}
                   </span>
                 )}
-                {!compact && unit.row !== 'front' && unit.alive && (
-                  <span className="px-1 py-0.5 rounded bg-sky-500/15 border border-sky-400/40 text-[9px] font-mono-nums font-semibold text-sky-300 shrink-0">
-                    {unit.row === 'middle'
-                      ? t('common.middleRow')
-                      : t('common.backRow')}
-                  </span>
-                )}
               </div>
-              <div className="mt-0.5 text-[11px] text-slate-400 truncate">
+              <div className="mt-0.5 text-[12px] text-slate-400 truncate font-mono-nums">
                 {unit.archetype
                   ? getArchetypeLabel(lang, unit.archetype)
                   : getClassName(lang, unit.classId)}{' '}
                 · {t('common.levelShort')}
-                <span className="font-mono-nums">{unit.level}</span> · SPD{' '}
+                {unit.level} · SPD{' '}
                 <span
-                  className={`font-mono-nums ${
+                  className={
                     hasStatus(unit, 'slow')
                       ? 'text-cyan-400 font-semibold'
                       : hasStatus(unit, 'spd_up')
                       ? 'text-emerald-400 font-semibold'
                       : 'text-slate-300'
-                  }`}
+                  }
                 >
                   {effectiveSpeed}
                 </span>

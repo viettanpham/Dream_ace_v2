@@ -17,13 +17,19 @@ import type {
   TeamColorRole,
   TurnQueueEntry,
 } from '../types/game';
+import { formatShortUnitName } from '../utils/battleDisplay';
 import { BottomSheet } from './BottomSheet';
+
+export type TurnQueueVariant = 'default' | 'phone' | 'sidebar';
 
 interface TurnQueueBarProps {
   battle: BattleState;
   battleSpeed: BattleSpeed;
   skipAnimations: boolean;
   enrageBonusPct: number;
+  variant?: TurnQueueVariant;
+  targetName?: string | null;
+  onSelectUnit?: (unitId: string) => void;
 }
 
 function getTeamCssVar(role: TeamColorRole): string {
@@ -51,14 +57,6 @@ function getClassGlyph(classId: MechClassId): string {
     case 'support':
       return '✚';
   }
-}
-
-function getCompactInitials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length >= 2) {
-    return (parts[0][0] + parts[1][0]).toUpperCase();
-  }
-  return name.slice(0, 3).toUpperCase();
 }
 
 function ConveyorChip({
@@ -110,7 +108,6 @@ function ConveyorChip({
             '0 0 12px rgba(254, 240, 138, 0.35), inset 0 0 8px rgba(254, 240, 138, 0.14)',
         }}
       >
-        {/* Pulsing ▼ marker */}
         <span
           className={`absolute -top-2 left-1/2 -translate-x-1/2 text-[9px] leading-none text-amber-200 ${
             animateShift ? 'anim-turn-arrow' : ''
@@ -120,7 +117,7 @@ function ConveyorChip({
           ▼
         </span>
 
-        <div className="flex items-center justify-between gap-1 text-[9px] font-bold tracking-wider uppercase">
+        <div className="flex items-center justify-between gap-1 text-[10px] font-bold tracking-wider uppercase">
           <span
             className="px-1 rounded-sm leading-tight truncate"
             style={{
@@ -135,11 +132,11 @@ function ConveyorChip({
         </div>
 
         <div className="mt-0.5 flex items-center justify-between gap-1">
-          <span className="text-[11px] font-bold text-white truncate">
-            {compactPhone ? getCompactInitials(entry.name) : entry.name}
+          <span className="text-[12px] font-bold text-white truncate">
+            {compactPhone ? formatShortUnitName(entry.name, 8) : entry.name}
           </span>
           <span
-            className={`font-mono-nums text-[10px] font-bold shrink-0 inline-flex items-center gap-0.5 ${speedColor}`}
+            className={`font-mono-nums text-[11px] font-bold shrink-0 inline-flex items-center gap-0.5 ${speedColor}`}
           >
             {entry.isSlowed && (
               <TrendingDown className="w-2.5 h-2.5 text-red-400" />
@@ -165,7 +162,7 @@ function ConveyorChip({
       title={fullTooltip}
       aria-label={fullTooltip}
       className={`shrink-0 rounded border bg-[#0E1522] hover:bg-slate-800/80 text-left cursor-pointer select-none ${
-        compactPhone ? 'w-[64px] px-1.5 py-1' : 'w-[126px] px-1.5 py-1'
+        compactPhone ? 'w-[68px] px-1.5 py-1' : 'w-[126px] px-1.5 py-1'
       } ${entry.phase === 'next_round' ? 'opacity-85' : ''} ${
         animateShift ? 'anim-conveyor-shift' : ''
       }`}
@@ -177,12 +174,12 @@ function ConveyorChip({
     >
       {compactPhone ? (
         <div className="flex flex-col items-center justify-center leading-tight">
-          <div className="flex items-center gap-0.5 text-[10px] font-bold">
+          <div className="flex items-center gap-0.5 text-[11px] font-bold">
             <span style={{ color: teamColor }}>
               {getClassGlyph(entry.classId)}
             </span>
             <span className="text-slate-100 truncate">
-              {getCompactInitials(entry.name)}
+              {formatShortUnitName(entry.name, 6)}
             </span>
           </div>
           <span className={`font-mono-nums text-[10px] ${speedColor}`}>
@@ -190,9 +187,9 @@ function ConveyorChip({
           </span>
         </div>
       ) : (
-        <div className="flex items-center justify-between gap-1 text-[11px] leading-tight">
+        <div className="flex items-center justify-between gap-1 text-[12px] leading-tight">
           <span
-            className="text-[9px] font-bold shrink-0"
+            className="text-[10px] font-bold shrink-0"
             style={{ color: teamColor }}
           >
             {teamTag}
@@ -201,7 +198,7 @@ function ConveyorChip({
             {entry.name}
           </span>
           <span
-            className={`font-mono-nums text-[10px] font-semibold shrink-0 inline-flex items-center gap-0.5 ${speedColor}`}
+            className={`font-mono-nums text-[11px] font-semibold shrink-0 inline-flex items-center gap-0.5 ${speedColor}`}
           >
             {entry.isSlowed && (
               <TrendingDown className="w-2.5 h-2.5 text-red-400" />
@@ -218,18 +215,20 @@ function ConveyorChip({
 }
 
 /**
- * Conveyor Turn Queue Bar (non-scrolling):
- * [Round N] [In combat] [Enrage?] chip1(ACTING) chip2... | Round N+1 | next1 next2... [+N]
- * - Uses pure buildTurnQueue(battle) -> { round, current, next }.
- * - Acted units NEVER appear in current; they appear only in next (Round N+1).
- * - Fixed-width flex container with overflow-hidden, ZERO scrollbar, ZERO auto-scroll.
- * - Overflow chip "+N" opens an anchored popover with the full current + next list.
+ * Turn Queue Bar supporting 3 responsive variants:
+ * - 'default': Non-scrolling conveyor track (preserves existing desktop/SSR TurnQueueBar tests).
+ * - 'phone': One-line max-44px strip with internal horizontal scroll only, large acting chip ("ACTOR > Target"),
+ *            and next 4-5 small chips.
+ * - 'sidebar': Compact vertical/grid panel for Tablet/PC right column with hover tooltips.
  */
 export function TurnQueueBar({
   battle,
   battleSpeed,
   skipAnimations,
   enrageBonusPct,
+  variant = 'default',
+  targetName = null,
+  onSelectUnit,
 }: TurnQueueBarProps) {
   const { lang, t } = useI18n();
   const trackRef = useRef<HTMLDivElement | null>(null);
@@ -259,6 +258,7 @@ export function TurnQueueBar({
   }, []);
 
   useEffect(() => {
+    if (variant !== 'default') return;
     const el = trackRef.current;
     if (!el) return;
     const measure = () => {
@@ -277,9 +277,8 @@ export function TurnQueueBar({
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [variant]);
 
-  // Dismiss overflow popover on Escape or outside click
   useEffect(() => {
     if (!overflowOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -305,11 +304,18 @@ export function TurnQueueBar({
   const currentRoundChips = queue.current;
   const nextRoundChips = queue.next;
 
-  // Compute exact visible chip budget from measured container width (with 8px safety buffer so chips never clip)
+  const handleChipClick = (entry: TurnQueueEntry) => {
+    if (onSelectUnit) {
+      onSelectUnit(entry.unitId);
+    } else {
+      setInspectedEntry(entry);
+    }
+  };
+
   const { visibleCurrent, visibleNext, showDivider, hiddenCount } = useMemo(() => {
     const gap = 6;
     const activeW = (isPhone ? 104 : 156) + gap;
-    const chipW = (isPhone ? 64 : 126) + gap;
+    const chipW = (isPhone ? 68 : 126) + gap;
     const dividerW = (isPhone ? 62 : 84) + gap;
     const overflowBtnW = 54;
     const usableW = Math.max(activeW, trackWidth - 8);
@@ -379,6 +385,250 @@ export function TurnQueueBar({
   const enragePct = Math.round(enrageBonusPct * 100);
   const enrageMult = (1 + enrageBonusPct).toFixed(1);
 
+  // PHONE ONE-LINE STRIP VARIANT (max 44px, internal scroll only, acting chip "SHORT > Target" + next 4-5 chips)
+  if (variant === 'phone') {
+    const actingEntry = !battle.summary ? currentRoundChips[0] ?? null : null;
+    const upcomingCombined = [
+      ...currentRoundChips.slice(actingEntry ? 1 : 0),
+      ...nextRoundChips,
+    ].slice(0, 5);
+
+    const actorShort = actingEntry ? formatShortUnitName(actingEntry.name, 10) : '';
+    const targetShort = targetName ? formatShortUnitName(targetName, 10) : '';
+    const actingLabel =
+      actingEntry && targetShort
+        ? `${actorShort} > ${targetShort}`
+        : actorShort;
+
+    return (
+      <div
+        data-testid="turn-queue-phone-strip"
+        className="h-11 max-h-[44px] shrink-0 w-full border-b border-slate-800/80 bg-[#0A0F18]/95 px-2 flex items-center gap-2 overflow-hidden"
+      >
+        {/* Compact Round Badge */}
+        <span
+          data-testid="turn-queue-round-chip"
+          title={
+            enragePct > 0
+              ? t('queue.enrageChipTooltip', { pct: enragePct })
+              : t('battle.round', { round: queue.round })
+          }
+          className={`shrink-0 inline-flex items-center gap-1 px-2 h-8 rounded font-mono-nums text-[12px] font-bold whitespace-nowrap ${
+            enragePct > 0
+              ? 'bg-red-950/75 border border-red-500/65 text-slate-100'
+              : 'bg-slate-900 border border-slate-700 text-slate-200'
+          }`}
+        >
+          <span>R{queue.round}</span>
+          {enragePct > 0 && (
+            <span
+              data-testid="turn-queue-enrage-badge"
+              className="inline-flex items-center gap-0.5 text-orange-300"
+            >
+              <Flame className="w-3 h-3 text-orange-400" />
+              <span>x{enrageMult}</span>
+            </span>
+          )}
+        </span>
+
+        {/* Inner Horizontally Scrollable Track (never scrolls page) */}
+        <div
+          data-testid="turn-queue-phone-track"
+          className="flex-1 min-w-0 flex items-center gap-1.5 overflow-x-auto battle-strip-scroll"
+          aria-label={t('queue.fullQueueTitle')}
+        >
+          {actingEntry && (
+            <button
+              type="button"
+              data-testid="turn-queue-acting-chip"
+              data-unit-id={actingEntry.unitId}
+              data-acting="true"
+              onClick={() => handleChipClick(actingEntry)}
+              className="shrink-0 h-8 px-2.5 rounded-md border bg-amber-400/18 text-[13px] font-bold text-amber-100 whitespace-nowrap inline-flex items-center gap-1.5 cursor-pointer"
+              style={{
+                borderColor: 'var(--turn-active)',
+              }}
+            >
+              <span
+                className="w-2 h-2 rounded-full shrink-0"
+                style={{ backgroundColor: getTeamCssVar(actingEntry.teamRole) }}
+              />
+              <span>{actingLabel}</span>
+            </button>
+          )}
+
+          {upcomingCombined.map((entry, idx) => {
+            const color = getTeamCssVar(entry.teamRole);
+            return (
+              <button
+                key={`${entry.phase}-${entry.unitId}-${idx}`}
+                type="button"
+                data-testid="turn-queue-phone-next-chip"
+                data-unit-id={entry.unitId}
+                onClick={() => handleChipClick(entry)}
+                className={`shrink-0 h-8 px-2 rounded border border-slate-700/90 bg-[#0E1522] text-[12px] font-semibold text-slate-200 whitespace-nowrap inline-flex items-center gap-1 cursor-pointer ${
+                  entry.phase === 'next_round' ? 'opacity-75' : ''
+                }`}
+              >
+                <span
+                  className="text-[12px] leading-none"
+                  style={{ color }}
+                  aria-hidden="true"
+                >
+                  {getClassGlyph(entry.classId)}
+                </span>
+                <span>{formatShortUnitName(entry.name, 8)}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // SIDEBAR VARIANT (Tablet / PC right column)
+  if (variant === 'sidebar') {
+    const actingEntry = !battle.summary ? currentRoundChips[0] ?? null : null;
+    const upcomingList = [
+      ...currentRoundChips.slice(actingEntry ? 1 : 0),
+      ...nextRoundChips,
+    ].slice(0, 6);
+
+    const actingLabel =
+      actingEntry && targetName
+        ? `${formatShortUnitName(actingEntry.name, 10)} > ${formatShortUnitName(
+            targetName,
+            10
+          )}`
+        : actingEntry
+        ? actingEntry.name
+        : '';
+
+    return (
+      <div
+        data-testid="turn-queue-sidebar"
+        className="rounded-lg border border-slate-800 bg-[#0A101B] p-2 space-y-2 shrink-0"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 min-w-0">
+            {!battle.summary && (
+              <span
+                data-testid="turn-queue-combat-icon"
+                title={t('queue.inCombat')}
+                aria-label={t('queue.inCombat')}
+                className="inline-flex items-center justify-center w-6 h-6 rounded bg-sky-500/12 border border-sky-500/35 text-sky-300 shrink-0"
+              >
+                <Swords className="w-3.5 h-3.5" aria-hidden="true" />
+              </span>
+            )}
+            <span
+              data-testid="turn-queue-round-chip"
+              title={
+                enragePct > 0
+                  ? t('queue.enrageChipTooltip', { pct: enragePct })
+                  : undefined
+              }
+              className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded font-mono-nums text-[12px] font-bold whitespace-nowrap ${
+                enragePct > 0
+                  ? 'bg-red-950/70 border border-red-500/65 text-slate-100'
+                  : 'bg-slate-900 border border-slate-700 text-slate-100'
+              }`}
+            >
+              <span>{t('battle.round', { round: queue.round })}</span>
+              {enragePct > 0 && (
+                <span
+                  data-testid="turn-queue-enrage-badge"
+                  title={t('queue.enrageChipTooltip', { pct: enragePct })}
+                  className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-red-500/25 text-orange-300 text-[12px] font-bold leading-none"
+                >
+                  <Flame className="w-3 h-3 text-orange-400 shrink-0" />
+                  <span>x{enrageMult}</span>
+                </span>
+              )}
+            </span>
+          </div>
+
+          <span className="text-[12px] text-slate-400 font-medium truncate">
+            {t('battle.turnOrder')}
+          </span>
+        </div>
+
+        {/* Acting Unit Highlight */}
+        {actingEntry && (
+          <button
+            type="button"
+            data-testid="turn-queue-acting-chip"
+            data-unit-id={actingEntry.unitId}
+            data-acting="true"
+            onClick={() => handleChipClick(actingEntry)}
+            title={`${getTeamTagLabel(lang, actingEntry.teamRole)} ${
+              actingEntry.name
+            } (${getClassName(lang, actingEntry.classId)}) · ${t(
+              'queue.speedLabel'
+            )} ${actingEntry.effectiveSpeed}`}
+            className="w-full min-h-[44px] px-2.5 py-1.5 rounded-lg border bg-amber-400/15 hover:bg-amber-400/20 flex items-center justify-between gap-2 text-left cursor-pointer transition-colors"
+            style={{ borderColor: 'var(--turn-active)' }}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <span
+                className="px-1.5 py-0.5 rounded text-[12px] font-mono-nums font-bold shrink-0"
+                style={{
+                  backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                  color: getTeamCssVar(actingEntry.teamRole),
+                  border: `1px solid ${getTeamCssVar(actingEntry.teamRole)}`,
+                }}
+              >
+                {getTeamTagLabel(lang, actingEntry.teamRole)}
+              </span>
+              <span className="text-[13px] font-bold text-amber-100 truncate">
+                {actingLabel}
+              </span>
+            </div>
+            <span className="font-mono-nums text-[12px] font-bold text-amber-200 shrink-0">
+              SPD {actingEntry.effectiveSpeed}
+            </span>
+          </button>
+        )}
+
+        {/* Upcoming Chips Row */}
+        {upcomingList.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {upcomingList.map((entry, idx) => {
+              const color = getTeamCssVar(entry.teamRole);
+              const tip = `${getTeamTagLabel(lang, entry.teamRole)} ${
+                entry.name
+              } (${getClassName(lang, entry.classId)}) · ${t(
+                'queue.speedLabel'
+              )} ${entry.effectiveSpeed}`;
+              return (
+                <button
+                  key={`sb-${entry.phase}-${entry.unitId}-${idx}`}
+                  type="button"
+                  onClick={() => handleChipClick(entry)}
+                  title={tip}
+                  className={`px-2 py-1 rounded border border-slate-700/90 bg-[#0E1522] hover:bg-slate-800 text-[12px] inline-flex items-center gap-1 cursor-pointer transition-colors ${
+                    entry.phase === 'next_round' ? 'opacity-75' : ''
+                  }`}
+                >
+                  <span style={{ color }} aria-hidden="true">
+                    {getClassGlyph(entry.classId)}
+                  </span>
+                  <span className="font-medium text-slate-200 whitespace-nowrap">
+                    {formatShortUnitName(entry.name, 9)}
+                  </span>
+                  <span className="font-mono-nums text-slate-400">
+                    {entry.effectiveSpeed}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // DEFAULT CONVEYOR VARIANT (preserves all TurnQueueBar.test.tsx invariants)
   return (
     <div
       data-testid="turn-queue-bar"
@@ -407,7 +657,7 @@ export function TurnQueueBar({
               ? t('queue.enrageChipTooltip', { pct: enragePct })
               : undefined
           }
-          className={`inline-flex items-center gap-1.5 px-2 py-1 rounded font-mono-nums text-[11px] font-bold whitespace-nowrap ${
+          className={`inline-flex items-center gap-1.5 px-2 py-1 rounded font-mono-nums text-[12px] font-bold whitespace-nowrap ${
             enragePct > 0
               ? 'bg-red-950/70 border border-red-500/65 text-slate-100'
               : 'bg-slate-900 border border-slate-700 text-slate-100'
@@ -418,7 +668,7 @@ export function TurnQueueBar({
             <span
               data-testid="turn-queue-enrage-badge"
               title={t('queue.enrageChipTooltip', { pct: enragePct })}
-              className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-red-500/25 text-orange-300 text-[10px] font-bold leading-none"
+              className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-red-500/25 text-orange-300 text-[11px] font-bold leading-none"
             >
               <Flame className="w-3 h-3 text-orange-400 shrink-0" aria-hidden="true" />
               <span>x{enrageMult}</span>
@@ -442,14 +692,14 @@ export function TurnQueueBar({
             isActive={idx === 0 && !battle.summary}
             compactPhone={isPhone}
             animateShift={animateShift}
-            onInspect={setInspectedEntry}
+            onInspect={handleChipClick}
           />
         ))}
 
         {showDivider && (
           <div
             data-testid="turn-queue-divider"
-            className="shrink-0 flex items-center gap-1 px-1.5 py-1 rounded border border-dashed border-slate-700 bg-slate-950/90 text-[10px] font-mono-nums font-semibold text-slate-400 whitespace-nowrap"
+            className="shrink-0 flex items-center gap-1 px-1.5 py-1 rounded border border-dashed border-slate-700 bg-slate-950/90 text-[11px] font-mono-nums font-semibold text-slate-400 whitespace-nowrap"
           >
             <span>{t('queue.nextRound', { round: queue.round + 1 })}</span>
           </div>
@@ -462,7 +712,7 @@ export function TurnQueueBar({
             isActive={false}
             compactPhone={isPhone}
             animateShift={animateShift}
-            onInspect={setInspectedEntry}
+            onInspect={handleChipClick}
           />
         ))}
       </div>
@@ -478,7 +728,7 @@ export function TurnQueueBar({
             aria-haspopup="dialog"
             title={t('queue.overflowHint', { count: hiddenCount })}
             aria-label={t('queue.overflowHint', { count: hiddenCount })}
-            className="min-h-[34px] min-w-[44px] px-2 rounded border border-slate-600 bg-slate-900 hover:bg-slate-800 hover:border-amber-400/60 text-[11px] font-mono-nums font-bold text-amber-300 inline-flex items-center justify-center gap-0.5 cursor-pointer"
+            className="min-h-[34px] min-w-[44px] px-2 rounded border border-slate-600 bg-slate-900 hover:bg-slate-800 hover:border-amber-400/60 text-[12px] font-mono-nums font-bold text-amber-300 inline-flex items-center justify-center gap-0.5 cursor-pointer"
           >
             <span>+{hiddenCount}</span>
             <ChevronDown className="w-3 h-3" />
@@ -492,7 +742,7 @@ export function TurnQueueBar({
               className="absolute right-0 top-full mt-2 z-50 w-[min(92vw,340px)] max-h-[70vh] flex flex-col rounded-lg border border-slate-700 bg-[#0B111D] shadow-2xl overflow-hidden"
             >
               <div className="shrink-0 px-3 py-2 border-b border-slate-800 bg-[#080C15] flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-slate-100">
+                <div className="flex items-center gap-1.5 text-[13px] font-bold text-slate-100">
                   <ListOrdered className="w-3.5 h-3.5 text-amber-300" />
                   <span>{t('queue.fullQueueTitle')}</span>
                 </div>
@@ -500,7 +750,7 @@ export function TurnQueueBar({
                   type="button"
                   onClick={() => setOverflowOpen(false)}
                   aria-label={t('common.close')}
-                  className="h-7 w-7 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 flex items-center justify-center cursor-pointer"
+                  className="h-8 w-8 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 flex items-center justify-center cursor-pointer"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -508,7 +758,7 @@ export function TurnQueueBar({
 
               <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3 tactical-scroll">
                 <div className="space-y-1.5">
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-amber-300">
+                  <div className="text-[12px] font-bold uppercase tracking-wider text-amber-300">
                     {t('queue.currentRoundGroup', { round: queue.round })}
                   </div>
                   {currentRoundChips.map((entry, idx) => {
@@ -522,25 +772,25 @@ export function TurnQueueBar({
                             ? 'border-amber-300 bg-amber-400/15'
                             : 'border-slate-800 bg-[#0A101B]'
                         }`}
-                        style={{ borderLeftWidth: '4px', borderLeftColor: color }}
+                        style={{ borderLeftWidth: '3px', borderLeftColor: color }}
                       >
                         <div className="min-w-0 flex items-center gap-1.5">
                           <span
-                            className="text-[11px] font-bold shrink-0"
+                            className="text-[12px] font-bold shrink-0"
                             style={{ color }}
                           >
                             {getTeamTagLabel(lang, entry.teamRole)}
                           </span>
-                          <span className="text-xs font-semibold text-slate-100 truncate">
+                          <span className="text-[13px] font-semibold text-slate-100 truncate">
                             {entry.name}
                           </span>
                           {isFirst && (
-                            <span className="px-1.5 py-0.5 rounded bg-amber-300 text-slate-950 text-[9px] font-bold uppercase shrink-0">
+                            <span className="px-1.5 py-0.5 rounded bg-amber-300 text-slate-950 text-[11px] font-bold uppercase shrink-0">
                               {t('queue.actingNow')}
                             </span>
                           )}
                         </div>
-                        <div className="font-mono-nums text-[11px] text-slate-300 shrink-0">
+                        <div className="font-mono-nums text-[12px] text-slate-300 shrink-0">
                           {t('queue.speedLabel')} {entry.effectiveSpeed}
                         </div>
                       </div>
@@ -549,7 +799,7 @@ export function TurnQueueBar({
                 </div>
 
                 <div className="space-y-1.5">
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  <div className="text-[12px] font-bold uppercase tracking-wider text-slate-400">
                     {t('queue.nextRoundGroup', { round: queue.round + 1 })}
                   </div>
                   {nextRoundChips.map((entry) => {
@@ -558,20 +808,20 @@ export function TurnQueueBar({
                       <div
                         key={`pop-next-${entry.unitId}`}
                         className="rounded border border-slate-800/80 bg-[#090E18] px-2.5 py-1.5 flex items-center justify-between gap-2"
-                        style={{ borderLeftWidth: '4px', borderLeftColor: color }}
+                        style={{ borderLeftWidth: '3px', borderLeftColor: color }}
                       >
                         <div className="min-w-0 flex items-center gap-1.5">
                           <span
-                            className="text-[11px] font-bold shrink-0"
+                            className="text-[12px] font-bold shrink-0"
                             style={{ color }}
                           >
                             {getTeamTagLabel(lang, entry.teamRole)}
                           </span>
-                          <span className="text-xs text-slate-200 truncate">
+                          <span className="text-[13px] text-slate-200 truncate">
                             {entry.name}
                           </span>
                         </div>
-                        <div className="font-mono-nums text-[11px] text-slate-400 shrink-0">
+                        <div className="font-mono-nums text-[12px] text-slate-400 shrink-0">
                           {t('queue.speedLabel')} {entry.effectiveSpeed}
                         </div>
                       </div>
@@ -584,7 +834,7 @@ export function TurnQueueBar({
         </div>
       )}
 
-      {/* Tap-to-inspect chip full name sheet (for mobile/long names) */}
+      {/* Tap-to-inspect chip full name sheet */}
       <BottomSheet
         open={Boolean(inspectedEntry)}
         onClose={() => setInspectedEntry(null)}
@@ -599,7 +849,7 @@ export function TurnQueueBar({
         }
       >
         {inspectedEntry && (
-          <div className="rounded-lg border border-slate-800 bg-[#0A101B] p-4 space-y-2 text-sm">
+          <div className="rounded-lg border border-slate-800 bg-[#0A101B] p-4 space-y-2 text-[13px]">
             <div className="flex items-center justify-between">
               <span className="text-slate-400">{t('queue.speedLabel')}</span>
               <span className="font-mono-nums font-bold text-slate-100">

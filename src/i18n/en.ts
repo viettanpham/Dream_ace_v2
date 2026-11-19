@@ -1223,6 +1223,31 @@ export const EN_TRANSLATIONS = {
   'admin.battleSizeOverride': 'Battle Squad Size Override',
   'admin.rewardMult': 'Reward Multiplier',
   'admin.unlockAllSectors': 'Unlock All Sectors',
+
+  // Battle Screen Redesign (Phone / Tablet / PC + Exit Confirm + 3-Row Exposure + Pre-Battle Details)
+  'battle.leaveTitle': 'Leave battle?',
+  'battle.leaveMessage':
+    'Leaving now will exit the active battle and return to base. Progress in this fight will be lost.',
+  'battle.leaveConfirm': 'Leave battle',
+  'battle.leaveCancel': 'Stay in battle',
+  'battle.moreActions': 'More actions',
+  'battle.autoCollapsedBar': 'AUTO active · Field expanded',
+  'battle.switchManual': 'Manual',
+  'battle.speedCycleTooltip': 'Cycle battle speed (x1 / x2 / x3)',
+  'battle.rowExposed': 'Exposed',
+  'battle.rowProtected': 'Protected',
+  'battle.rowEmpty': 'Empty',
+  'battle.selectedUnitTitle': 'Selected Unit',
+  'battle.noUnitSelected': 'Select any unit on the field to inspect stats and statuses.',
+  'battle.viewSwitchTooltip': 'Switch between Radar and Card view',
+  'battle.menuTitle': 'Battle Menu',
+  'battle.detailsShow': 'Details',
+  'battle.detailsHide': 'Hide details',
+  'battle.preBattleSummary': '{region} · {difficulty} · {size}v{size} · ~Lv.{level}',
+  'battle.yourTurnShort': 'Your turn',
+  'battle.aiTurnShort': '{name} acting',
+  'battle.targetShort': 'Target',
+  'battle.skillsSheetTitle': 'Active Skills',
 } as const;
 
 export type TranslationKey = keyof typeof EN_TRANSLATIONS;
