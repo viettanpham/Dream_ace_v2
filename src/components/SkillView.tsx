@@ -12,7 +12,6 @@ import {
   X,
 } from 'lucide-react';
 import { BALANCE_CONFIG } from '../data/balance';
-import { MECH_CLASSES } from '../data/classes';
 import { getScaledSkillStats, getSkillById } from '../data/skills';
 import {
   getRequiredGearLevelForSkillLevel,
@@ -67,7 +66,6 @@ export function SkillView() {
   const [mobileSkillId, setMobileSkillId] = useState<string | null>(null);
 
   const activeGear = pilot.gears[pilot.activeGearId];
-  const activeClass = MECH_CLASSES[activeGear.classId];
   const activeGearName = getClassName(lang, activeGear.classId);
 
   const classAndGeneralSkills = useMemo(

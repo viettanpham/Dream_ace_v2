@@ -1,14 +1,12 @@
 import { BALANCE_CONFIG } from '../data/balance';
 import { MECH_CLASS_LIST, STAT_KEYS } from '../data/classes';
 import { DEFAULT_ADMIN_SHOP_RARITY_WEIGHTS, SHOP_STOCK_CONFIG } from '../data/shopConfig';
-import { getItemInstanceName } from '../i18n';
 import type {
   AdminConfig,
   GearUnit,
   InventoryFilterState,
   ItemInstance,
   ItemRarity,
-  Language,
   MechClassId,
 } from '../types/game';
 import {
@@ -16,7 +14,7 @@ import {
   getGearEquippedInstances,
   getItemEquippedByGear,
   getSellPrice,
-  validateEquipItem,
+  validateEquipOnGear,
 } from './equipment';
 
 export const RARITY_RANK: Record<ItemRarity, number> = {
@@ -116,7 +114,7 @@ export interface InventoryEntryView {
   equippedOnSelected: boolean;
   usableBySelected: boolean;
   isUpgrade: boolean;
-  validation: ReturnType<typeof validateEquipItem>;
+  validation: ReturnType<typeof validateEquipOnGear>;
   displayName: string;
 }
 
@@ -128,7 +126,7 @@ export function filterAndSortInventory(
   filter: InventoryFilterState,
   activeGear: GearUnit,
   allGears: Record<MechClassId, GearUnit>,
-  lang: Language
+  resolveDisplayName: (item: ItemInstance) => string = (it) => it.templateId
 ): InventoryEntryView[] {
   const ownedGears = MECH_CLASS_LIST.map((c) => allGears[c.id]).filter(
     (g): g is GearUnit => Boolean(g && g.owned)
@@ -182,14 +180,14 @@ export function filterAndSortInventory(
       continue;
     }
 
-    const displayName = getItemInstanceName(lang, item, true);
+    const displayName = resolveDisplayName(item);
     if (query.length > 0 && !displayName.toLowerCase().includes(query)) {
       continue;
     }
 
     const equippedBy = getItemEquippedByGear(allGears, item.instanceId);
     const equippedOnSelected = equippedBy === activeGear.classId;
-    const validation = validateEquipItem(activeGear, item, allGears);
+    const validation = validateEquipOnGear(item, activeGear, allGears);
 
     enriched.push({
       item,
@@ -220,14 +218,16 @@ export function filterAndSortInventory(
         const tA = a.item.obtainedAt ?? 0;
         const tB = b.item.obtainedAt ?? 0;
         if (tA !== tB) {
-          cmp = tA - tB;
-        } else {
-          // Earlier array indices are newer drops/purchases
-          cmp =
-            (indexMap.get(b.item.instanceId) ?? 0) -
-            (indexMap.get(a.item.instanceId) ?? 0);
+          return (tA - tB) * dir;
         }
-        break;
+        // Store prepends new drops/purchases at index 0, so smaller index = newer.
+        // Apply sort direction once: desc (-1) keeps smaller index first; asc (+1) puts larger index first.
+        const idxA = indexMap.get(a.item.instanceId) ?? 0;
+        const idxB = indexMap.get(b.item.instanceId) ?? 0;
+        if (idxA !== idxB) {
+          return dir === -1 ? idxA - idxB : idxB - idxA;
+        }
+        return a.item.instanceId.localeCompare(b.item.instanceId);
       }
       case 'level':
         cmp = a.item.requiredLevel - b.item.requiredLevel;

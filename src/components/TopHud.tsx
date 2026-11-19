@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Award,
@@ -38,18 +38,50 @@ export function TopHud() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const tapCountRef = useRef(0);
   const lastTapRef = useRef(0);
+  const titleNavTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleSecretTap = () => {
-    if (!ENABLE_ADMIN_CP) return;
+  useEffect(() => {
+    return () => {
+      if (titleNavTimerRef.current) {
+        clearTimeout(titleNavTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleBrandTap = () => {
+    if (titleNavTimerRef.current) {
+      clearTimeout(titleNavTimerRef.current);
+      titleNavTimerRef.current = null;
+    }
+
+    if (!ENABLE_ADMIN_CP) {
+      setScreen('TITLE');
+      return;
+    }
+
     const now = Date.now();
     if (now - lastTapRef.current > 2500) {
       tapCountRef.current = 0;
     }
     lastTapRef.current = now;
     tapCountRef.current += 1;
+
     if (tapCountRef.current >= 7) {
       tapCountRef.current = 0;
       unlockAdminMode(true);
+      return;
+    }
+
+    // Single tap navigates to Title screen after a short multi-tap window;
+    // rapid 7-taps cancel navigation so Admin unlocks in place.
+    if (tapCountRef.current === 1) {
+      titleNavTimerRef.current = setTimeout(() => {
+        titleNavTimerRef.current = null;
+        if (tapCountRef.current === 1) {
+          tapCountRef.current = 0;
+          setScreen('TITLE');
+        }
+      }, 320);
     }
   };
 
@@ -66,31 +98,28 @@ export function TopHud() {
   return (
     <>
       <header className="min-h-[52px] md:h-14 pt-safe shrink-0 border-b border-slate-800/90 bg-[#0A0F18]/95 px-2.5 sm:px-6 flex items-center justify-between gap-2 sm:gap-4">
-        {/* Left: Brand Wordmark (Desktop) or Compact Pilot+Gear Pill (Mobile) */}
+        {/* Left: Brand Wordmark (Desktop & Mobile — 7-tap unlocks Admin CP) + Mobile Pilot+Gear */}
         <div className="flex items-center gap-2 min-w-0">
           <button
             type="button"
-            onClick={() => setScreen('TITLE')}
-            className="hidden md:inline-flex font-display text-2xl font-bold tracking-[0.12em] text-slate-50 hover:text-amber-400 transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 rounded"
+            data-testid="tophud-brand-logo"
+            onClick={handleBrandTap}
+            className="inline-flex items-center min-h-[40px] md:min-h-0 font-display text-sm sm:text-lg md:text-2xl font-bold tracking-[0.08em] md:tracking-[0.12em] text-slate-50 hover:text-amber-400 transition-colors whitespace-nowrap shrink-0 cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 rounded"
           >
             {t('app.title')}
           </button>
 
-          {/* Mobile compact Pilot + Gear Lv (7-tap unlocks Admin CP) */}
-          <button
-            type="button"
-            onClick={handleSecretTap}
-            className="flex md:hidden items-center gap-1.5 min-w-0 text-left cursor-pointer select-none"
-          >
-            <span className="font-semibold text-sm text-slate-100 truncate max-w-[74px]">
+          {/* Mobile compact Pilot + Gear Lv */}
+          <div className="flex md:hidden items-center gap-1 min-w-0 text-left">
+            <span className="font-semibold text-xs text-slate-200 truncate max-w-[54px]">
               {pilot.name || 'Vance'}
             </span>
-            <span className="font-mono-nums text-xs font-bold text-amber-400 whitespace-nowrap">
+            <span className="font-mono-nums text-[11px] font-bold text-amber-400 whitespace-nowrap">
               {getClassName(lang, activeGear.classId).slice(0, 3).toUpperCase()}{' '}
               {t('common.levelShort')}
               {activeGear.level}
             </span>
-          </button>
+          </div>
 
           {cheatsActive && (
             <button
@@ -109,10 +138,7 @@ export function TopHud() {
 
         {/* Center: Desktop full info / Mobile Credits */}
         <div className="flex items-center gap-2.5 sm:gap-5 text-xs sm:text-sm text-slate-300 min-w-0">
-          <div
-            onClick={handleSecretTap}
-            className="hidden md:flex items-center gap-2 whitespace-nowrap min-w-0 cursor-pointer select-none"
-          >
+          <div className="hidden md:flex items-center gap-2 whitespace-nowrap min-w-0">
             <span className="text-slate-400">{t('common.pilot')}:</span>
             <span className="font-semibold text-slate-100">
               {pilot.name || 'Vance'}

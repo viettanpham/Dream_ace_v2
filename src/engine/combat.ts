@@ -324,8 +324,8 @@ export function sortTurnOrder(units: CombatUnit[]): string[] {
 export function getEnemyEnrageBonusPct(
   round: number,
   enabled = true,
-  startRound = BALANCE_CONFIG.enrageStartRound,
-  stepPct = BALANCE_CONFIG.enrageStepPct
+  startRound: number = BALANCE_CONFIG.enrageStartRound,
+  stepPct: number = BALANCE_CONFIG.enrageStepPct
 ): number {
   const safeStart = Math.max(1, Math.floor(startRound));
   const safeStep = Math.max(0, stepPct);
@@ -501,7 +501,15 @@ export function createInitialBattleState(
     1,
     Math.min(squadSize, adminConfig?.formationFrontCapacity ?? Math.ceil(squadSize / 2))
   );
-  const frontCount = Math.min(Math.ceil(squadSize / 2), frontCap); // respects admin formation cap
+  const backCap = Math.max(
+    1,
+    Math.min(squadSize, adminConfig?.formationBackCapacity ?? Math.ceil(squadSize / 2))
+  );
+  const desiredFront = Math.min(Math.ceil(squadSize / 2), frontCap);
+  const frontCount = Math.min(
+    frontCap,
+    Math.max(desiredFront, squadSize - backCap)
+  ); // respects both front and back admin formation capacities
   const activeGear = pilot.gears[pilot.activeGearId];
   const classIds = MECH_CLASS_LIST.map((c) => c.id);
 
@@ -578,14 +586,18 @@ export function createInitialBattleState(
   // Optional Pilot-for-Hire: joins as an EXTRA veteran wingman for this battle!
   if (pilot.hiredWingman) {
     const hiredLv = Math.max(1, activeGear.level + pilot.hiredWingman.bonusLevel);
+    const allyBackCount = squadSize - frontCount;
+    const mercInFront = allyBackCount >= backCap && frontCount < frontCap;
     allyUnits.push(
       buildCombatUnit({
         id: 'ally_hired_merc',
         name: pilot.hiredWingman.callsign,
         callsign: 'MERC',
         side: 'ally',
-        row: 'back',
-        formationCol: Math.max(0, squadSize - frontCount),
+        row: mercInFront ? 'front' : 'back',
+        formationCol: mercInFront
+          ? frontCount
+          : Math.max(0, squadSize - frontCount),
         isPlayer: false,
         classId: pilot.hiredWingman.classId,
         level: hiredLv,

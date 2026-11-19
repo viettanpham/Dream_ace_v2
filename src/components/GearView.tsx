@@ -1,16 +1,10 @@
 import { useMemo, useState } from 'react';
 import {
-  ArrowUpCircle,
   Check,
   ChevronDown,
   ChevronUp,
-  Cpu,
-  Crosshair,
-  Flame,
   Lock,
-  Shield,
   ShieldAlert,
-  Zap,
 } from 'lucide-react';
 import {
   EMPTY_STAT_BLOCK,
@@ -63,34 +57,12 @@ import type {
 import { soundFx } from '../utils/sound';
 import { BottomSheet } from './BottomSheet';
 import { FighterSvg } from './FighterSvg';
+import { SlotIcon } from './GameIcons';
 
 type GearSelection =
   | { kind: 'slot'; slot: EquipmentSlot }
   | { kind: 'inventory'; instanceId: string }
   | null;
-
-function SlotIcon({
-  slot,
-  className = 'w-4 h-4',
-}: {
-  slot: EquipmentSlot;
-  className?: string;
-}) {
-  switch (slot) {
-    case 'main_weapon':
-      return <Crosshair className={className} />;
-    case 'sub_weapon':
-      return <Zap className={className} />;
-    case 'armor':
-      return <Shield className={className} />;
-    case 'engine':
-      return <Flame className={className} />;
-    case 'cpu':
-      return <Cpu className={className} />;
-    case 'accessory':
-      return <ArrowUpCircle className={className} />;
-  }
-}
 
 export function GearView() {
   const { lang, t } = useI18n();

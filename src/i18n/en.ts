@@ -1164,6 +1164,21 @@ export const EN_TRANSLATIONS = {
   'admin.systemClearErrors': 'Clear Log',
   'admin.systemNoErrors': 'No runtime errors recorded.',
   'admin.systemInspector': 'Live State Inspector',
+  'admin.close': 'Close',
+  'admin.setLevel': 'Set Level',
+  'admin.apply': 'Apply',
+  'admin.addExp': 'Add EXP',
+  'admin.statPoints': 'Stat Points',
+  'admin.resetAllocation': 'Stat points reset',
+  'admin.unlockAllGears': 'Unlock All Gears',
+  'admin.itemGenerator': 'Item Generator',
+  'admin.generateItems': 'Generate Items',
+  'admin.godMode': 'God Mode (Invulnerable)',
+  'admin.oneHit': 'One-Hit Kill',
+  'admin.alwaysWin': 'Always Win',
+  'admin.battleSizeOverride': 'Battle Squad Size Override',
+  'admin.rewardMult': 'Reward Multiplier',
+  'admin.unlockAllSectors': 'Unlock All Sectors',
 } as const;
 
 export type TranslationKey = keyof typeof EN_TRANSLATIONS;
