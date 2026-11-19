@@ -123,7 +123,9 @@ export function CombatLogList({
         data-testid="combat-log-scroll"
         onScroll={handleScroll}
         className={`flex-1 min-h-0 overflow-y-auto overscroll-contain tactical-scroll ${
-          isCompact ? 'px-3 py-1.5 space-y-1 text-xs' : 'p-4 space-y-2 text-sm'
+          isCompact
+            ? 'px-3 py-2 space-y-1.5 text-[13px]'
+            : 'p-4 space-y-2 text-[14px]'
         }`}
       >
         {entries.map((entry) => {
@@ -134,22 +136,18 @@ export function CombatLogList({
               data-testid="combat-log-entry"
               className="leading-snug flex items-baseline gap-2"
             >
-              <span
-                className={`font-mono-nums text-slate-500 shrink-0 ${
-                  isCompact ? 'text-[10px]' : 'text-xs'
-                }`}
-              >
+              <span className="font-mono-nums text-slate-500 shrink-0 text-[12px]">
                 R{entry.round}
               </span>
               <span
-                className={`font-mono-nums font-semibold shrink-0 w-14 ${
-                  isCompact ? 'text-[10px]' : 'text-xs'
-                } ${getLogTagStyle(entry.tag)}`}
+                className={`font-mono-nums font-semibold shrink-0 w-14 text-[12px] ${getLogTagStyle(
+                  entry.tag
+                )}`}
               >
                 {getLogTagLabel(lang, entry.tag)}
               </span>
               <span
-                className={isCompact ? 'text-slate-300' : 'text-slate-200'}
+                className={isCompact ? 'text-slate-200' : 'text-slate-100'}
                 style={
                   actorColor
                     ? {
@@ -171,9 +169,9 @@ export function CombatLogList({
           type="button"
           data-testid="combat-log-jump-latest"
           onClick={handleJumpToLatest}
-          className="absolute right-3 bottom-2 z-10 min-h-[32px] px-2.5 py-1 rounded-full border border-sky-400/70 bg-sky-500/90 hover:bg-sky-400 text-slate-950 font-semibold text-[11px] shadow-lg inline-flex items-center gap-1 cursor-pointer transition-colors"
+          className="absolute right-3 bottom-2 z-10 min-h-[44px] px-3.5 py-1.5 rounded-full border border-sky-400/70 bg-sky-500/95 hover:bg-sky-400 text-slate-950 font-semibold text-[13px] shadow-lg inline-flex items-center gap-1.5 cursor-pointer transition-colors"
         >
-          <ArrowDown className="w-3.5 h-3.5 shrink-0" />
+          <ArrowDown className="w-4 h-4 shrink-0" />
           <span>{t('battle.jumpToLatest')}</span>
         </button>
       )}

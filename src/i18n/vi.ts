@@ -1268,5 +1268,13 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'radar.legendAllyShape': 'Lục giác / Tròn: Bạn & Đồng minh',
   'radar.legendEnemyShape': 'Hình thoi / Bát giác: Địch & Boss',
   'radar.legendDown': 'X xám: Đã hạ (không thể chọn)',
+
+  // Battle Screen Polish Round 2
+  'battle.unitDown': 'Đã hạ',
+  'battle.tabAllies': 'Đồng minh',
+  'battle.tabEnemies': 'Kẻ địch',
+  'battle.speechBubbles': 'Bong bóng thoại đơn vị',
+  'battle.speedLabel': 'Tốc độ',
+  'battle.skillCdShort': 'Hồi {turns}L',
 };
 

@@ -26,11 +26,16 @@ import {
   computeHitFlashDurationMs,
   computeRadarFxDurationMs,
   computeRowExposure,
+  computeSpeechBubbleAnchor,
   evaluateRadarTargetValidity,
   formatShortUnitName,
+  formatSpeechBubbleText,
   getRadarHitAreaSize,
+  isCompactPopupTone,
   layoutStaggeredPopups,
   readRadarLegendOpen,
+  SPEECH_BUBBLE_DURATION_MS,
+  SPEECH_BUBBLE_MAX_CHARS,
   useBattleLayoutMode,
   usePrefersReducedMotion,
   writeRadarLegendOpen,
@@ -48,6 +53,7 @@ interface BattleRadarViewProps {
   hasSingleAllySkill: boolean;
   autoBattleEnabled: boolean;
   skipAnimations: boolean;
+  speechBubblesEnabled?: boolean;
   battleSpeed?: BattleSpeed;
   layoutMode?: BattleLayoutMode;
   onSelectEnemy: (unitId: string) => void;
@@ -190,13 +196,15 @@ function getPolygonPoints(sides: number, radius: number, offsetDeg = -90): strin
   const pts: string[] = [];
   for (let i = 0; i < sides; i += 1) {
     const rad = ((offsetDeg + (360 / sides) * i) * Math.PI) / 180;
-    pts.push(`${(Math.cos(rad) * radius).toFixed(2)},${(Math.sin(rad) * radius).toFixed(2)}`);
+    pts.push(
+      `${(Math.cos(rad) * radius).toFixed(2)},${(Math.sin(rad) * radius).toFixed(2)}`
+    );
   }
   return pts.join(' ');
 }
 
 function getDiamondPoints(radius: number): string {
-  const r = radius * 1.12;
+  const r = radius * 1.1;
   return `0,${(-r).toFixed(2)} ${r.toFixed(2)},0 0,${r.toFixed(2)} ${(-r).toFixed(2)},0`;
 }
 
@@ -212,16 +220,19 @@ const ClassCenterIcon = memo(function ClassCenterIcon({
   isBoss,
   color,
   facingAngle,
+  scale = 1,
 }: {
   classId: MechClassId;
   isStructure?: boolean;
   isBoss?: boolean;
   color: string;
   facingAngle: number;
+  scale?: number;
 }) {
+  const tx = `scale(${scale.toFixed(2)}) rotate(${facingAngle})`;
   if (isStructure || isBoss) {
     return (
-      <g transform={`rotate(${facingAngle})`}>
+      <g transform={tx}>
         <rect
           x="-5.5"
           y="-5.5"
@@ -250,7 +261,7 @@ const ClassCenterIcon = memo(function ClassCenterIcon({
   switch (classId) {
     case 'interceptor':
       return (
-        <g transform={`rotate(${facingAngle})`}>
+        <g transform={tx}>
           <polygon
             points="0,-9 6.6,6.6 0,3.4 -6.6,6.6"
             fill={color}
@@ -264,7 +275,7 @@ const ClassCenterIcon = memo(function ClassCenterIcon({
       );
     case 'siege':
       return (
-        <g transform={`rotate(${facingAngle})`}>
+        <g transform={tx}>
           <polygon
             points="-2,-9.5 2,-9.5 3,-2.3 7,-1 7,6.5 -7,6.5 -7,-1 -3,-2.3"
             fill={color}
@@ -278,7 +289,7 @@ const ClassCenterIcon = memo(function ClassCenterIcon({
       );
     case 'support':
       return (
-        <g transform={`rotate(${facingAngle})`}>
+        <g transform={tx}>
           <circle
             cx="0"
             cy="0"
@@ -301,7 +312,7 @@ const ClassCenterIcon = memo(function ClassCenterIcon({
     case 'striker':
     default:
       return (
-        <g transform={`rotate(${facingAngle})`}>
+        <g transform={tx}>
           <polygon
             points="0,-8.5 3,-1.8 8.8,3 8.2,6.5 2,4.2 0,7.2 -2,4.2 -8.2,6.5 -8.8,3 -3,-1.8"
             fill={color}
@@ -316,60 +327,86 @@ const ClassCenterIcon = memo(function ClassCenterIcon({
   }
 });
 
+/**
+ * Builds 3-row lanes per side with content-aware widths/heights so populated rows fill
+ * the field comfortably and empty rows shrink instead of leaving large empty gaps.
+ */
 function buildRowLanes(
   isLandscape: boolean,
   vw: number,
-  vh: number
+  vh: number,
+  units: CombatUnit[]
 ): RowLaneRect[] {
+  const hasUnits = (side: 'ally' | 'enemy', row: CombatRow) =>
+    units.some((u) => u.side === side && u.row === row);
+
+  const distribute = (
+    totalSpan: number,
+    gap: number,
+    weights: number[]
+  ): number[] => {
+    const usable = Math.max(60, totalSpan - gap * (weights.length - 1));
+    const sum = weights.reduce((a, b) => a + b, 0) || 1;
+    return weights.map((w) => (usable * w) / sum);
+  };
+
   if (isLandscape) {
-    // 6 vertical columns: Ally Back | Ally Middle | Ally Front || Enemy Front | Enemy Middle | Enemy Back
-    const padX = 12;
-    const centerGap = 20;
-    const laneGap = 6;
+    const padX = 10;
+    const centerGap = 16;
+    const laneGap = 5;
     const halfW = (vw - padX * 2 - centerGap) / 2;
-    const colW = (halfW - laneGap * 2) / 3;
-    const y = 10;
-    const h = vh - 20;
+    const y = 8;
+    const h = vh - 16;
 
     const allyRows: CombatRow[] = ['back', 'middle', 'front'];
     const enemyRows: CombatRow[] = ['front', 'middle', 'back'];
 
+    const allyWeights = allyRows.map((r) => (hasUnits('ally', r) ? 1.28 : 0.56));
+    const enemyWeights = enemyRows.map((r) =>
+      hasUnits('enemy', r) ? 1.28 : 0.56
+    );
+    const allyWidths = distribute(halfW, laneGap, allyWeights);
+    const enemyWidths = distribute(halfW, laneGap, enemyWeights);
+
     const lanes: RowLaneRect[] = [];
+    let curX = padX;
     allyRows.forEach((row, i) => {
-      const x = padX + i * (colW + laneGap);
+      const colW = allyWidths[i];
       lanes.push({
         side: 'ally',
         row,
-        x,
+        x: curX,
         y,
         w: colW,
         h,
-        labelX: x + colW / 2,
-        labelY: y + 15,
+        labelX: curX + colW / 2,
+        labelY: y + 13,
         labelAnchor: 'middle',
-        badgeX: x + colW / 2,
-        badgeY: y + 29,
+        badgeX: curX + colW / 2,
+        badgeY: y + 24,
         badgeAnchor: 'middle',
       });
+      curX += colW + laneGap;
     });
 
-    const rightStart = padX + halfW + centerGap;
+    curX = padX + halfW + centerGap;
     enemyRows.forEach((row, i) => {
-      const x = rightStart + i * (colW + laneGap);
+      const colW = enemyWidths[i];
       lanes.push({
         side: 'enemy',
         row,
-        x,
+        x: curX,
         y,
         w: colW,
         h,
-        labelX: x + colW / 2,
-        labelY: y + 15,
+        labelX: curX + colW / 2,
+        labelY: y + 13,
         labelAnchor: 'middle',
-        badgeX: x + colW / 2,
-        badgeY: y + 29,
+        badgeX: curX + colW / 2,
+        badgeY: y + 24,
         badgeAnchor: 'middle',
       });
+      curX += colW + laneGap;
     });
 
     return lanes;
@@ -378,51 +415,64 @@ function buildRowLanes(
   // Portrait 6 horizontal bands: Enemy Back -> Middle -> Front || Ally Front -> Middle -> Back
   const padX = 8;
   const padY = 8;
-  const centerGap = 14;
-  const laneGap = 5;
+  const centerGap = 12;
+  const laneGap = 4;
   const halfH = (vh - padY * 2 - centerGap) / 2;
-  const rowH = (halfH - laneGap * 2) / 3;
   const w = vw - padX * 2;
 
   const enemyRows: CombatRow[] = ['back', 'middle', 'front'];
   const allyRows: CombatRow[] = ['front', 'middle', 'back'];
 
+  const enemyHeights = distribute(
+    halfH,
+    laneGap,
+    enemyRows.map((r) => (hasUnits('enemy', r) ? 1.26 : 0.58))
+  );
+  const allyHeights = distribute(
+    halfH,
+    laneGap,
+    allyRows.map((r) => (hasUnits('ally', r) ? 1.26 : 0.58))
+  );
+
   const lanes: RowLaneRect[] = [];
+  let curY = padY;
   enemyRows.forEach((row, i) => {
-    const y = padY + i * (rowH + laneGap);
+    const rowH = enemyHeights[i];
     lanes.push({
       side: 'enemy',
       row,
       x: padX,
-      y,
+      y: curY,
       w,
       h: rowH,
-      labelX: padX + 8,
-      labelY: y + 13,
+      labelX: padX + 7,
+      labelY: curY + 11,
       labelAnchor: 'start',
-      badgeX: padX + w - 8,
-      badgeY: y + 13,
+      badgeX: padX + w - 7,
+      badgeY: curY + 11,
       badgeAnchor: 'end',
     });
+    curY += rowH + laneGap;
   });
 
-  const bottomStart = padY + halfH + centerGap;
+  curY = padY + halfH + centerGap;
   allyRows.forEach((row, i) => {
-    const y = bottomStart + i * (rowH + laneGap);
+    const rowH = allyHeights[i];
     lanes.push({
       side: 'ally',
       row,
       x: padX,
-      y,
+      y: curY,
       w,
       h: rowH,
-      labelX: padX + 8,
-      labelY: y + 13,
+      labelX: padX + 7,
+      labelY: curY + 11,
       labelAnchor: 'start',
-      badgeX: padX + w - 8,
-      badgeY: y + 13,
+      badgeX: padX + w - 7,
+      badgeY: curY + 11,
       badgeAnchor: 'end',
     });
+    curY += rowH + laneGap;
   });
 
   return lanes;
@@ -446,14 +496,14 @@ function computeUnitPositions(
     rowUnits.forEach((unit, idx) => {
       const frac = (idx + 0.5) / count;
       if (isLandscape) {
-        const topSafe = lane.y + 42;
-        const bottomSafe = lane.y + lane.h - 28;
+        const topSafe = lane.y + 34;
+        const bottomSafe = lane.y + lane.h - 26;
         const x = lane.x + lane.w / 2;
         const y = topSafe + frac * Math.max(20, bottomSafe - topSafe);
         map.set(unit.id, { x, y });
       } else {
-        const leftSafe = lane.x + 34;
-        const rightSafe = lane.x + lane.w - 34;
+        const leftSafe = lane.x + 32;
+        const rightSafe = lane.x + lane.w - 32;
         const x = leftSafe + frac * Math.max(20, rightSafe - leftSafe);
         const y = lane.y + lane.h * 0.54;
         map.set(unit.id, { x, y });
@@ -543,9 +593,16 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
 }: RadarUnitMarkerProps) {
   const isEnemy = unit.side === 'enemy';
   const role = getTeamColorRole(unit);
-  const teamHex = unit.alive ? getTeamHex(role) : '#64748b';
+  const teamHex = unit.alive ? getTeamHex(role) : '#475569';
   const shape = getMarkerShape(unit);
   const isStealthed = unit.alive && hasStatus(unit, 'stealth');
+
+  const shortName = formatShortUnitName(unit.name, 10);
+
+  // Down units draw smaller & dimmer so they do not clutter active lanes
+  const visualRadius = unit.alive
+    ? tokenRadius
+    : Math.max(9, Math.round(tokenRadius * 0.52));
 
   const hpRatio = Math.max(
     0,
@@ -563,24 +620,24 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
     ? '#fb923c'
     : '#22c55e';
 
-  const shortName = formatShortUnitName(unit.name, 10);
   const visibleStatuses = unit.alive ? unit.statuses.slice(0, 2) : [];
   const extraStatuses = unit.alive ? Math.max(0, unit.statuses.length - 2) : 0;
 
   const markerOpacity = !unit.alive
-    ? 0.38
+    ? 0.26
     : isStealthed
     ? 0.55
     : isBlockedByRow
     ? 0.56
     : 1;
 
-  const hexOuter = getPolygonPoints(6, tokenRadius + 0.5, -90);
-  const hexInner = getPolygonPoints(6, Math.max(8, tokenRadius - 3.2), -90);
-  const diamondOuter = getDiamondPoints(tokenRadius);
-  const diamondInner = getDiamondPoints(Math.max(8, tokenRadius - 3.5));
-  const fortressOuter = getFortressPoints(tokenRadius);
-  const fortressInner = getFortressPoints(Math.max(8, tokenRadius - 3.6));
+  const iconScale = Math.max(0.85, Math.min(1.3, visualRadius / 20));
+  const hexOuter = getPolygonPoints(6, visualRadius + 0.5, -90);
+  const hexInner = getPolygonPoints(6, Math.max(6, visualRadius - 3.2), -90);
+  const diamondOuter = getDiamondPoints(visualRadius);
+  const diamondInner = getDiamondPoints(Math.max(6, visualRadius - 3.5));
+  const fortressOuter = getFortressPoints(visualRadius);
+  const fortressInner = getFortressPoints(Math.max(6, visualRadius - 3.6));
 
   return (
     <g
@@ -588,6 +645,7 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
       data-unit-row={unit.row}
       data-unit-side={unit.side}
       data-marker-shape={shape}
+      data-visual-radius={visualRadius}
       data-acting={isActive ? 'true' : 'false'}
       data-targeted={isTargeted ? 'true' : 'false'}
       data-blocked-by-row={isBlockedByRow ? 'true' : 'false'}
@@ -608,7 +666,11 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
       onPointerUp={onLongPressCancel}
       onPointerCancel={onLongPressCancel}
       onPointerLeave={onLongPressCancel}
-      className={!unit.alive ? 'cursor-not-allowed focus:outline-none' : 'cursor-pointer focus:outline-none'}
+      className={
+        !unit.alive
+          ? 'cursor-not-allowed focus:outline-none'
+          : 'cursor-pointer focus:outline-none'
+      }
     >
       <title>{hoverTooltip}</title>
 
@@ -642,7 +704,7 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
               data-testid={`radar-acting-ring-${unit.id}`}
               cx="0"
               cy="0"
-              r={tokenRadius + 7.5}
+              r={visualRadius + 7}
               fill="rgba(254, 240, 138, 0.14)"
               stroke="#fef08a"
               strokeWidth="2.4"
@@ -658,17 +720,17 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
               <circle
                 cx="0"
                 cy="0"
-                r={tokenRadius + 6.5}
+                r={visualRadius + 6}
                 fill="none"
                 stroke={isEnemy ? '#f87171' : '#34d399'}
                 strokeWidth="1.6"
                 strokeDasharray="4 3"
               />
               <path
-                d={`M ${-tokenRadius - 7.5} ${-tokenRadius + 2} V ${-tokenRadius - 7.5} H ${-tokenRadius + 2}
-                    M ${tokenRadius - 2} ${-tokenRadius - 7.5} H ${tokenRadius + 7.5} V ${-tokenRadius + 2}
-                    M ${tokenRadius + 7.5} ${tokenRadius - 2} V ${tokenRadius + 7.5} H ${tokenRadius - 2}
-                    M ${-tokenRadius + 2} ${tokenRadius + 7.5} H ${-tokenRadius - 7.5} V ${tokenRadius - 2}`}
+                d={`M ${-visualRadius - 7} ${-visualRadius + 2} V ${-visualRadius - 7} H ${-visualRadius + 2}
+                    M ${visualRadius - 2} ${-visualRadius - 7} H ${visualRadius + 7} V ${-visualRadius + 2}
+                    M ${visualRadius + 7} ${visualRadius - 2} V ${visualRadius + 7} H ${visualRadius - 2}
+                    M ${-visualRadius + 2} ${visualRadius + 7} H ${-visualRadius - 7} V ${visualRadius - 2}`}
                 fill="none"
                 stroke={isEnemy ? '#ef4444' : '#22c55e'}
                 strokeWidth="2.2"
@@ -683,7 +745,7 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
               <circle
                 cx="0"
                 cy="0"
-                r={tokenRadius + 4}
+                r={visualRadius + 4}
                 fill="rgba(56, 189, 248, 0.14)"
                 stroke="#38bdf8"
                 strokeWidth="1.4"
@@ -696,19 +758,21 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
             <g>
               <polygon
                 points={hexOuter}
-                fill={unit.alive ? '#0a1622' : '#0f172a'}
+                fill={unit.alive ? '#0a1622' : '#0b1019'}
                 stroke={isActive ? '#fef08a' : teamHex}
-                strokeWidth={isActive ? '2.4' : '2'}
+                strokeWidth={isActive ? '2.4' : unit.alive ? '2' : '1.2'}
                 strokeLinejoin="round"
               />
-              <polygon
-                points={hexInner}
-                fill="none"
-                stroke={teamHex}
-                strokeOpacity="0.55"
-                strokeWidth="1"
-                strokeLinejoin="round"
-              />
+              {unit.alive && (
+                <polygon
+                  points={hexInner}
+                  fill="none"
+                  stroke={teamHex}
+                  strokeOpacity="0.55"
+                  strokeWidth="1"
+                  strokeLinejoin="round"
+                />
+              )}
             </g>
           )}
 
@@ -716,10 +780,10 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
             <circle
               cx="0"
               cy="0"
-              r={tokenRadius}
-              fill={unit.alive ? '#0b1320' : '#0f172a'}
+              r={visualRadius}
+              fill={unit.alive ? '#0b1320' : '#0b1019'}
               stroke={isActive ? '#fef08a' : teamHex}
-              strokeWidth={isActive ? '2.2' : '1.8'}
+              strokeWidth={isActive ? '2.2' : unit.alive ? '1.8' : '1.2'}
               strokeDasharray={isStealthed ? '3 2' : undefined}
             />
           )}
@@ -728,20 +792,22 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
             <g>
               <polygon
                 points={diamondOuter}
-                fill={unit.alive ? '#140b12' : '#0f172a'}
+                fill={unit.alive ? '#140b12' : '#0b1019'}
                 stroke={isActive ? '#fef08a' : teamHex}
-                strokeWidth={isActive ? '2.2' : '1.9'}
+                strokeWidth={isActive ? '2.2' : unit.alive ? '1.9' : '1.2'}
                 strokeDasharray={isStealthed ? '3 2' : undefined}
                 strokeLinejoin="miter"
               />
-              <polygon
-                points={diamondInner}
-                fill="none"
-                stroke={teamHex}
-                strokeOpacity="0.45"
-                strokeWidth="0.9"
-                strokeDasharray="2 2"
-              />
+              {unit.alive && (
+                <polygon
+                  points={diamondInner}
+                  fill="none"
+                  stroke={teamHex}
+                  strokeOpacity="0.45"
+                  strokeWidth="0.9"
+                  strokeDasharray="2 2"
+                />
+              )}
             </g>
           )}
 
@@ -749,22 +815,24 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
             <g>
               <polygon
                 points={fortressOuter}
-                fill={unit.alive ? '#170f0c' : '#0f172a'}
+                fill={unit.alive ? '#170f0c' : '#0b1019'}
                 stroke={isActive ? '#fef08a' : teamHex}
-                strokeWidth={isActive ? '2.4' : '2.1'}
+                strokeWidth={isActive ? '2.4' : unit.alive ? '2.1' : '1.2'}
                 strokeLinejoin="miter"
               />
-              <polygon
-                points={fortressInner}
-                fill="none"
-                stroke={teamHex}
-                strokeOpacity="0.6"
-                strokeWidth="1.1"
-              />
+              {unit.alive && (
+                <polygon
+                  points={fortressInner}
+                  fill="none"
+                  stroke={teamHex}
+                  strokeOpacity="0.6"
+                  strokeWidth="1.1"
+                />
+              )}
             </g>
           )}
 
-          {/* Center Role Icon or Down X */}
+          {/* Center Role Icon or small dim Down X */}
           {unit.alive ? (
             <ClassCenterIcon
               classId={unit.classId}
@@ -772,12 +840,13 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
               isBoss={unit.isBoss}
               color={teamHex}
               facingAngle={facingAngle}
+              scale={iconScale}
             />
           ) : (
             <path
-              d="M -6 -6 L 6 6 M 6 -6 L -6 6"
-              stroke="#94a3b8"
-              strokeWidth="2.2"
+              d="M -3.5 -3.5 L 3.5 3.5 M 3.5 -3.5 L -3.5 3.5"
+              stroke="#64748b"
+              strokeWidth="1.6"
               strokeLinecap="round"
             />
           )}
@@ -786,7 +855,7 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
           {visibleStatuses.length > 0 && (
             <g
               data-testid={`radar-status-${unit.id}`}
-              transform={`translate(${tokenRadius - 4}, ${-tokenRadius + 1})`}
+              transform={`translate(${visualRadius - 4}, ${-visualRadius + 1})`}
             >
               {visibleStatuses.map((st, sIdx) => (
                 <g
@@ -833,7 +902,7 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
 
           {/* AUTO Badge on Player Token */}
           {unit.isPlayer && autoBattleEnabled && unit.alive && (
-            <g transform={`translate(0, ${-tokenRadius - 10})`}>
+            <g transform={`translate(0, ${-visualRadius - 10})`}>
               <rect
                 x="-15"
                 y="-6"
@@ -857,86 +926,97 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
           )}
         </g>
 
-        {/* HP + Shield Linear Bars (compositor scaleX) + Short Name Plate */}
-        <g transform={`translate(0, ${tokenRadius + 5})`}>
-          {/* HP Bar */}
-          <rect
-            x={-barW / 2}
-            y="0"
-            width={barW}
-            height="3.6"
-            rx="1.5"
-            fill="#1e293b"
-          />
-          <g transform={`translate(${-barW / 2}, 0)`}>
+        {/* Alive: HP + Shield Bars + Name Plate | Down: Compact dim name only */}
+        {unit.alive ? (
+          <g transform={`translate(0, ${visualRadius + 5})`}>
             <rect
-              x="0"
+              x={-barW / 2}
               y="0"
               width={barW}
-              height="3.6"
+              height="3.8"
               rx="1.5"
-              fill={hpFillColor}
-              style={{
-                transform: `scaleX(${hpRatio})`,
-                transformOrigin: '0px 0px',
-              }}
+              fill="#1e293b"
             />
-          </g>
-
-          {/* Shield Bar */}
-          <rect
-            x={-barW / 2}
-            y="4.6"
-            width={barW}
-            height="2.4"
-            rx="1"
-            fill="#1e293b"
-          />
-          {unit.derived.maxShield > 0 && (
-            <g transform={`translate(${-barW / 2}, 4.6)`}>
+            <g transform={`translate(${-barW / 2}, 0)`}>
               <rect
                 x="0"
                 y="0"
                 width={barW}
-                height="2.4"
-                rx="1"
-                fill={hasStatus(unit, 'shield_break') ? '#ef4444' : '#38bdf8'}
+                height="3.8"
+                rx="1.5"
+                fill={hpFillColor}
                 style={{
-                  transform: `scaleX(${shdRatio})`,
+                  transform: `scaleX(${hpRatio})`,
                   transformOrigin: '0px 0px',
                 }}
               />
             </g>
-          )}
 
-          {/* Short Name (max 10 chars, no wrap) */}
-          <rect
-            x={-barW / 2 - 4}
-            y="8.5"
-            width={barW + 8}
-            height="12"
-            rx="3"
-            fill="rgba(5, 10, 18, 0.9)"
-          />
+            <rect
+              x={-barW / 2}
+              y="4.8"
+              width={barW}
+              height="2.4"
+              rx="1"
+              fill="#1e293b"
+            />
+            {unit.derived.maxShield > 0 && (
+              <g transform={`translate(${-barW / 2}, 4.8)`}>
+                <rect
+                  x="0"
+                  y="0"
+                  width={barW}
+                  height="2.4"
+                  rx="1"
+                  fill={hasStatus(unit, 'shield_break') ? '#ef4444' : '#38bdf8'}
+                  style={{
+                    transform: `scaleX(${shdRatio})`,
+                    transformOrigin: '0px 0px',
+                  }}
+                />
+              </g>
+            )}
+
+            <rect
+              x={-barW / 2 - 4}
+              y="8.6"
+              width={barW + 8}
+              height="12.5"
+              rx="3"
+              fill="rgba(5, 10, 18, 0.9)"
+            />
+            <text
+              data-testid="radar-unit-name"
+              x="0"
+              y="17.8"
+              textAnchor="middle"
+              fontSize="9.5"
+              fontWeight="700"
+              fill={isActive ? '#fef08a' : '#f1f5f9'}
+            >
+              {shortName}
+            </text>
+          </g>
+        ) : (
           <text
             data-testid="radar-unit-name"
             x="0"
-            y="17.2"
+            y={visualRadius + 10}
             textAnchor="middle"
-            fontSize="9"
-            fontWeight="700"
-            fill={isActive ? '#fef08a' : unit.alive ? '#f1f5f9' : '#94a3b8'}
+            fontSize="8"
+            fontWeight="600"
+            fill="#64748b"
           >
             {shortName}
           </text>
-        </g>
+        )}
       </g>
 
       {/* Small Lock Icon when unit cannot be targeted because a front/middle row is alive */}
       {isBlockedByRow && unit.alive && (
         <g
           data-testid={`radar-lock-${unit.id}`}
-          transform={`translate(${tokenRadius - 1}, ${tokenRadius - 2})`}
+          transform={`translate(${visualRadius - 1}, ${visualRadius - 2})`}
         >
           <circle
             cx="0"
@@ -974,7 +1054,7 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
           <circle
             cx="0"
             cy="0"
-            r={tokenRadius + 4}
+            r={visualRadius + 4}
             fill="rgba(255, 255, 255, 0.55)"
             stroke="#fef08a"
             strokeWidth="2.4"
@@ -994,7 +1074,7 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
           <circle
             cx="0"
             cy="0"
-            r={tokenRadius + 5}
+            r={visualRadius + 5}
             fill="rgba(239, 68, 68, 0.25)"
             stroke="#f87171"
             strokeWidth="2.2"
@@ -1013,6 +1093,7 @@ export function BattleRadarView({
   hasSingleAllySkill,
   autoBattleEnabled,
   skipAnimations,
+  speechBubblesEnabled = true,
   battleSpeed = 1,
   layoutMode: layoutModeProp,
   onSelectEnemy,
@@ -1031,6 +1112,9 @@ export function BattleRadarView({
   );
   const [invalidToast, setInvalidToast] = useState<string | null>(null);
   const [fadingDefeatIds, setFadingDefeatIds] = useState<string[]>([]);
+  const [visibleBubbleId, setVisibleBubbleId] = useState<string | null>(
+    battle.wingmanChat?.id ?? null
+  );
 
   const toastTimerRef = useRef<number | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
@@ -1059,6 +1143,20 @@ export function BattleRadarView({
       toastTimerRef.current = null;
     }, 2200);
   }, []);
+
+  // Auto-hide speech bubble after 1.5s cleanly even when rendered standalone
+  useEffect(() => {
+    const chatId = battle.wingmanChat?.id ?? null;
+    if (!chatId || !speechBubblesEnabled) {
+      setVisibleBubbleId(null);
+      return;
+    }
+    setVisibleBubbleId(chatId);
+    const timer = window.setTimeout(() => {
+      setVisibleBubbleId((cur) => (cur === chatId ? null : cur));
+    }, SPEECH_BUBBLE_DURATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [battle.wingmanChat?.id, speechBubblesEnabled]);
 
   useEffect(() => {
     return () => {
@@ -1109,14 +1207,15 @@ export function BattleRadarView({
     }
   }, [battle.units, animationsSkipped, defeatFadeDurationMs]);
 
-  const vw = isLandscape ? 820 : 380;
-  const vh = isLandscape ? 460 : 520;
+  // Tighter viewBox so 4v4 fills the field well and 8v8 still fits with zero clipping
+  const vw = isLandscape ? 720 : 380;
+  const vh = isLandscape ? 420 : 500;
   const cx = vw / 2;
   const cy = vh / 2;
 
   const lanes = useMemo(
-    () => buildRowLanes(isLandscape, vw, vh),
-    [isLandscape, vw, vh]
+    () => buildRowLanes(isLandscape, vw, vh, battle.units),
+    [isLandscape, vw, vh, battle.units]
   );
 
   const posMap = useMemo(
@@ -1133,7 +1232,35 @@ export function BattleRadarView({
     [battle.units]
   );
 
-  // Active unit and targeting actor (used to evaluate long-range / Siege overrides and row locks)
+  // Adaptive unit marker scaling: larger in 4v4 so units fill the field, clean fit in 8v8
+  const maxUnitsInRow = useMemo(() => {
+    const counts = new Map<string, number>();
+    let max = 1;
+    for (const u of battle.units) {
+      const key = `${u.side}:${u.row}`;
+      const next = (counts.get(key) ?? 0) + 1;
+      counts.set(key, next);
+      if (next > max) max = next;
+    }
+    return max;
+  }, [battle.units]);
+
+  const tokenRadius = isLandscape
+    ? maxUnitsInRow <= 2 && battle.squadSize <= 4
+      ? 26
+      : maxUnitsInRow <= 3
+      ? 22
+      : 19
+    : maxUnitsInRow <= 2 && battle.squadSize <= 4
+    ? 22
+    : maxUnitsInRow <= 3
+    ? 18
+    : 16;
+
+  const hitSize = getRadarHitAreaSize(isLandscape);
+  const barW = isLandscape ? (tokenRadius >= 24 ? 62 : 56) : 52;
+
+  // Active unit and targeting actor
   const activeUnit = useMemo(
     () => battle.units.find((u) => u.id === activeUnitId) ?? null,
     [battle.units, activeUnitId]
@@ -1150,7 +1277,6 @@ export function BattleRadarView({
     );
   }, [activeUnit, battle.units]);
 
-  // Evaluate target validity for every enemy unit using the combat engine's 3-row + long-range/Siege rules
   const enemyValidityMap = useMemo(() => {
     const map = new Map<string, TargetValidityResult>();
     for (const unit of battle.units) {
@@ -1161,7 +1287,6 @@ export function BattleRadarView({
         unit,
         'attack'
       );
-      // Respect explicit validBasicTargetIds override only when actor does not already ignore row blocking
       if (
         !result.ignoresRowBlocking &&
         result.valid &&
@@ -1185,7 +1310,6 @@ export function BattleRadarView({
     return map;
   }, [battle.units, targetingActor, validBasicTargetIds, enemyExposure]);
 
-  // Resolve active hit-flash target IDs from current FX events and unit animState
   const fxHitTargetIds = useMemo(() => {
     const set = new Set<string>();
     for (const u of battle.units) {
@@ -1209,20 +1333,18 @@ export function BattleRadarView({
     return set;
   }, [fadingDefeatIds, battle.explodedUnitIds]);
 
+  // All floating text (damage + buff/status like "WPN +30%") shares the same max-6 stagger queue
   const staggeredPopups = useMemo(
     () =>
       layoutStaggeredPopups(battle.popups, posMap, vw, vh, {
         maxVisible: 6,
-        verticalStepPct: 7.5,
+        verticalStepPct: 6.2,
         staggerDelayMs: 110,
         durationMs: 800,
+        baseOffsetYPct: 8,
       }),
     [battle.popups, posMap, vw, vh]
   );
-
-  const tokenRadius = isLandscape ? 20 : battle.squadSize >= 8 ? 16 : 18;
-  const hitSize = getRadarHitAreaSize(isLandscape);
-  const barW = isLandscape ? 54 : 50;
 
   const getInvalidReasonMessage = useCallback(
     (reason: TargetInvalidReason | null): string => {
@@ -1242,7 +1364,6 @@ export function BattleRadarView({
     [t]
   );
 
-  // Ref-backed interaction state so RadarUnitMarker callbacks stay referentially stable for React.memo
   const interactionRef = useRef({
     battle,
     canPlayerManualAct,
@@ -1280,7 +1401,6 @@ export function BattleRadarView({
     const isEnemySelected = ctx.battle.selectedTargetId === unit.id;
     const isAllySelected = ctx.battle.selectedAllyTargetId === unit.id;
 
-    // Down units are never targetable
     if (!unit.alive) {
       if (ctx.canPlayerManualAct) {
         ctx.showInvalidToast(ctx.getInvalidReasonMessage('unit_down'));
@@ -1333,7 +1453,6 @@ export function BattleRadarView({
     }
   }, []);
 
-  // Compute aim arrow from acting unit to current target
   const aimArrow = useMemo(() => {
     if (battle.summary || !activeUnit || !activeUnit.alive) return null;
     const from = posMap.get(activeUnit.id);
@@ -1356,7 +1475,6 @@ export function BattleRadarView({
         if (enemyTarget) targetUnit = enemyTarget;
       }
     } else {
-      // Enemy acting: point toward nearest exposed alive ally
       const exposedAllyRow =
         allyExposure.front === 'exposed'
           ? 'front'
@@ -1405,10 +1523,44 @@ export function BattleRadarView({
     tokenRadius,
   ]);
 
-  const chatterUnit =
-    battle.wingmanChat &&
-    battle.units.find((u) => u.id === battle.wingmanChat?.unitId);
-  const chatterPos = chatterUnit ? posMap.get(chatterUnit.id) : null;
+  // Compact speech bubble (single short line <= 28 chars, collision-avoiding anchor, auto-hides after 1.5s, toggleable)
+  const activeBubble = useMemo(() => {
+    if (
+      !speechBubblesEnabled ||
+      !battle.wingmanChat ||
+      visibleBubbleId !== battle.wingmanChat.id
+    ) {
+      return null;
+    }
+    const unit = battle.units.find(
+      (u) => u.id === battle.wingmanChat?.unitId && u.alive
+    );
+    if (!unit) return null;
+    const anchor = computeSpeechBubbleAnchor(unit.id, posMap, vw, vh);
+    if (!anchor) return null;
+    const rawMsg = t(battle.wingmanChat.textKey as Parameters<typeof t>[0]);
+    const text = formatSpeechBubbleText(
+      unit.name,
+      rawMsg,
+      SPEECH_BUBBLE_MAX_CHARS
+    );
+    return {
+      id: battle.wingmanChat.id,
+      text,
+      fullText: `${unit.name}: ${rawMsg}`,
+      leftPct: anchor.leftPct,
+      topPct: anchor.topPct,
+    };
+  }, [
+    speechBubblesEnabled,
+    battle.wingmanChat,
+    battle.units,
+    visibleBubbleId,
+    posMap,
+    vw,
+    vh,
+    t,
+  ]);
 
   const getRowLabel = (row: CombatRow) =>
     row === 'front'
@@ -1476,10 +1628,8 @@ export function BattleRadarView({
           </marker>
         </defs>
 
-        {/* Deep radar dish backdrop */}
         <rect x="0" y="0" width={vw} height={vh} fill="url(#radarBgGlow)" />
 
-        {/* Subtle drifting stars */}
         {STAR_DOTS.map((st, idx) => (
           <circle
             key={idx}
@@ -1487,14 +1637,13 @@ export function BattleRadarView({
             cy={(st.y / 100) * vh}
             r={st.r}
             fill="#bae6fd"
-            opacity="0.32"
+            opacity="0.3"
             className={animationsSkipped ? undefined : 'anim-radar-star'}
             style={animationsSkipped ? undefined : { animationDelay: st.delay }}
           />
         ))}
 
-        {/* Concentric tactical range rings */}
-        {[0.32, 0.64, 0.96].map((scale, i) => (
+        {[0.34, 0.66, 0.96].map((scale, i) => (
           <circle
             key={i}
             cx={cx}
@@ -1508,7 +1657,6 @@ export function BattleRadarView({
           />
         ))}
 
-        {/* Rotating radar sweep wedge (skipped when reduced motion / skipAnimations) */}
         {!animationsSkipped && (
           <g
             data-testid="radar-sweep-layer"
@@ -1526,7 +1674,7 @@ export function BattleRadarView({
           </g>
         )}
 
-        {/* 3-ROW SEPARATED TACTICAL LANE BANDS (EXPOSED vs PROTECTED vs EMPTY) */}
+        {/* 3-ROW CONTENT-FIT LANE BANDS (smaller Exposed/Protected labels) */}
         {lanes.map((lane) => {
           const exposure =
             lane.side === 'enemy'
@@ -1541,16 +1689,16 @@ export function BattleRadarView({
               ? 'rgba(239, 68, 68, 0.11)'
               : 'rgba(56, 189, 248, 0.11)'
             : isProtected
-            ? 'rgba(15, 23, 42, 0.64)'
-            : 'rgba(15, 23, 42, 0.26)';
+            ? 'rgba(15, 23, 42, 0.62)'
+            : 'rgba(15, 23, 42, 0.24)';
 
           const strokeColor = isExposed
             ? isEnemySide
-              ? 'rgba(248, 113, 113, 0.62)'
-              : 'rgba(56, 189, 248, 0.62)'
+              ? 'rgba(248, 113, 113, 0.6)'
+              : 'rgba(56, 189, 248, 0.6)'
             : isProtected
-            ? 'rgba(148, 163, 184, 0.44)'
-            : 'rgba(51, 65, 85, 0.3)';
+            ? 'rgba(148, 163, 184, 0.42)'
+            : 'rgba(51, 65, 85, 0.28)';
 
           const labelFill = isExposed
             ? isEnemySide
@@ -1589,7 +1737,7 @@ export function BattleRadarView({
                 x={lane.labelX}
                 y={lane.labelY}
                 textAnchor={lane.labelAnchor}
-                fontSize={isLandscape ? '10.5' : '9.5'}
+                fontSize={isLandscape ? '9' : '8.5'}
                 fontFamily="monospace"
                 fontWeight="700"
                 fill={labelFill}
@@ -1600,7 +1748,7 @@ export function BattleRadarView({
                 x={lane.badgeX}
                 y={lane.badgeY}
                 textAnchor={lane.badgeAnchor}
-                fontSize={isLandscape ? '9.5' : '8.5'}
+                fontSize={isLandscape ? '8' : '7.5'}
                 fontFamily="monospace"
                 fontWeight="700"
                 fill={badgeFill}
@@ -1636,7 +1784,7 @@ export function BattleRadarView({
           />
         )}
 
-        {/* Actor-to-Target Tactical Aim Line & Arrow */}
+        {/* Actor-to-Target Aim Line & Arrow */}
         {aimArrow && (
           <g
             data-testid="radar-target-arrow"
@@ -1732,7 +1880,7 @@ export function BattleRadarView({
           );
         })}
 
-        {/* COMPOSITOR-ONLY COMBAT FX LAYER (transform & opacity only, speed-scaled, skipped on reduced motion) */}
+        {/* COMPOSITOR-ONLY COMBAT FX LAYER */}
         {!animationsSkipped &&
           battle.fxEvents.map((fx) => {
             const { from, targets } = resolveFxEndpoints(fx, battle, posMap);
@@ -1791,7 +1939,6 @@ export function BattleRadarView({
                     );
                   }
 
-                  // Projectile (bolt or missile) animated via pure translate3d + opacity
                   return (
                     <g
                       key={targetId}
@@ -1827,7 +1974,7 @@ export function BattleRadarView({
           })}
       </svg>
 
-      {/* Collapsible Tactical Legend Control (closed by default, persisted in localStorage) */}
+      {/* Collapsible Tactical Legend (closed by default, persisted in localStorage) */}
       <div className="absolute top-1.5 right-1.5 z-30 flex flex-col items-end">
         <button
           type="button"
@@ -1856,7 +2003,6 @@ export function BattleRadarView({
             </div>
 
             <div className="space-y-1.5 leading-snug">
-              {/* Acting ring */}
               <div className="flex items-center gap-2">
                 <svg width="18" height="18" viewBox="0 0 18 18" className="shrink-0">
                   <circle cx="9" cy="9" r="6.5" fill="rgba(254,240,138,0.16)" stroke="#fef08a" strokeWidth="2" />
@@ -1864,7 +2010,6 @@ export function BattleRadarView({
                 <span>{t('radar.legendActing')}</span>
               </div>
 
-              {/* Target ring & aim arrow */}
               <div className="flex items-center gap-2">
                 <svg width="18" height="18" viewBox="0 0 18 18" className="shrink-0">
                   <circle cx="9" cy="9" r="6" fill="none" stroke="#ef4444" strokeWidth="1.6" strokeDasharray="3 2" />
@@ -1873,7 +2018,6 @@ export function BattleRadarView({
                 <span>{t('radar.legendTarget')}</span>
               </div>
 
-              {/* Lock badge */}
               <div className="flex items-center gap-2">
                 <svg width="18" height="18" viewBox="0 0 18 18" className="shrink-0">
                   <circle cx="9" cy="9" r="7" fill="#090f1a" stroke="#fbbf24" strokeWidth="1.3" />
@@ -1883,7 +2027,6 @@ export function BattleRadarView({
                 <span>{t('radar.legendLocked')}</span>
               </div>
 
-              {/* Shapes for color-blind accessibility */}
               <div className="flex items-center gap-2">
                 <svg width="18" height="18" viewBox="0 0 18 18" className="shrink-0">
                   <polygon points="9,2 15,5.5 15,12.5 9,16 3,12.5 3,5.5" fill="#0a1622" stroke="#22c55e" strokeWidth="1.6" />
@@ -1898,7 +2041,6 @@ export function BattleRadarView({
                 <span>{t('radar.legendEnemyShape')}</span>
               </div>
 
-              {/* Row states */}
               <div className="flex items-center gap-2 pt-0.5 border-t border-slate-800/90">
                 <svg width="18" height="14" viewBox="0 0 18 14" className="shrink-0">
                   <rect x="1" y="2" width="16" height="10" rx="2" fill="rgba(239,68,68,0.16)" stroke="#f87171" strokeWidth="1.5" />
@@ -1920,7 +2062,7 @@ export function BattleRadarView({
                 <span>{t('radar.legendEmpty')}</span>
               </div>
 
-              <div className="text-[11px] text-slate-400 pt-0.5 border-t border-slate-800/90">
+              <div className="text-[12px] text-slate-400 pt-0.5 border-t border-slate-800/90">
                 {t('radar.legendLongRange')} · {t('radar.legendDown')}
               </div>
             </div>
@@ -1940,45 +2082,55 @@ export function BattleRadarView({
         </div>
       )}
 
-      {/* Staggered Floating Damage / Status Popups Overlay (vertical + time staggered, capped, 800ms fade) */}
+      {/* Staggered Floating Popups (max 6 simultaneous; buffs/status rendered compact & tight-anchored) */}
       {!animationsSkipped && staggeredPopups.length > 0 && (
         <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          {staggeredPopups.map((item) => (
-            <div
-              key={item.popup.id}
-              data-testid="damage-popup"
-              style={{
-                left: `${item.leftPct}%`,
-                top: `${item.topPct}%`,
-                animationDelay: `${item.delayMs}ms`,
-                animationDuration: `${item.durationMs}ms`,
-              }}
-              className={`absolute z-20 font-display text-[20px] font-bold tracking-wider drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)] whitespace-nowrap anim-popup ${getPopupColorClass(
-                item.popup.tone
-              )}`}
-            >
-              {item.popup.text}
-            </div>
-          ))}
+          {staggeredPopups.map((item) => {
+            const isSmall = isCompactPopupTone(item.popup.tone);
+            return (
+              <div
+                key={item.popup.id}
+                data-testid="damage-popup"
+                data-popup-compact={isSmall ? 'true' : 'false'}
+                style={{
+                  left: `${item.leftPct}%`,
+                  top: `${item.topPct}%`,
+                  animationDelay: `${item.delayMs}ms`,
+                  animationDuration: `${item.durationMs}ms`,
+                }}
+                className={`absolute z-20 font-display font-bold tracking-wide drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] whitespace-nowrap ${
+                  isSmall
+                    ? 'text-[12px] px-1 rounded bg-[#050a12]/80 anim-popup-tight'
+                    : item.popup.tone === 'crit'
+                    ? 'text-[17px] anim-popup'
+                    : 'text-[15px] anim-popup'
+                } ${getPopupColorClass(item.popup.tone)}`}
+              >
+                {item.popup.text}
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {/* Wingman Radio Chatter Floating Bubble */}
-      {battle.wingmanChat && chatterUnit && chatterPos && (
+      {/* Compact Single-Line Unit Speech Bubble (<= 28 chars, collision-avoiding, 1.5s auto-hide, toggleable) */}
+      {activeBubble && (
         <div
+          data-testid="radar-speech-bubble"
+          title={activeBubble.fullText}
           style={{
-            left: `${Math.min(78, Math.max(22, (chatterPos.x / vw) * 100))}%`,
-            top: `${Math.max(6, (chatterPos.y / vh) * 100 - 12)}%`,
+            left: `${activeBubble.leftPct}%`,
+            top: `${activeBubble.topPct}%`,
           }}
-          className="pointer-events-none absolute z-30 -translate-x-1/2 max-w-[210px] rounded-lg border border-sky-400/70 bg-[#071322]/95 px-2.5 py-1.5 shadow-lg flex items-start gap-1.5"
+          className="pointer-events-none absolute z-30 -translate-x-1/2 max-w-[205px] rounded-md border border-sky-400/65 bg-[#071322]/94 px-2 py-0.5 shadow-md flex items-center gap-1 whitespace-nowrap"
         >
-          <Radio className="w-3.5 h-3.5 text-sky-400 shrink-0 mt-0.5" />
-          <div className="min-w-0 text-[12px] leading-tight text-sky-100">
-            <span className="font-bold text-sky-300">
-              {formatShortUnitName(chatterUnit.name, 10)}:{' '}
-            </span>
-            <span>{t(battle.wingmanChat.textKey as Parameters<typeof t>[0])}</span>
-          </div>
+          <Radio className="w-3 h-3 text-sky-400 shrink-0" aria-hidden="true" />
+          <span
+            data-testid="radar-speech-bubble-text"
+            className="text-[12px] leading-tight font-medium text-sky-100 truncate"
+          >
+            {activeBubble.text}
+          </span>
         </div>
       )}
     </div>

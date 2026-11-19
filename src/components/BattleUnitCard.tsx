@@ -1,12 +1,15 @@
+import { memo, useRef } from 'react';
 import {
   Anchor,
   BatteryCharging,
   Castle,
+  Crosshair,
   EyeOff,
   Flame,
   Gauge,
   Heart,
   Info,
+  Lock,
   Radio,
   RotateCcw,
   Shield,
@@ -19,32 +22,30 @@ import {
   Swords,
   Target,
   Wind,
+  X,
   Zap,
 } from 'lucide-react';
-import { useRef } from 'react';
-import {
-  getEffectiveUnitSpeed,
-  getTeamColorRole,
-  hasStatus,
-} from '../engine/combat';
+import { getTeamColorRole, hasStatus } from '../engine/combat';
 import {
   getArchetypeLabel,
   getClassName,
   getStatusDesc,
   getStatusLabel,
-  getTeamTagLabel,
   useI18n,
 } from '../i18n';
 import type {
   ActiveStatusEffect,
   CombatUnit,
   FloatingPopup,
+  MechClassId,
   StatusEffectType,
   TeamColorRole,
 } from '../types/game';
-import { formatShortUnitName } from '../utils/battleDisplay';
-import { FighterSvg } from './FighterSvg';
-import { StatBar } from './StatBar';
+import {
+  formatShortUnitName,
+  isCompactPopupTone,
+  usePrefersReducedMotion,
+} from '../utils/battleDisplay';
 
 interface BattleUnitCardProps {
   unit: CombatUnit;
@@ -161,7 +162,7 @@ function getStatusBadgeStyle(st: ActiveStatusEffect): string {
 }
 
 function StatusMiniIcon({ type }: { type: StatusEffectType }) {
-  const cls = 'w-2.5 h-2.5 shrink-0';
+  const cls = 'w-3 h-3 shrink-0';
   switch (type) {
     case 'burn':
       return <Flame className={cls} />;
@@ -207,50 +208,155 @@ function StatusMiniIcon({ type }: { type: StatusEffectType }) {
   }
 }
 
-function formatStatusSuffix(st: ActiveStatusEffect): string {
-  if (st.type === 'siege_mode' || st.type === 'siege_defense') {
-    return 'ON';
-  }
-  if (st.type === 'charging') {
-    return '⚡';
-  }
-  if (st.charges && st.charges > 0) {
-    return `${st.charges}x`;
-  }
-  if (st.turnsRemaining >= 50) {
-    return '∞';
-  }
-  return `${st.turnsRemaining}t`;
+function RoleBadgeSvg({
+  classId,
+  side,
+  isPlayer,
+  isBoss,
+  color,
+}: {
+  classId: MechClassId;
+  side: 'ally' | 'enemy';
+  isPlayer: boolean;
+  isBoss?: boolean;
+  color: string;
+}) {
+  return (
+    <svg
+      width="28"
+      height="28"
+      viewBox="-14 -14 28 28"
+      className="shrink-0"
+      aria-hidden="true"
+    >
+      {/* Team shape outline (color-blind distinguishable) */}
+      {side === 'ally' && isPlayer ? (
+        <polygon
+          points="0,-12 10.4,-6 10.4,6 0,12 -10.4,6 -10.4,-6"
+          fill="#0a1622"
+          stroke={color}
+          strokeWidth="1.7"
+        />
+      ) : side === 'ally' ? (
+        <circle
+          cx="0"
+          cy="0"
+          r="11.5"
+          fill="#0b1320"
+          stroke={color}
+          strokeWidth="1.6"
+        />
+      ) : isBoss ? (
+        <polygon
+          points="-7,-11 7,-11 11,-7 11,7 7,11 -7,11 -11,7 -11,-7"
+          fill="#170f0c"
+          stroke={color}
+          strokeWidth="1.8"
+        />
+      ) : (
+        <polygon
+          points="0,-12.5 12.5,0 0,12.5 -12.5,0"
+          fill="#140b12"
+          stroke={color}
+          strokeWidth="1.6"
+        />
+      )}
+
+      {/* Role silhouette */}
+      {classId === 'interceptor' ? (
+        <polygon points="0,-6.5 4.8,5 0,2.5 -4.8,5" fill={color} />
+      ) : classId === 'siege' ? (
+        <polygon
+          points="-1.6,-6.5 1.6,-6.5 2.4,-1.5 5.2,-0.5 5.2,5 -5.2,5 -5.2,-0.5 -2.4,-1.5"
+          fill={color}
+        />
+      ) : classId === 'support' ? (
+        <path
+          d="M 0 -5 V 5 M -5 0 H 5"
+          stroke={color}
+          strokeWidth="2.2"
+          strokeLinecap="round"
+        />
+      ) : (
+        <polygon
+          points="0,-6 2,-1.2 6.2,2.2 5.6,4.8 1.5,3 0,5.2 -1.5,3 -5.6,4.8 -6.2,2.2 -2,-1.2"
+          fill={color}
+        />
+      )}
+    </svg>
+  );
 }
 
-export function BattleUnitCard({
+/**
+ * Compact Tactical Unit Row for Card View ("Thẻ"):
+ * - Alive units render as a dense 48–56px one-line row (role icon, short name, class & level,
+ *   tabular HP/SHD/SP bars with scaleX compositor fills, up to 2 status icons +N, and >=44px info button).
+ * - Down units collapse to a thin 28px single-line greyed row (name + "Down") instead of a full card.
+ */
+export const BattleUnitCard = memo(function BattleUnitCard({
   unit,
   isActiveTurn,
   isTargeted,
   canTarget,
-  exploding,
   skipAnimations,
   autoActive = false,
-  compact = false,
   frontBlocked = false,
-  wingmanChatText = null,
   popups,
   onSelect,
   onInspect,
 }: BattleUnitCardProps) {
   const { lang, t } = useI18n();
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const effectiveSkip = skipAnimations || prefersReducedMotion;
+
   const longPressTimerRef = useRef<number | null>(null);
   const longPressFiredRef = useRef(false);
 
-  const hpRatio = Math.max(0, Math.min(1, unit.hp / Math.max(1, unit.derived.maxHp)));
-
   const isEnemy = unit.side === 'enemy';
+  const shortName = formatShortUnitName(unit.name, 10);
+
+  // COLLAPSED 28px DOWN ROW
+  if (!unit.alive) {
+    return (
+      <div
+        data-testid={`unit-row-down-${unit.id}`}
+        data-unit-id={unit.id}
+        data-unit-collapsed="true"
+        data-unit-down="true"
+        onClick={onInspect}
+        title={`${unit.name} · ${t('battle.unitDown')}`}
+        className="h-[28px] max-h-[28px] rounded-md border border-slate-800/70 bg-[#070B12]/70 px-2 flex items-center justify-between gap-2 text-[12px] text-slate-500 select-none cursor-pointer hover:bg-slate-900/60"
+      >
+        <div className="flex items-center gap-1.5 min-w-0">
+          <X className="w-3.5 h-3.5 text-slate-600 shrink-0" aria-hidden="true" />
+          <span className="font-semibold text-slate-500 line-through truncate">
+            {shortName}
+          </span>
+        </div>
+        <span className="font-mono-nums text-[12px] text-slate-500 shrink-0">
+          {t('battle.unitDown')}
+        </span>
+      </div>
+    );
+  }
+
+  const hpRatio = Math.max(
+    0,
+    Math.min(1, unit.hp / Math.max(1, unit.derived.maxHp))
+  );
+  const shdRatio = Math.max(
+    0,
+    Math.min(1, unit.shield / Math.max(1, unit.derived.maxShield))
+  );
+  const spRatio = Math.max(
+    0,
+    Math.min(1, unit.sp / Math.max(1, unit.derived.maxSp))
+  );
+
   const shieldBroken = hasStatus(unit, 'shield_break');
   const isStealthed = hasStatus(unit, 'stealth');
-  const effectiveSpeed = getEffectiveUnitSpeed(unit);
   const teamRole = getTeamColorRole(unit);
   const teamVars = getTeamVars(teamRole);
-  const teamTag = getTeamTagLabel(lang, teamRole);
 
   const hpBarColor =
     hpRatio <= 0.25
@@ -259,43 +365,25 @@ export function BattleUnitCard({
       ? 'bg-orange-400'
       : 'bg-emerald-500';
 
-  const statusLabel = !unit.alive
-    ? t('battle.status.destroyed')
-    : isActiveTurn
-    ? t('queue.actingLabel')
-    : unit.isDefending
-    ? t('battle.status.defending')
-    : isTargeted
-    ? isEnemy
-      ? t('battle.status.targeted')
-      : t('battle.status.allyTarget')
-    : unit.isPlayer
-    ? t('battle.status.player')
-    : t('battle.status.standby');
-
-  const cardStyle: React.CSSProperties | undefined = !unit.alive
-    ? undefined
-    : isActiveTurn
+  const rowStyle: React.CSSProperties = isActiveTurn
     ? {
         borderColor: 'var(--turn-active)',
-        backgroundColor: '#141D2C',
+        backgroundColor: '#151E2E',
       }
     : isTargeted
     ? {
         borderColor: isEnemy ? 'var(--team-enemy)' : 'var(--team-me)',
-        backgroundColor: isEnemy ? '#1B1319' : '#0F1E1A',
+        backgroundColor: isEnemy ? '#1B1218' : '#0F1E1A',
       }
     : {
         borderColor: teamVars.border,
       };
 
-  const cardClass = !unit.alive
-    ? 'border-slate-800/60 bg-[#080C12]/60 opacity-55'
-    : isActiveTurn
-    ? skipAnimations
+  const rowClass = isActiveTurn
+    ? effectiveSkip
       ? 'shadow-[0_0_0_1px_var(--turn-active)]'
       : 'anim-turn-active'
-    : 'bg-[#0E141F]/95 hover:brightness-110';
+    : 'bg-[#0C121D]/95 hover:bg-[#111927]';
 
   const startLongPress = () => {
     if (!onInspect) return;
@@ -314,34 +402,41 @@ export function BattleUnitCard({
     }
   };
 
-  const handleCardClick = () => {
+  const handleRowClick = () => {
     if (longPressFiredRef.current) {
       longPressFiredRef.current = false;
       return;
     }
-    if (canTarget && unit.alive && onSelect) {
+    if (canTarget && onSelect) {
       onSelect();
     } else if (onInspect) {
       onInspect();
     }
   };
 
-  const isClickable = (canTarget && unit.alive && Boolean(onSelect)) || Boolean(onInspect);
-
-  const visibleStatuses = compact ? unit.statuses.slice(0, 3) : unit.statuses;
-  const overflowStatuses = compact ? Math.max(0, unit.statuses.length - 3) : 0;
+  const isClickable = (canTarget && Boolean(onSelect)) || Boolean(onInspect);
+  const visibleStatuses = unit.statuses.slice(0, 2);
+  const overflowStatuses = Math.max(0, unit.statuses.length - 2);
+  const roleLabel = unit.archetype
+    ? getArchetypeLabel(lang, unit.archetype)
+    : getClassName(lang, unit.classId);
 
   return (
     <div
+      data-testid={`unit-row-${unit.id}`}
+      data-unit-id={unit.id}
+      data-unit-collapsed="false"
+      data-acting={isActiveTurn ? 'true' : 'false'}
+      data-targeted={isTargeted ? 'true' : 'false'}
       role={isClickable ? 'button' : undefined}
       tabIndex={isClickable ? 0 : undefined}
-      onClick={isClickable ? handleCardClick : undefined}
+      onClick={isClickable ? handleRowClick : undefined}
       onKeyDown={
         isClickable
           ? (e: React.KeyboardEvent) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                handleCardClick();
+                handleRowClick();
               }
             }
           : undefined
@@ -350,258 +445,198 @@ export function BattleUnitCard({
       onPointerUp={cancelLongPress}
       onPointerCancel={cancelLongPress}
       onPointerLeave={cancelLongPress}
-      style={cardStyle}
-      className={`relative rounded-lg border transition-all select-none ${
-        compact ? 'p-2' : 'p-3'
-      } ${cardClass} ${isClickable ? 'cursor-pointer' : ''} ${
-        isStealthed && unit.alive ? 'border-dashed opacity-85' : ''
-      } ${frontBlocked && unit.alive ? 'opacity-85' : ''} ${getAnimClass(
-        unit,
-        skipAnimations
-      )}`}
+      style={rowStyle}
+      className={`relative min-h-[50px] rounded-lg border px-2 py-1 flex items-center gap-2 transition-colors select-none ${rowClass} ${
+        isClickable ? 'cursor-pointer' : ''
+      } ${isStealthed ? 'border-dashed opacity-75' : ''} ${
+        frontBlocked ? 'opacity-65' : ''
+      } ${getAnimClass(unit, effectiveSkip)}`}
     >
-      {/* Staggered Floating Popups (max 3 per card, 800ms fade, vertical + time staggered) */}
-      {!skipAnimations &&
-        popups.slice(-3).map((pop, idx) => (
-          <div
-            key={pop.id}
-            data-testid="damage-popup"
-            style={{
-              top: `${-6 - idx * 22}px`,
-              animationDelay: `${idx * 110}ms`,
-              animationDuration: '800ms',
-            }}
-            className={`pointer-events-none absolute left-1/2 z-20 font-display text-[20px] font-bold tracking-wider drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)] whitespace-nowrap anim-popup ${getPopupColor(
-              pop.tone
-            )}`}
-          >
-            {pop.text}
-          </div>
-        ))}
-
-      {/* Wingman Radio Chatter Pill */}
-      {wingmanChatText && unit.alive && (
-        <div className="mb-1.5 rounded border border-sky-400/60 bg-sky-950/80 px-2 py-1 text-[11px] text-sky-100 flex items-center gap-1.5">
-          <Radio className="w-3 h-3 text-sky-400 shrink-0" />
-          <span className="truncate">&ldquo;{wingmanChatText}&rdquo;</span>
-        </div>
-      )}
-
-      <div
-        className={`flex items-center ${compact ? 'gap-2' : 'gap-3'} ${
-          isEnemy && !compact ? 'flex-row-reverse text-right' : 'flex-row text-left'
-        }`}
-      >
-        <div
-          className={`relative shrink-0 ${
-            isStealthed && unit.alive ? 'opacity-60' : ''
-          }`}
-        >
-          <FighterSvg
-            classId={unit.classId}
-            side={unit.side}
-            facing={isEnemy ? 'left' : 'right'}
-            size={compact ? 'sm' : 'md'}
-            destroyed={!unit.alive}
-            defending={unit.isDefending || hasStatus(unit, 'invincible')}
-            impactFlash={!skipAnimations && unit.animState === 'hit'}
-            exploding={!skipAnimations && exploding}
-          />
-        </div>
-
-        <div className={`flex-1 min-w-0 ${compact ? 'space-y-1' : 'space-y-1.5'}`}>
-          <div
-            className={`flex items-start justify-between gap-1.5 ${
-              isEnemy && !compact ? 'flex-row-reverse' : 'flex-row'
-            }`}
-          >
-            <div className="min-w-0 flex-1">
-              <div
-                className={`font-display ${
-                  compact ? 'text-[15px]' : 'text-[15px]'
-                } font-bold leading-tight text-slate-100 truncate flex items-center gap-1 ${
-                  isEnemy && !compact ? 'justify-end' : 'justify-start'
-                }`}
-              >
-                {unit.isBoss && (
-                  <Skull
-                    className="w-3.5 h-3.5 shrink-0"
-                    style={{ color: 'var(--team-boss)' }}
-                  />
-                )}
-                {!compact && (
-                  <span
-                    className="text-[12px] font-mono-nums font-bold px-1 rounded border shrink-0"
-                    style={{
-                      color: teamVars.accent,
-                      borderColor: teamVars.border,
-                      backgroundColor: teamVars.bg,
-                    }}
-                  >
-                    {teamTag}
-                  </span>
-                )}
-                <span
-                  className="truncate whitespace-nowrap"
-                  title={unit.name}
-                  style={{ color: unit.alive ? teamVars.accent : undefined }}
-                >
-                  {compact ? formatShortUnitName(unit.name, 10) : unit.name}
-                </span>
-                {unit.isPlayer && autoActive && unit.alive && (
-                  <span className="px-1 rounded bg-emerald-500 text-slate-950 text-[12px] font-mono-nums font-extrabold tracking-wider shrink-0">
-                    {t('auto.badge')}
-                  </span>
-                )}
-                {unit.isStructure && unit.alive && (
-                  <span className="px-1 rounded bg-orange-500/20 border border-orange-400/50 text-[12px] font-mono-nums font-bold text-orange-300 shrink-0">
-                    {t('battle.structureTag')}
-                  </span>
-                )}
-              </div>
-              <div className="mt-0.5 text-[12px] text-slate-400 truncate font-mono-nums">
-                {unit.archetype
-                  ? getArchetypeLabel(lang, unit.archetype)
-                  : getClassName(lang, unit.classId)}{' '}
-                · {t('common.levelShort')}
-                {unit.level} · SPD{' '}
-                <span
-                  className={
-                    hasStatus(unit, 'slow')
-                      ? 'text-cyan-400 font-semibold'
-                      : hasStatus(unit, 'spd_up')
-                      ? 'text-emerald-400 font-semibold'
-                      : 'text-slate-300'
-                  }
-                >
-                  {effectiveSpeed}
-                </span>
-              </div>
-            </div>
-
-            <div className="shrink-0 flex items-center gap-1">
-              {!compact && (
-                <div
-                  style={
-                    isActiveTurn && unit.alive
-                      ? { color: 'var(--turn-active-text)' }
-                      : undefined
-                  }
-                  className={`text-[10px] font-semibold tracking-wider inline-flex items-center gap-1 ${
-                    !unit.alive
-                      ? 'text-slate-500'
-                      : isActiveTurn
-                      ? 'font-extrabold'
-                      : isTargeted
-                      ? isEnemy
-                        ? 'text-red-400'
-                        : 'text-emerald-400'
-                      : unit.isDefending
-                      ? 'text-sky-400'
-                      : unit.isPlayer
-                      ? 'text-emerald-400'
-                      : 'text-slate-500'
-                  }`}
-                >
-                  {unit.isDefending && unit.alive && <Shield className="w-3 h-3" />}
-                  <span>{statusLabel}</span>
-                </div>
-              )}
-
-              {onInspect && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onInspect();
-                  }}
-                  aria-label={t('battle.inspectUnit')}
-                  title={t('battle.inspectUnit')}
-                  className="min-w-[32px] min-h-[32px] sm:min-w-[28px] sm:min-h-[28px] rounded border border-slate-700/80 bg-slate-900/90 hover:bg-slate-800 text-slate-400 hover:text-sky-300 flex items-center justify-center cursor-pointer"
-                >
-                  <Info className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Active Status Effects Row */}
-          {unit.alive && visibleStatuses.length > 0 && (
+      {/* Compact Staggered Floating Popups (max 6, tight-anchored for buffs/status) */}
+      {!effectiveSkip &&
+        popups.slice(-6).map((pop, idx) => {
+          const isSmall = isCompactPopupTone(pop.tone);
+          return (
             <div
-              className={`flex flex-wrap items-center gap-1 ${
-                isEnemy && !compact ? 'justify-end' : 'justify-start'
+              key={pop.id}
+              data-testid="damage-popup"
+              data-popup-compact={isSmall ? 'true' : 'false'}
+              style={{
+                top: `${-4 - idx * 16}px`,
+                animationDelay: `${idx * 100}ms`,
+                animationDuration: '800ms',
+              }}
+              className={`pointer-events-none absolute left-1/2 z-20 font-display font-bold tracking-wide drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] whitespace-nowrap ${
+                isSmall
+                  ? 'text-[12px] anim-popup-tight'
+                  : 'text-[15px] anim-popup'
+              } ${getPopupColor(pop.tone)}`}
+            >
+              {pop.text}
+            </div>
+          );
+        })}
+
+      {/* 1. Role / Team Shape Icon */}
+      <div className="relative shrink-0">
+        <RoleBadgeSvg
+          classId={unit.classId}
+          side={unit.side}
+          isPlayer={unit.isPlayer}
+          isBoss={unit.isBoss}
+          color={teamVars.accent}
+        />
+        {frontBlocked && (
+          <span
+            data-testid={`unit-row-lock-${unit.id}`}
+            title={t('radar.invalidFrontAlive')}
+            className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-[#070B12] border border-amber-400 flex items-center justify-center"
+          >
+            <Lock className="w-2.5 h-2.5 text-amber-300" />
+          </span>
+        )}
+      </div>
+
+      {/* 2. Short Name + Class & Level */}
+      <div className="w-[104px] sm:w-[116px] shrink-0 min-w-0">
+        <div className="flex items-center gap-1 min-w-0">
+          {unit.isBoss && (
+            <Skull
+              className="w-3.5 h-3.5 shrink-0"
+              style={{ color: 'var(--team-boss)' }}
+            />
+          )}
+          <span
+            title={unit.name}
+            style={{
+              color: isActiveTurn ? 'var(--turn-active-text)' : teamVars.accent,
+            }}
+            className="text-[13px] font-bold leading-tight whitespace-nowrap truncate"
+          >
+            {shortName}
+          </span>
+          {isTargeted && (
+            <Crosshair
+              className={`w-3.5 h-3.5 shrink-0 ${
+                isEnemy ? 'text-red-400' : 'text-emerald-400'
+              }`}
+              aria-hidden="true"
+            />
+          )}
+          {unit.isPlayer && autoActive && (
+            <span className="text-[11px] font-mono-nums font-bold text-emerald-300 shrink-0">
+              {t('auto.badge')}
+            </span>
+          )}
+        </div>
+        <div className="text-[12px] text-slate-400 font-mono-nums leading-tight truncate">
+          {roleLabel} · {t('common.levelShort')}
+          {unit.level}
+        </div>
+      </div>
+
+      {/* 3. Fixed-Width Tabular HP Bar + Shield & SP Bars (zero layout shift via scaleX) */}
+      <div className="flex-1 min-w-[92px] space-y-1">
+        {/* HP line */}
+        <div className="flex items-center gap-1.5">
+          <div className="flex-1 h-2 rounded-full bg-slate-900 border border-slate-800/90 overflow-hidden">
+            <div
+              className={`h-full w-full ${hpBarColor}`}
+              style={{
+                transform: `scaleX(${hpRatio})`,
+                transformOrigin: 'left center',
+              }}
+            />
+          </div>
+          <span className="w-[66px] text-right font-mono-nums text-[12px] font-semibold text-slate-200 shrink-0">
+            {unit.hp}/{unit.derived.maxHp}
+          </span>
+        </div>
+
+        {/* Shield + SP compact dual bars */}
+        <div className="grid grid-cols-2 gap-1.5 items-center">
+          <div className="flex items-center gap-1 min-w-0">
+            <div className="flex-1 h-1.5 rounded-full bg-slate-900 overflow-hidden">
+              <div
+                className={`h-full w-full ${
+                  shieldBroken ? 'bg-red-500/60' : 'bg-sky-400'
+                }`}
+                style={{
+                  transform: `scaleX(${
+                    unit.derived.maxShield > 0 ? shdRatio : 0
+                  })`,
+                  transformOrigin: 'left center',
+                }}
+              />
+            </div>
+            <span
+              className={`w-[30px] text-right font-mono-nums text-[12px] shrink-0 ${
+                shieldBroken ? 'text-red-300 line-through' : 'text-sky-300'
               }`}
             >
-              {visibleStatuses.map((st) => (
-                <span
-                  key={st.type}
-                  title={getStatusDesc(lang, st.type)}
-                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono-nums font-semibold border ${getStatusBadgeStyle(
-                    st
-                  )}`}
-                >
-                  <StatusMiniIcon type={st.type} />
-                  <span>
-                    {compact
-                      ? formatStatusSuffix(st)
-                      : `${getStatusLabel(lang, st.type)} ${formatStatusSuffix(st)}`}
-                  </span>
-                </span>
-              ))}
-              {overflowStatuses > 0 && (
-                <span className="px-1.5 py-0.5 rounded text-[10px] font-mono-nums font-bold border border-slate-700 bg-slate-900 text-slate-300">
-                  +{overflowStatuses}
-                </span>
-              )}
+              {unit.shield}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1 min-w-0">
+            <div className="flex-1 h-1.5 rounded-full bg-slate-900 overflow-hidden">
+              <div
+                className="h-full w-full bg-purple-400"
+                style={{
+                  transform: `scaleX(${unit.derived.maxSp > 0 ? spRatio : 0})`,
+                  transformOrigin: 'left center',
+                }}
+              />
             </div>
-          )}
-
-          {/* HP Bar */}
-          <StatBar
-            label="HP"
-            value={unit.hp}
-            max={unit.derived.maxHp}
-            fillClassName={hpBarColor}
-            heightClassName={compact ? 'h-1.5' : 'h-2'}
-            instant={skipAnimations}
-            showTrail
-            compactHeader={compact}
-          />
-
-          {/* Shield & SP Bars */}
-          <div className="grid grid-cols-2 gap-1.5">
-            <StatBar
-              label="SHD"
-              labelClassName={
-                shieldBroken ? 'text-red-400 line-through' : 'text-sky-400/90'
-              }
-              valueClassName={shieldBroken ? 'text-red-300' : 'text-sky-200'}
-              value={unit.shield}
-              max={Math.max(1, unit.derived.maxShield)}
-              valueText={compact ? `${unit.shield}` : `${unit.shield}/${unit.derived.maxShield}`}
-              fillClassName={shieldBroken ? 'bg-red-500/50' : 'bg-sky-400'}
-              heightClassName="h-1.5"
-              instant={skipAnimations}
-              showTrail
-              compactHeader
-            />
-
-            <StatBar
-              label="SP"
-              labelClassName="text-purple-300/90"
-              valueClassName="text-purple-200"
-              value={unit.sp}
-              max={Math.max(1, unit.derived.maxSp)}
-              valueText={compact ? `${unit.sp}` : `${unit.sp}/${unit.derived.maxSp}`}
-              fillClassName="bg-purple-400"
-              heightClassName="h-1.5"
-              instant={skipAnimations}
-              showTrail
-              compactHeader
-            />
+            <span className="w-[26px] text-right font-mono-nums text-[12px] text-purple-300 shrink-0">
+              {unit.sp}
+            </span>
           </div>
         </div>
       </div>
+
+      {/* 4. Status Icons (up to 2 + overflow) & >=44px Info Button */}
+      <div className="shrink-0 flex items-center gap-1">
+        {visibleStatuses.length > 0 && (
+          <div className="hidden sm:flex items-center gap-0.5">
+            {visibleStatuses.map((st) => (
+              <span
+                key={st.type}
+                title={`${getStatusLabel(lang, st.type)}: ${getStatusDesc(
+                  lang,
+                  st.type
+                )}`}
+                className={`w-5 h-5 rounded border inline-flex items-center justify-center ${getStatusBadgeStyle(
+                  st
+                )}`}
+              >
+                <StatusMiniIcon type={st.type} />
+              </span>
+            ))}
+            {overflowStatuses > 0 && (
+              <span className="text-[12px] font-mono-nums font-bold text-slate-300 px-0.5">
+                +{overflowStatuses}
+              </span>
+            )}
+          </div>
+        )}
+
+        {onInspect && (
+          <button
+            type="button"
+            data-testid={`unit-row-info-${unit.id}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onInspect();
+            }}
+            aria-label={t('battle.inspectUnit')}
+            title={t('battle.inspectUnit')}
+            className="min-w-[44px] min-h-[44px] rounded-md border border-slate-700/80 bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-sky-300 inline-flex items-center justify-center cursor-pointer shrink-0"
+          >
+            <Info className="w-4 h-4" />
+          </button>
+        )}
+      </div>
     </div>
   );
-}
+});

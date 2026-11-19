@@ -11,6 +11,7 @@ import {
   HeartHandshake,
   Info,
   LayoutGrid,
+  MessageSquare,
   MoreHorizontal,
   Package,
   Radar,
@@ -64,8 +65,12 @@ import type {
 } from '../types/game';
 import {
   computeRowExposure,
+  evaluateRadarTargetValidity,
   formatShortUnitName,
+  readSpeechBubblesEnabled,
+  SPEECH_BUBBLE_DURATION_MS,
   useBattleLayoutMode,
+  writeSpeechBubblesEnabled,
   type RowExposureState,
 } from '../utils/battleDisplay';
 import { BattleRadarView } from './BattleRadarView';
@@ -138,6 +143,19 @@ export function BattleScreen() {
   const [suppliesSheetOpen, setSuppliesSheetOpen] = useState(false);
   const [moreActionsOpen, setMoreActionsOpen] = useState(false);
   const [statsModalOpen, setStatsModalOpen] = useState(false);
+  const [cardSideTab, setCardSideTab] = useState<'ally' | 'enemy'>('enemy');
+  const [speechBubblesEnabled, setSpeechBubblesEnabled] = useState<boolean>(
+    () => readSpeechBubblesEnabled()
+  );
+  const [cardToast, setCardToast] = useState<string | null>(null);
+
+  const toggleSpeechBubbles = () => {
+    setSpeechBubblesEnabled((prev) => {
+      const next = !prev;
+      writeSpeechBubblesEnabled(next);
+      return next;
+    });
+  };
 
   const bypassFx = skipAnimations || battleSpeed === 10;
 
@@ -193,9 +211,17 @@ export function BattleScreen() {
     if (!battle?.wingmanChat) return;
     const timer = window.setTimeout(() => {
       clearWingmanChat();
-    }, 2600);
+    }, SPEECH_BUBBLE_DURATION_MS);
     return () => window.clearTimeout(timer);
   }, [battle?.wingmanChat, clearWingmanChat]);
+
+  useEffect(() => {
+    if (!cardToast) return;
+    const timer = window.setTimeout(() => {
+      setCardToast(null);
+    }, 2200);
+    return () => window.clearTimeout(timer);
+  }, [cardToast]);
 
   // Automatic AI (and player Charge Shot auto-release) scheduler
   useEffect(() => {
@@ -488,14 +514,21 @@ export function BattleScreen() {
       ? t('battle.rowProtected')
       : t('battle.rowEmpty');
 
+  const getCardInvalidReason = (unit: CombatUnit): string | null => {
+    const actor =
+      activeUnit?.isPlayer && activeUnit.alive ? activeUnit : playerUnit ?? null;
+    const check = evaluateRadarTargetValidity(battle.units, actor, unit, 'attack');
+    if (check.valid) return null;
+    if (check.reason === 'unit_down') return t('radar.invalidDown');
+    if (check.reason === 'stealthed') return t('radar.invalidStealthed');
+    if (check.reason === 'middle_row_alive') return t('radar.invalidMiddleAlive');
+    return t('radar.invalidFrontAlive');
+  };
+
   const renderCardUnit = (unit: CombatUnit, compact: boolean) => {
     const isEnemy = unit.side === 'enemy';
     const frontBlocked =
       isEnemy && unit.alive && !validBasicTargetIds.has(unit.id);
-    const wingmanChatText =
-      battle.wingmanChat && battle.wingmanChat.unitId === unit.id
-        ? t(battle.wingmanChat.textKey as Parameters<typeof t>[0])
-        : null;
 
     return (
       <BattleUnitCard
@@ -503,7 +536,7 @@ export function BattleScreen() {
         unit={unit}
         compact={compact}
         frontBlocked={frontBlocked}
-        wingmanChatText={wingmanChatText}
+        wingmanChatText={null}
         isActiveTurn={activeUnitId === unit.id && !battle.summary}
         isTargeted={
           isEnemy
@@ -514,7 +547,7 @@ export function BattleScreen() {
         }
         canTarget={
           isEnemy
-            ? canPlayerManualAct && unit.alive && !hasStatus(unit, 'stealth')
+            ? canPlayerManualAct && unit.alive
             : canPlayerManualAct && unit.alive && hasSingleAllySkill
         }
         exploding={battle.explodedUnitIds.includes(unit.id)}
@@ -524,6 +557,11 @@ export function BattleScreen() {
         onSelect={
           isEnemy
             ? () => {
+                if (frontBlocked || hasStatus(unit, 'stealth')) {
+                  const reason = getCardInvalidReason(unit);
+                  if (reason) setCardToast(reason);
+                  return;
+                }
                 selectTarget(unit.id);
                 setInspectedUnitId(unit.id);
               }
@@ -544,35 +582,26 @@ export function BattleScreen() {
   ) => {
     const exposureMap =
       side === 'enemy' ? enemyExposure : allyExposure;
-    const orderedRows: CombatRow[] =
-      side === 'enemy' && isPhonePortrait
-        ? ['back', 'middle', 'front']
-        : ROWS_ORDER;
+    const orderedRows: CombatRow[] = ROWS_ORDER;
 
     return (
-      <div className="space-y-2" data-testid={`card-side-${side}`}>
+      <div className="space-y-1.5 min-w-0" data-testid={`card-side-${side}`}>
         <div className="flex items-center justify-between text-[13px] px-1">
           <span
-            className="font-display text-[15px] font-bold tracking-wider uppercase"
+            className="font-display text-[14px] font-bold tracking-wider uppercase truncate"
             style={{
               color:
                 side === 'enemy' ? 'var(--team-enemy)' : 'var(--team-ally)',
             }}
           >
             {side === 'enemy'
-              ? t('battle.hostileWing', { sector: sectorLabel })
-              : t('battle.alliedWing')}
+              ? t('battle.tabEnemies')
+              : t('battle.tabAllies')}
           </span>
-          <span className="font-mono-nums text-[12px] text-slate-400">
+          <span className="font-mono-nums text-[12px] text-slate-400 shrink-0">
             {side === 'enemy'
-              ? t('battle.activeCount', {
-                  alive: aliveEnemiesCount,
-                  total: enemies.length,
-                })
-              : t('battle.operational', {
-                  alive: aliveAlliesCount,
-                  total: allies.length,
-                })}
+              ? `${aliveEnemiesCount}/${enemies.length}`
+              : `${aliveAlliesCount}/${allies.length}`}
           </span>
         </div>
 
@@ -589,7 +618,7 @@ export function BattleScreen() {
               key={`${side}-${row}`}
               data-card-row={`${side}-${row}`}
               data-row-state={exposure}
-              className={`rounded-lg border p-2 space-y-2 ${
+              className={`rounded-lg border p-1.5 space-y-1 ${
                 isExposed
                   ? side === 'enemy'
                     ? 'border-red-500/45 bg-red-950/15'
@@ -599,7 +628,7 @@ export function BattleScreen() {
                   : 'border-dashed border-slate-800/70 bg-slate-950/25'
               }`}
             >
-              <div className="flex items-center justify-between gap-2 text-[12px] font-mono-nums font-bold">
+              <div className="flex items-center justify-between gap-2 px-1 text-[12px] font-mono-nums font-bold">
                 <span
                   className={
                     isExposed
@@ -612,7 +641,7 @@ export function BattleScreen() {
                   {getRowTitle(row)}
                 </span>
                 <span
-                  className={`px-1.5 py-0.5 rounded text-[12px] ${
+                  className={`px-1.5 py-0.2 rounded text-[12px] ${
                     isExposed
                       ? side === 'enemy'
                         ? 'bg-red-500/20 text-red-200'
@@ -627,11 +656,7 @@ export function BattleScreen() {
               </div>
 
               {rowUnits.length > 0 && (
-                <div
-                  className={`grid gap-2 ${
-                    compact ? 'grid-cols-2' : 'grid-cols-1 xl:grid-cols-2'
-                  }`}
-                >
+                <div className="space-y-1">
                   {rowUnits.map((u) => renderCardUnit(u, compact))}
                 </div>
               )}
@@ -653,6 +678,7 @@ export function BattleScreen() {
           hasSingleAllySkill={hasSingleAllySkill}
           autoBattleEnabled={autoBattleEnabled}
           skipAnimations={bypassFx}
+          speechBubblesEnabled={speechBubblesEnabled}
           battleSpeed={battleSpeed}
           layoutMode={layoutMode}
           onSelectEnemy={(id) => {
@@ -668,27 +694,98 @@ export function BattleScreen() {
       );
     }
 
+    if (isPhonePortrait) {
+      return (
+        <div
+          data-testid="battle-card-view"
+          className="flex-1 min-h-0 flex flex-col overflow-hidden"
+        >
+          {/* Phone Segmented Switch: Allies | Enemies */}
+          <div
+            data-testid="card-side-tabs"
+            role="tablist"
+            className="shrink-0 grid grid-cols-2 gap-1.5 pb-1.5"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={cardSideTab === 'ally'}
+              data-testid="card-tab-ally"
+              onClick={() => setCardSideTab('ally')}
+              className={`min-h-[44px] px-3 rounded-lg border text-[13px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors ${
+                cardSideTab === 'ally'
+                  ? 'border-sky-400 bg-sky-500/20 text-sky-100'
+                  : 'border-slate-800 bg-slate-950 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <span>{t('battle.tabAllies')}</span>
+              <span className="font-mono-nums text-[12px] opacity-85">
+                {aliveAlliesCount}/{allies.length}
+              </span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={cardSideTab === 'enemy'}
+              data-testid="card-tab-enemy"
+              onClick={() => setCardSideTab('enemy')}
+              className={`min-h-[44px] px-3 rounded-lg border text-[13px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors ${
+                cardSideTab === 'enemy'
+                  ? 'border-red-400 bg-red-500/20 text-red-100'
+                  : 'border-slate-800 bg-slate-950 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <span>{t('battle.tabEnemies')}</span>
+              <span className="font-mono-nums text-[12px] opacity-85">
+                {aliveEnemiesCount}/{enemies.length}
+              </span>
+            </button>
+          </div>
+
+          {cardToast && (
+            <div
+              role="status"
+              data-testid="card-invalid-target-toast"
+              className="shrink-0 mb-1.5 rounded-md border border-amber-400/70 bg-amber-950/85 px-2.5 py-1 text-[12px] font-semibold text-amber-100 text-center truncate"
+            >
+              {cardToast}
+            </div>
+          )}
+
+          <div
+            style={{ touchAction: 'pan-y' }}
+            className="flex-1 min-h-0 overflow-y-auto tactical-scroll touch-pan-y pb-1"
+          >
+            {cardSideTab === 'ally'
+              ? renderThreeRowCardSide('ally', allies, true)
+              : renderThreeRowCardSide('enemy', enemies, true)}
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div
-        style={{ touchAction: 'pan-y' }}
-        className="flex-1 min-h-0 overflow-y-auto tactical-scroll touch-pan-y p-2 space-y-4"
+        data-testid="battle-card-view"
+        className="flex-1 min-h-0 flex flex-col overflow-hidden"
       >
+        {cardToast && (
+          <div
+            role="status"
+            data-testid="card-invalid-target-toast"
+            className="shrink-0 mb-1.5 rounded-md border border-amber-400/70 bg-amber-950/85 px-3 py-1 text-[12px] font-semibold text-amber-100 text-center truncate"
+          >
+            {cardToast}
+          </div>
+        )}
         <div
-          className={`grid gap-4 items-start ${
-            isPhonePortrait ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-2'
-          }`}
+          style={{ touchAction: 'pan-y' }}
+          className="flex-1 min-h-0 overflow-y-auto tactical-scroll touch-pan-y p-1"
         >
-          {isPhonePortrait ? (
-            <>
-              {renderThreeRowCardSide('enemy', enemies, true)}
-              {renderThreeRowCardSide('ally', allies, true)}
-            </>
-          ) : (
-            <>
-              {renderThreeRowCardSide('ally', allies, battle.squadSize > 4)}
-              {renderThreeRowCardSide('enemy', enemies, battle.squadSize > 4)}
-            </>
-          )}
+          <div className="grid grid-cols-2 gap-2 items-start">
+            {renderThreeRowCardSide('ally', allies, false)}
+            {renderThreeRowCardSide('enemy', enemies, false)}
+          </div>
         </div>
       </div>
     );
@@ -1009,14 +1106,14 @@ export function BattleScreen() {
             </button>
           </div>
 
-          {/* 6) Single-row bottom action dock — collapses to thin bar in Auto mode */}
-          <div className="shrink-0 border-t border-slate-800/90 bg-[#0A0F18]/98 px-2 py-2 pb-safe">
+          {/* 6) Single-row bottom action dock — collapses to slim <=40px bar in Auto mode */}
+          <div className="shrink-0 border-t border-slate-800/90 bg-[#0A0F18]/98 px-2 py-1.5 pb-safe">
             {autoBattleEnabled ? (
               <div
                 data-testid="battle-auto-collapsed-dock"
-                className="min-h-[44px] px-3 rounded-lg border border-emerald-500/40 bg-emerald-500/12 flex items-center justify-between gap-2"
+                className="h-10 max-h-[40px] px-2.5 rounded-lg border border-emerald-500/40 bg-emerald-500/12 flex items-center justify-between gap-2"
               >
-                <div className="flex items-center gap-2 min-w-0 text-[13px] font-semibold text-emerald-200">
+                <div className="flex items-center gap-1.5 min-w-0 text-[13px] font-semibold text-emerald-200">
                   <Bot className="w-4 h-4 text-emerald-400 shrink-0" />
                   <span className="truncate">{t('battle.autoCollapsedBar')}</span>
                 </div>
@@ -1024,7 +1121,7 @@ export function BattleScreen() {
                   type="button"
                   data-testid="battle-auto-resume-manual"
                   onClick={() => setAutoBattleEnabled(false)}
-                  className="min-h-[36px] px-3 rounded-md border border-slate-600 bg-slate-900 hover:bg-slate-800 text-slate-100 text-[13px] font-semibold shrink-0 cursor-pointer"
+                  className="h-8 px-2.5 rounded-md border border-slate-600 bg-slate-900 hover:bg-slate-800 text-slate-100 text-[12px] font-semibold shrink-0 cursor-pointer"
                 >
                   {t('battle.switchManual')}
                 </button>
@@ -1087,19 +1184,24 @@ export function BattleScreen() {
         >
           {/* LEFT COLUMN (~65%): Controls + Balance Bar + Field + Action Bar under field */}
           <div className="min-w-0 min-h-0 flex flex-col gap-2 overflow-hidden">
-            {/* Compact Toolbar with PC Hover Tooltips */}
-            <div className="shrink-0 rounded-lg border border-slate-800/90 bg-[#0A0F18]/95 px-2 py-1.5 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5 flex-wrap">
+            {/* Single-Row Unified Control Bar (Manual/Auto + Speed + Radar/Card + "..." overflow menu) */}
+            <div
+              data-testid="battle-desktop-controls"
+              className="shrink-0 rounded-lg border border-slate-800/90 bg-[#0A0F18]/95 px-2 py-1 flex items-center justify-between gap-2 flex-nowrap"
+            >
+              <div className="flex items-center gap-2 min-w-0 flex-nowrap">
                 {/* Manual | Auto */}
                 <div
-                  className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-950 p-0.5"
+                  className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-950 p-0.5 shrink-0"
                   role="group"
                   title={t('auto.hotkeyHint')}
                 >
                   <button
                     type="button"
+                    data-testid="battle-manual-toggle"
+                    aria-pressed={!autoBattleEnabled}
                     onClick={() => setAutoBattleEnabled(false)}
-                    className={`min-h-[36px] px-2.5 rounded-md text-[13px] font-semibold transition-colors cursor-pointer ${
+                    className={`min-h-[44px] px-2.5 rounded-md text-[13px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                       !autoBattleEnabled
                         ? 'bg-slate-200 text-slate-950'
                         : 'text-slate-400 hover:text-slate-100'
@@ -1110,13 +1212,15 @@ export function BattleScreen() {
                   <button
                     type="button"
                     data-testid="battle-auto-toggle"
+                    aria-pressed={autoBattleEnabled}
                     onClick={() => setAutoBattleEnabled(true)}
-                    className={`min-h-[36px] px-2.5 rounded-md text-[13px] font-semibold transition-colors cursor-pointer inline-flex items-center gap-1 ${
+                    className={`min-h-[44px] px-2.5 rounded-md text-[13px] font-bold transition-colors cursor-pointer inline-flex items-center gap-1 whitespace-nowrap ${
                       autoBattleEnabled
-                        ? 'bg-emerald-500 text-slate-950'
+                        ? 'bg-emerald-500 text-slate-950 shadow-[0_0_10px_rgba(16,185,129,0.45)]'
                         : 'text-slate-400 hover:text-slate-100'
                     }`}
                   >
+                    <Bot className="w-4 h-4 shrink-0" />
                     <span>{t('auto.auto')}</span>
                     <kbd className="font-mono-nums text-[12px] px-1 rounded bg-black/20">
                       A
@@ -1126,9 +1230,10 @@ export function BattleScreen() {
 
                 {/* Speeds 1x 2x 3x 5x 10x */}
                 <div
-                  className="inline-flex items-center rounded-lg border border-slate-800 bg-slate-950 p-0.5"
+                  data-testid="battle-speed-selector"
+                  className="inline-flex items-center rounded-lg border border-slate-800 bg-slate-950 p-0.5 shrink-0"
                   role="group"
-                  aria-label="Battle speed"
+                  aria-label={t('battle.speedLabel')}
                 >
                   {BATTLE_SPEEDS.map((spd) => (
                     <button
@@ -1136,7 +1241,9 @@ export function BattleScreen() {
                       type="button"
                       onClick={() => setBattleSpeed(spd)}
                       title={`${spd}x`}
-                      className={`min-h-[36px] px-2 rounded-md text-[12px] font-mono-nums font-bold transition-colors cursor-pointer ${
+                      className={`min-h-[44px] px-2 rounded-md text-[13px] font-mono-nums font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                        spd >= 5 ? 'hidden lg:inline-flex items-center justify-center' : 'inline-flex items-center justify-center'
+                      } ${
                         battleSpeed === spd
                           ? 'bg-sky-500 text-slate-950'
                           : 'text-slate-400 hover:text-slate-100'
@@ -1149,55 +1256,55 @@ export function BattleScreen() {
 
                 {/* Radar | Card View Switch */}
                 <div
-                  className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-950 p-0.5"
+                  data-testid="battle-view-switch"
+                  className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-950 p-0.5 shrink-0"
                   role="group"
                   aria-label={t('battle.viewModeLabel')}
                 >
                   <button
                     type="button"
+                    data-testid="battle-view-radar"
+                    aria-pressed={effectiveViewMode === 'radar'}
                     onClick={() => setBattleViewMode('radar')}
                     title={t('battle.viewRadar')}
-                    className={`min-h-[36px] px-2.5 rounded-md text-[12px] font-semibold inline-flex items-center gap-1 cursor-pointer ${
+                    className={`min-h-[44px] px-2.5 rounded-md text-[13px] font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
                       effectiveViewMode === 'radar'
                         ? 'bg-sky-500 text-slate-950'
                         : 'text-slate-400 hover:text-slate-100'
                     }`}
                   >
-                    <Radar className="w-3.5 h-3.5" />
+                    <Radar className="w-4 h-4 shrink-0" />
                     <span>{t('battle.viewRadar')}</span>
                   </button>
                   <button
                     type="button"
+                    data-testid="battle-view-card"
+                    aria-pressed={effectiveViewMode === 'card'}
                     onClick={() => setBattleViewMode('card')}
                     title={t('battle.viewCard')}
-                    className={`min-h-[36px] px-2.5 rounded-md text-[12px] font-semibold inline-flex items-center gap-1 cursor-pointer ${
+                    className={`min-h-[44px] px-2.5 rounded-md text-[13px] font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
                       effectiveViewMode === 'card'
                         ? 'bg-sky-500 text-slate-950'
                         : 'text-slate-400 hover:text-slate-100'
                     }`}
                   >
-                    <LayoutGrid className="w-3.5 h-3.5" />
+                    <LayoutGrid className="w-4 h-4 shrink-0" />
                     <span>{t('battle.viewCard')}</span>
                   </button>
                 </div>
               </div>
 
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <button
-                  type="button"
-                  onClick={() => setTacticsModalOpen(true)}
-                  title={t('auto.tacticsBtn')}
-                  aria-label={t('auto.tacticsBtn')}
-                  className="min-h-[36px] min-w-[36px] px-2 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-emerald-300 inline-flex items-center justify-center cursor-pointer"
-                >
-                  <Settings className="w-4 h-4" />
-                </button>
-
-                {/* Auto-Repeat */}
-                {autoRepeatSession?.active ? (
-                  <div className="inline-flex items-center gap-1.5 min-h-[36px] px-2 rounded-lg border border-emerald-500/60 bg-emerald-500/15 text-emerald-200 text-[12px] font-mono-nums font-semibold">
+              <div className="flex items-center gap-1.5 shrink-0">
+                {autoRepeatSession?.active && (
+                  <button
+                    type="button"
+                    data-testid="battle-repeat-active-stop"
+                    onClick={() => stopAutoRepeat('manual_stop')}
+                    title={t('auto.repeatStop')}
+                    className="min-h-[44px] px-2.5 rounded-lg border border-emerald-500/60 bg-emerald-500/15 hover:bg-red-500/20 text-emerald-200 text-[12px] font-mono-nums font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                  >
                     <Repeat className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span className="whitespace-nowrap">
+                    <span>
                       {autoRepeatSession.limit === 'infinite'
                         ? `#${autoRepeatSession.completedRuns + 1}`
                         : `${Math.min(
@@ -1205,90 +1312,20 @@ export function BattleScreen() {
                             autoRepeatSession.completedRuns + 1
                           )}/${autoRepeatSession.limit}`}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => stopAutoRepeat('manual_stop')}
-                      className="px-2 py-0.5 rounded bg-red-500/90 hover:bg-red-500 text-white text-[12px] font-sans font-bold cursor-pointer inline-flex items-center gap-1"
-                    >
-                      <Square className="w-2.5 h-2.5 fill-current" />
-                      <span>{t('auto.repeatStop')}</span>
-                    </button>
-                  </div>
-                ) : (
-                  <div className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-950 overflow-hidden min-h-[36px]">
-                    <select
-                      value={String(autoRepeatLimit)}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setAutoRepeatLimit(
-                          v === 'infinite'
-                            ? 'infinite'
-                            : (Number(v) as 1 | 5 | 10)
-                        );
-                      }}
-                      aria-label={t('auto.repeatLabel')}
-                      className="min-h-[36px] bg-transparent pl-2 pr-1 text-[12px] font-mono-nums text-slate-200 focus:outline-none cursor-pointer"
-                    >
-                      {REPEAT_OPTIONS.map((opt) => (
-                        <option
-                          key={String(opt)}
-                          value={String(opt)}
-                          className="bg-slate-900"
-                        >
-                          {repeatLabelFor(opt)}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        startAutoRepeat(autoRepeatLimit, battle.sectorId)
-                      }
-                      title={t('auto.repeatStart')}
-                      className="min-h-[36px] px-2 border-l border-slate-800 bg-slate-900 hover:bg-emerald-500/20 text-emerald-300 text-[12px] font-semibold inline-flex items-center gap-1 cursor-pointer"
-                    >
-                      <Repeat className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                )}
-
-                <button
-                  type="button"
-                  onClick={toggleSkipAnimations}
-                  aria-pressed={skipAnimations}
-                  title={t('battle.skipAnim')}
-                  className={`min-h-[36px] px-2 rounded-lg border text-[12px] font-semibold inline-flex items-center gap-1 cursor-pointer ${
-                    skipAnimations
-                      ? 'border-sky-400 bg-sky-500/20 text-sky-200'
-                      : 'border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <ZapOff className="w-3.5 h-3.5" />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setStatsModalOpen(true)}
-                  title={t('stats.title')}
-                  aria-label={t('stats.title')}
-                  className="min-h-[36px] px-2.5 rounded-lg border border-sky-500/45 bg-sky-500/12 hover:bg-sky-500/22 text-sky-200 text-[12px] font-semibold inline-flex items-center gap-1 cursor-pointer"
-                >
-                  <BarChart3 className="w-3.5 h-3.5 text-sky-400" />
-                  <span>{t('stats.btn')}</span>
-                </button>
-
-                {!battle.summary && (
-                  <button
-                    type="button"
-                    onClick={retreatBattle}
-                    title={t('battle.retreat')}
-                    aria-label={t('battle.retreat')}
-                    className="min-h-[36px] px-2.5 rounded-lg border border-red-500/40 bg-red-500/10 hover:bg-red-500/20 text-red-300 text-[12px] font-semibold inline-flex items-center gap-1 cursor-pointer"
-                  >
-                    <Flag className="w-3.5 h-3.5" />
-                    <span className="hidden xl:inline">{t('battle.retreat')}</span>
+                    <Square className="w-3 h-3 text-red-400 fill-current shrink-0" />
                   </button>
                 )}
+
+                <button
+                  type="button"
+                  data-testid="battle-more-btn"
+                  onClick={() => setMoreActionsOpen(true)}
+                  aria-label={t('battle.moreActions')}
+                  title={t('battle.moreActions')}
+                  className="min-h-[44px] min-w-[44px] px-2.5 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 inline-flex items-center justify-center gap-1 cursor-pointer shrink-0"
+                >
+                  <MoreHorizontal className="w-5 h-5" />
+                </button>
               </div>
             </div>
 
@@ -1340,31 +1377,9 @@ export function BattleScreen() {
               {renderFieldContent()}
             </div>
 
-            {/* Action Bar Under the Field */}
-            <div className="shrink-0 rounded-lg border border-slate-800/90 bg-[#0A0F18]/98 p-2 space-y-2">
-              {autoBattleEnabled ? (
-                <div
-                  data-testid="battle-auto-collapsed-dock"
-                  className="min-h-[44px] px-3 rounded-lg border border-emerald-500/40 bg-emerald-500/12 flex items-center justify-between gap-2"
-                >
-                  <div className="flex items-center gap-2 text-[13px] font-semibold text-emerald-200 min-w-0">
-                    <Bot className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span className="truncate">
-                      {t('auto.autoTurnRunning', {
-                        gear: getClassName(lang, battle.deployedGearId),
-                      })}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    data-testid="battle-auto-resume-manual"
-                    onClick={() => setAutoBattleEnabled(false)}
-                    className="min-h-[36px] px-3 rounded-md border border-slate-600 bg-slate-900 hover:bg-slate-800 text-slate-100 text-[13px] font-semibold cursor-pointer shrink-0"
-                  >
-                    {t('battle.switchManual')}
-                  </button>
-                </div>
-              ) : (
+            {/* Pinned Action Bar Under the Field (hidden when Auto is ON to avoid duplicating the top Auto indicator) */}
+            {!autoBattleEnabled && (
+              <div className="shrink-0 rounded-lg border border-slate-800/90 bg-[#0A0F18]/98 p-2 space-y-2">
                 <>
                   {/* Turn Status + Active Locks */}
                   <div className="flex flex-wrap items-center justify-between gap-2 text-[13px] px-1">
@@ -1488,7 +1503,7 @@ export function BattleScreen() {
                           const borderClass = isToggleOn
                             ? 'border-emerald-400 bg-emerald-500/20 text-emerald-100'
                             : !clickable
-                            ? 'border-slate-800 bg-slate-900/70 text-slate-500 opacity-65'
+                            ? 'border-slate-800 bg-slate-900/75 text-slate-500 opacity-50'
                             : skill.category === 'elite'
                             ? 'border-amber-400/80 bg-amber-500/15 hover:bg-amber-500/25 text-amber-100'
                             : skill.category === 'special'
@@ -1499,6 +1514,7 @@ export function BattleScreen() {
                             <button
                               key={skill.id}
                               type="button"
+                              data-testid={`battle-skill-btn-${skill.id}`}
                               disabled={!clickable}
                               onClick={() => {
                                 if (clickable) {
@@ -1512,7 +1528,9 @@ export function BattleScreen() {
                                 skill.id
                               )}${reasonText ? ` [${reasonText}]` : ''}`}
                               className={`min-h-[44px] px-2 py-1 rounded-lg border text-left transition-colors flex flex-col justify-between gap-0.5 ${borderClass} ${
-                                clickable ? 'cursor-pointer' : 'cursor-not-allowed'
+                                clickable
+                                  ? 'cursor-pointer'
+                                  : 'cursor-not-allowed'
                               }`}
                             >
                               <div className="flex items-center justify-between gap-1">
@@ -1520,14 +1538,22 @@ export function BattleScreen() {
                                   icon={skill.icon}
                                   className="w-3.5 h-3.5 shrink-0"
                                 />
-                                <span className="font-mono-nums text-[12px] font-bold text-amber-300">
+                                <span
+                                  className={`font-mono-nums text-[12px] font-bold ${
+                                    usability.cooldownRemaining > 0
+                                      ? 'text-red-300'
+                                      : 'text-amber-300'
+                                  }`}
+                                >
                                   {isToggleOn
                                     ? t('battle.skillOnTag')
                                     : isUsedOnce
                                     ? t('battle.skillUsedTag')
                                     : usability.cooldownRemaining > 0
-                                    ? `CD${usability.cooldownRemaining}`
-                                    : `${usability.spCost}`}
+                                    ? t('battle.skillCdShort', {
+                                        turns: usability.cooldownRemaining,
+                                      })
+                                    : `${usability.spCost} SP`}
                                 </span>
                               </div>
                               <div className="text-[12px] font-semibold leading-tight truncate">
@@ -1558,8 +1584,8 @@ export function BattleScreen() {
                     </div>
                   )}
                 </>
-              )}
-            </div>
+              </div>
+            )}
           </div>
 
           {/* RIGHT COLUMN (~35%): Turn Queue + Selected Unit Detail + Full Combat Log */}
@@ -1595,18 +1621,18 @@ export function BattleScreen() {
         </div>
       )}
 
-      {/* ==================== PHONE MORE ACTIONS ("...") BOTTOM SHEET ==================== */}
+      {/* ==================== SHARED MORE ACTIONS ("...") MENU ==================== */}
       <BottomSheet
         open={moreActionsOpen}
         onClose={() => setMoreActionsOpen(false)}
         title={t('battle.moreActions')}
         subtitle={`${sectorLabel} · ${battle.squadSize}v${battle.squadSize}`}
       >
-        <div className="space-y-4">
+        <div data-testid="battle-more-menu" className="space-y-4">
           {/* Full Speed Picker (1x / 2x / 3x / 5x / 10x) */}
           <div className="space-y-2">
             <div className="text-[12px] font-semibold uppercase tracking-wider text-slate-400">
-              Speed
+              {t('battle.speedLabel')}
             </div>
             <div className="grid grid-cols-5 gap-2">
               {BATTLE_SPEEDS.map((spd) => (
@@ -1626,7 +1652,7 @@ export function BattleScreen() {
             </div>
           </div>
 
-          {/* Auto-Repeat */}
+          {/* Number of Battles & Auto-Repeat */}
           <div className="rounded-lg border border-slate-800 bg-[#080D16] p-3 space-y-2">
             <div className="text-[12px] font-semibold uppercase tracking-wider text-slate-400">
               {t('auto.repeatLabel')}
@@ -1634,6 +1660,7 @@ export function BattleScreen() {
             {autoRepeatSession?.active ? (
               <button
                 type="button"
+                data-testid="battle-more-repeat-stop"
                 onClick={() => {
                   stopAutoRepeat('manual_stop');
                   setMoreActionsOpen(false);
@@ -1646,6 +1673,7 @@ export function BattleScreen() {
             ) : (
               <div className="flex items-center gap-2">
                 <select
+                  data-testid="battle-more-repeat-select"
                   value={String(autoRepeatLimit)}
                   onChange={(e) => {
                     const v = e.target.value;
@@ -1664,6 +1692,7 @@ export function BattleScreen() {
                 </select>
                 <button
                   type="button"
+                  data-testid="battle-more-repeat-start"
                   onClick={() => {
                     startAutoRepeat(autoRepeatLimit, battle.sectorId);
                     setMoreActionsOpen(false);
@@ -1680,6 +1709,7 @@ export function BattleScreen() {
           <div className="grid grid-cols-1 gap-2">
             <button
               type="button"
+              data-testid="battle-more-tactics"
               onClick={() => {
                 setMoreActionsOpen(false);
                 setTacticsModalOpen(true);
@@ -1692,6 +1722,27 @@ export function BattleScreen() {
 
             <button
               type="button"
+              data-testid="battle-toggle-bubbles"
+              onClick={toggleSpeechBubbles}
+              aria-pressed={speechBubblesEnabled}
+              className={`min-h-[44px] px-3.5 rounded-lg border text-[13px] font-semibold flex items-center justify-between cursor-pointer ${
+                speechBubblesEnabled
+                  ? 'border-sky-400 bg-sky-500/20 text-sky-200'
+                  : 'border-slate-700 bg-slate-900 text-slate-300'
+              }`}
+            >
+              <span className="inline-flex items-center gap-2.5">
+                <MessageSquare className="w-4 h-4 text-sky-400" />
+                <span>{t('battle.speechBubbles')}</span>
+              </span>
+              <span className="font-mono-nums text-[12px]">
+                {speechBubblesEnabled ? 'ON' : 'OFF'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="battle-toggle-skip-anim"
               onClick={toggleSkipAnimations}
               aria-pressed={skipAnimations}
               className={`min-h-[44px] px-3.5 rounded-lg border text-[13px] font-semibold flex items-center justify-between cursor-pointer ${
@@ -1711,6 +1762,7 @@ export function BattleScreen() {
 
             <button
               type="button"
+              data-testid="battle-more-stats"
               onClick={() => {
                 setMoreActionsOpen(false);
                 setStatsModalOpen(true);
@@ -1724,6 +1776,7 @@ export function BattleScreen() {
             {!battle.summary && (
               <button
                 type="button"
+                data-testid="battle-more-retreat"
                 onClick={() => {
                   setMoreActionsOpen(false);
                   retreatBattle();
@@ -1807,13 +1860,21 @@ export function BattleScreen() {
                       )}
                     </div>
                   </div>
-                  <div className="text-right font-mono-nums text-[12px] font-bold text-amber-300 shrink-0">
+                  <div
+                    className={`text-right font-mono-nums text-[12px] font-bold shrink-0 ${
+                      usability.cooldownRemaining > 0
+                        ? 'text-red-300'
+                        : 'text-amber-300'
+                    }`}
+                  >
                     {isToggleOn
                       ? t('battle.skillOnTag')
                       : isUsedOnce
                       ? t('battle.skillUsedTag')
                       : usability.cooldownRemaining > 0
-                      ? `CD ${usability.cooldownRemaining}`
+                      ? t('battle.skillCdShort', {
+                          turns: usability.cooldownRemaining,
+                        })
                       : `${usability.spCost} SP`}
                   </div>
                 </button>

@@ -132,17 +132,21 @@ function ConveyorChip({
         </div>
 
         <div className="mt-0.5 flex items-center justify-between gap-1">
-          <span className="text-[12px] font-bold text-white truncate">
-            {compactPhone ? formatShortUnitName(entry.name, 8) : entry.name}
+          <span
+            data-testid="turn-queue-chip-name"
+            data-full-name={entry.name}
+            className="text-[13px] font-bold text-white whitespace-nowrap"
+          >
+            {formatShortUnitName(entry.name, 10)}
           </span>
           <span
-            className={`font-mono-nums text-[11px] font-bold shrink-0 inline-flex items-center gap-0.5 ${speedColor}`}
+            className={`font-mono-nums text-[12px] font-bold shrink-0 inline-flex items-center gap-0.5 ${speedColor}`}
           >
             {entry.isSlowed && (
-              <TrendingDown className="w-2.5 h-2.5 text-red-400" />
+              <TrendingDown className="w-3 h-3 text-red-400" />
             )}
             {entry.isSpeedBoosted && (
-              <TrendingUp className="w-2.5 h-2.5 text-emerald-400" />
+              <TrendingUp className="w-3 h-3 text-emerald-400" />
             )}
             {entry.effectiveSpeed}
           </span>
@@ -162,7 +166,7 @@ function ConveyorChip({
       title={fullTooltip}
       aria-label={fullTooltip}
       className={`shrink-0 rounded border bg-[#0E1522] hover:bg-slate-800/80 text-left cursor-pointer select-none ${
-        compactPhone ? 'w-[68px] px-1.5 py-1' : 'w-[126px] px-1.5 py-1'
+        compactPhone ? 'w-[78px] px-1.5 py-1' : 'w-[132px] px-2 py-1'
       } ${entry.phase === 'next_round' ? 'opacity-85' : ''} ${
         animateShift ? 'anim-conveyor-shift' : ''
       }`}
@@ -174,37 +178,45 @@ function ConveyorChip({
     >
       {compactPhone ? (
         <div className="flex flex-col items-center justify-center leading-tight">
-          <div className="flex items-center gap-0.5 text-[11px] font-bold">
+          <div className="flex items-center gap-0.5 text-[12px] font-bold">
             <span style={{ color: teamColor }}>
               {getClassGlyph(entry.classId)}
             </span>
-            <span className="text-slate-100 truncate">
-              {formatShortUnitName(entry.name, 6)}
+            <span
+              data-testid="turn-queue-chip-name"
+              data-full-name={entry.name}
+              className="text-slate-100 whitespace-nowrap"
+            >
+              {formatShortUnitName(entry.name, 10)}
             </span>
           </div>
-          <span className={`font-mono-nums text-[10px] ${speedColor}`}>
+          <span className={`font-mono-nums text-[12px] ${speedColor}`}>
             {entry.effectiveSpeed}
           </span>
         </div>
       ) : (
         <div className="flex items-center justify-between gap-1 text-[12px] leading-tight">
           <span
-            className="text-[10px] font-bold shrink-0"
+            className="text-[12px] font-bold shrink-0"
             style={{ color: teamColor }}
           >
             {teamTag}
           </span>
-          <span className="text-slate-200 font-medium truncate flex-1">
-            {entry.name}
+          <span
+            data-testid="turn-queue-chip-name"
+            data-full-name={entry.name}
+            className="text-slate-200 font-medium whitespace-nowrap flex-1"
+          >
+            {formatShortUnitName(entry.name, 10)}
           </span>
           <span
-            className={`font-mono-nums text-[11px] font-semibold shrink-0 inline-flex items-center gap-0.5 ${speedColor}`}
+            className={`font-mono-nums text-[12px] font-semibold shrink-0 inline-flex items-center gap-0.5 ${speedColor}`}
           >
             {entry.isSlowed && (
-              <TrendingDown className="w-2.5 h-2.5 text-red-400" />
+              <TrendingDown className="w-3 h-3 text-red-400" />
             )}
             {entry.isSpeedBoosted && (
-              <TrendingUp className="w-2.5 h-2.5 text-emerald-400" />
+              <TrendingUp className="w-3 h-3 text-emerald-400" />
             )}
             {entry.effectiveSpeed}
           </span>
@@ -442,9 +454,15 @@ export function TurnQueueBar({
               type="button"
               data-testid="turn-queue-acting-chip"
               data-unit-id={actingEntry.unitId}
+              data-full-name={actingEntry.name}
               data-acting="true"
+              title={`${getTeamTagLabel(lang, actingEntry.teamRole)} ${
+                actingEntry.name
+              }${targetName ? ` > ${targetName}` : ''} · ${t(
+                'queue.speedLabel'
+              )} ${actingEntry.effectiveSpeed}`}
               onClick={() => handleChipClick(actingEntry)}
-              className="shrink-0 h-8 px-2.5 rounded-md border bg-amber-400/18 text-[13px] font-bold text-amber-100 whitespace-nowrap inline-flex items-center gap-1.5 cursor-pointer"
+              className="shrink-0 h-9 px-2.5 rounded-md border bg-amber-400/18 text-[13px] font-bold text-amber-100 whitespace-nowrap inline-flex items-center gap-1.5 cursor-pointer"
               style={{
                 borderColor: 'var(--turn-active)',
               }}
@@ -459,14 +477,22 @@ export function TurnQueueBar({
 
           {upcomingCombined.map((entry, idx) => {
             const color = getTeamCssVar(entry.teamRole);
+            const tip = `${getTeamTagLabel(lang, entry.teamRole)} ${
+              entry.name
+            } (${getClassName(lang, entry.classId)}) · ${t(
+              'queue.speedLabel'
+            )} ${entry.effectiveSpeed}`;
             return (
               <button
                 key={`${entry.phase}-${entry.unitId}-${idx}`}
                 type="button"
                 data-testid="turn-queue-phone-next-chip"
                 data-unit-id={entry.unitId}
+                data-full-name={entry.name}
+                title={tip}
+                aria-label={tip}
                 onClick={() => handleChipClick(entry)}
-                className={`shrink-0 h-8 px-2 rounded border border-slate-700/90 bg-[#0E1522] text-[12px] font-semibold text-slate-200 whitespace-nowrap inline-flex items-center gap-1 cursor-pointer ${
+                className={`shrink-0 h-9 px-2 rounded border border-slate-700/90 bg-[#0E1522] text-[12px] font-semibold text-slate-200 whitespace-nowrap inline-flex items-center gap-1 cursor-pointer ${
                   entry.phase === 'next_round' ? 'opacity-75' : ''
                 }`}
               >
@@ -477,7 +503,9 @@ export function TurnQueueBar({
                 >
                   {getClassGlyph(entry.classId)}
                 </span>
-                <span>{formatShortUnitName(entry.name, 8)}</span>
+                <span data-testid="turn-queue-chip-name">
+                  {formatShortUnitName(entry.name, 10)}
+                </span>
               </button>
             );
           })}
@@ -494,15 +522,13 @@ export function TurnQueueBar({
       ...nextRoundChips,
     ].slice(0, 6);
 
+    const actingShort = actingEntry
+      ? formatShortUnitName(actingEntry.name, 10)
+      : '';
     const actingLabel =
       actingEntry && targetName
-        ? `${formatShortUnitName(actingEntry.name, 10)} > ${formatShortUnitName(
-            targetName,
-            10
-          )}`
-        : actingEntry
-        ? actingEntry.name
-        : '';
+        ? `${actingShort} > ${formatShortUnitName(targetName, 10)}`
+        : actingShort;
 
     return (
       <div
@@ -559,6 +585,7 @@ export function TurnQueueBar({
             type="button"
             data-testid="turn-queue-acting-chip"
             data-unit-id={actingEntry.unitId}
+            data-full-name={actingEntry.name}
             data-acting="true"
             onClick={() => handleChipClick(actingEntry)}
             title={`${getTeamTagLabel(lang, actingEntry.teamRole)} ${
@@ -580,7 +607,10 @@ export function TurnQueueBar({
               >
                 {getTeamTagLabel(lang, actingEntry.teamRole)}
               </span>
-              <span className="text-[13px] font-bold text-amber-100 truncate">
+              <span
+                data-testid="turn-queue-acting-name"
+                className="text-[13px] font-bold text-amber-100 whitespace-nowrap"
+              >
                 {actingLabel}
               </span>
             </div>
@@ -590,11 +620,12 @@ export function TurnQueueBar({
           </button>
         )}
 
-        {/* Upcoming Chips Row */}
+        {/* Upcoming Chips Row (max 10-char short names, full name on hover/tap) */}
         {upcomingList.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {upcomingList.map((entry, idx) => {
               const color = getTeamCssVar(entry.teamRole);
+              const shortName = formatShortUnitName(entry.name, 10);
               const tip = `${getTeamTagLabel(lang, entry.teamRole)} ${
                 entry.name
               } (${getClassName(lang, entry.classId)}) · ${t(
@@ -604,19 +635,26 @@ export function TurnQueueBar({
                 <button
                   key={`sb-${entry.phase}-${entry.unitId}-${idx}`}
                   type="button"
+                  data-testid="turn-queue-sidebar-chip"
+                  data-unit-id={entry.unitId}
+                  data-full-name={entry.name}
                   onClick={() => handleChipClick(entry)}
                   title={tip}
-                  className={`px-2 py-1 rounded border border-slate-700/90 bg-[#0E1522] hover:bg-slate-800 text-[12px] inline-flex items-center gap-1 cursor-pointer transition-colors ${
+                  aria-label={tip}
+                  className={`min-h-[44px] px-2.5 py-1 rounded-md border border-slate-700/90 bg-[#0E1522] hover:bg-slate-800 text-[13px] inline-flex items-center gap-1.5 cursor-pointer transition-colors ${
                     entry.phase === 'next_round' ? 'opacity-75' : ''
                   }`}
                 >
                   <span style={{ color }} aria-hidden="true">
                     {getClassGlyph(entry.classId)}
                   </span>
-                  <span className="font-medium text-slate-200 whitespace-nowrap">
-                    {formatShortUnitName(entry.name, 9)}
+                  <span
+                    data-testid="turn-queue-chip-name"
+                    className="font-medium text-slate-200 whitespace-nowrap"
+                  >
+                    {shortName}
                   </span>
-                  <span className="font-mono-nums text-slate-400">
+                  <span className="font-mono-nums text-[12px] text-slate-400">
                     {entry.effectiveSpeed}
                   </span>
                 </button>

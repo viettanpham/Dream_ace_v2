@@ -53,7 +53,10 @@ export interface StaggeredPopupOptions {
 }
 
 export const RADAR_LEGEND_STORAGE_KEY = 'starfront_radar_legend_open_v1';
+export const RADAR_BUBBLES_STORAGE_KEY = 'starfront_speech_bubbles_enabled_v1';
 export const RADAR_MIN_HIT_AREA_PX = 44;
+export const SPEECH_BUBBLE_MAX_CHARS = 28;
+export const SPEECH_BUBBLE_DURATION_MS = 1500;
 
 /**
  * Pure responsive layout classifier for the Battle Screen.
@@ -176,6 +179,126 @@ export function writeRadarLegendOpen(open: boolean): void {
   } catch {
     // Ignore storage quota or private-mode errors
   }
+}
+
+/**
+ * Persists whether radar/card unit speech bubbles are enabled (default true).
+ */
+export function readSpeechBubblesEnabled(): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    const raw = window.localStorage.getItem(RADAR_BUBBLES_STORAGE_KEY);
+    if (raw === null) return true;
+    return raw !== 'false';
+  } catch {
+    return true;
+  }
+}
+
+export function writeSpeechBubblesEnabled(enabled: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(
+      RADAR_BUBBLES_STORAGE_KEY,
+      enabled ? 'true' : 'false'
+    );
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+/**
+ * Formats a unit speech bubble into a single short line (default max 28 chars, truncated with '…').
+ */
+export function formatSpeechBubbleText(
+  speakerName: string,
+  message: string,
+  maxLen = SPEECH_BUBBLE_MAX_CHARS
+): string {
+  const limit = Math.max(4, Math.floor(maxLen));
+  const cleanSpeaker = formatShortUnitName(speakerName, 8);
+  const cleanMsg = String(message ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const combined = cleanSpeaker
+    ? cleanMsg
+      ? `${cleanSpeaker}: ${cleanMsg}`
+      : cleanSpeaker
+    : cleanMsg;
+  if (!combined) return '';
+  if (combined.length <= limit) return combined;
+  return `${combined.slice(0, limit - 1).trimEnd()}…`;
+}
+
+/**
+ * Places a compact speech bubble above the speaking unit while avoiding nearby unit markers.
+ */
+export function computeSpeechBubbleAnchor(
+  speakerUnitId: string,
+  posMap: Map<string, PopupAnchorPoint>,
+  vw: number,
+  vh: number
+): { leftPct: number; topPct: number } | null {
+  const speakerPos = posMap.get(speakerUnitId);
+  if (!speakerPos) return null;
+
+  const safeVw = Math.max(1, vw);
+  const safeVh = Math.max(1, vh);
+  const baseLeftPct = (speakerPos.x / safeVw) * 100;
+  const baseTopPct = (speakerPos.y / safeVh) * 100;
+
+  const others: Array<{ leftPct: number; topPct: number }> = [];
+  posMap.forEach((pos, id) => {
+    if (id === speakerUnitId) return;
+    others.push({
+      leftPct: (pos.x / safeVw) * 100,
+      topPct: (pos.y / safeVh) * 100,
+    });
+  });
+
+  // Candidate offsets: directly above, higher above, slightly left/right above, or below as last resort
+  const candidates = [
+    { dx: 0, dy: -13 },
+    { dx: 0, dy: -19 },
+    { dx: -12, dy: -13 },
+    { dx: 12, dy: -13 },
+    { dx: 0, dy: 14 },
+  ];
+
+  let best = {
+    leftPct: Math.min(82, Math.max(18, baseLeftPct)),
+    topPct: Math.min(88, Math.max(4, baseTopPct - 13)),
+  };
+
+  for (const cand of candidates) {
+    const leftPct = Math.min(82, Math.max(18, baseLeftPct + cand.dx));
+    const topPct = Math.min(88, Math.max(4, baseTopPct + cand.dy));
+    const collides = others.some(
+      (o) => Math.abs(o.leftPct - leftPct) < 16 && Math.abs(o.topPct - topPct) < 10
+    );
+    if (!collides) {
+      best = {
+        leftPct: Number(leftPct.toFixed(2)),
+        topPct: Number(topPct.toFixed(2)),
+      };
+      break;
+    }
+  }
+
+  return best;
+}
+
+/**
+ * Returns true for secondary buff/status/evade/shield floating callouts (e.g. "WPN +30%")
+ * that should render compactly and tightly anchored to the affected unit.
+ */
+export function isCompactPopupTone(tone: FloatingPopup['tone']): boolean {
+  return (
+    tone === 'buff' ||
+    tone === 'status' ||
+    tone === 'evade' ||
+    tone === 'shield'
+  );
 }
 
 /**

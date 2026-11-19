@@ -1266,6 +1266,14 @@ export const EN_TRANSLATIONS = {
   'radar.legendAllyShape': 'Hex / Circle: Player & Allies',
   'radar.legendEnemyShape': 'Diamond / Octagon: Enemy & Boss',
   'radar.legendDown': 'Grey X: Down (untargetable)',
+
+  // Battle Screen Polish Round 2
+  'battle.unitDown': 'Down',
+  'battle.tabAllies': 'Allies',
+  'battle.tabEnemies': 'Enemies',
+  'battle.speechBubbles': 'Unit speech bubbles',
+  'battle.speedLabel': 'Speed',
+  'battle.skillCdShort': 'CD {turns}t',
 } as const;
 
 export type TranslationKey = keyof typeof EN_TRANSLATIONS;
