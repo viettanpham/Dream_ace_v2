@@ -1025,6 +1025,8 @@ export const EN_TRANSLATIONS = {
   'inv.favoriteBtn': 'Favorite',
   'inv.unfavoriteBtn': 'Unfavorite',
   'inv.sellForBtn': 'Sell (+{credits} CR)',
+  'inv.sellConfirmRare': 'Confirm sell {rarity} (+{credits} CR)',
+  'inv.bulkSellConfirmRare': 'Confirm sell {count} ({rarity}+ included)',
   'inv.sellDisabledLocked': 'Unlock item before selling',
   'inv.sellDisabledEquipped': 'Unequip item before selling',
   'inv.powerScoreShort': 'PWR {score}',

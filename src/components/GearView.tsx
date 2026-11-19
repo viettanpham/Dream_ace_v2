@@ -1,10 +1,23 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowDownWideNarrow,
+  ArrowUp,
+  ArrowUpNarrowWide,
+  Ban,
   Check,
   ChevronDown,
   ChevronUp,
+  Coins,
+  HelpCircle,
   Lock,
-  ShieldAlert,
+  Search,
+  SlidersHorizontal,
+  Sparkles,
+  Star,
+  Tag,
+  Trash2,
+  Unlock,
+  X,
 } from 'lucide-react';
 import {
   EMPTY_STAT_BLOCK,
@@ -23,11 +36,17 @@ import {
   getEnchantMetadata,
   getGearEquippedInstances,
   getItemEquippedByGear,
+  getSellPrice,
   simulateGearEquipChange,
   sumGearEquipmentStats,
   sumGearSpecialTraits,
   validateEquipOnGear,
 } from '../engine/equipment';
+import {
+  countActiveInventoryFilters,
+  filterAndSortInventory,
+  type InventoryEntryView,
+} from '../engine/inventory';
 import { getGearPassiveBonuses } from '../engine/skills';
 import {
   calculateDerivedStats,
@@ -50,23 +69,66 @@ import {
 } from '../i18n';
 import { useGameStore } from '../store/useGameStore';
 import type {
+  ConsumableItem,
   EnchantAttemptResult,
   EquipmentSlot,
+  InventorySlotFilter,
+  InventorySortKey,
+  ItemInstance,
+  ItemRarity,
   StatBlock,
 } from '../types/game';
 import { soundFx } from '../utils/sound';
 import { BottomSheet } from './BottomSheet';
 import { FighterSvg } from './FighterSvg';
-import { SlotIcon } from './GameIcons';
+import { ClassIcon, ConsumableIcon, SlotIcon } from './GameIcons';
+import { QuickSellModal } from './QuickSellModal';
 
 type GearSelection =
   | { kind: 'slot'; slot: EquipmentSlot }
   | { kind: 'inventory'; instanceId: string }
   | null;
 
+const RARITY_OPTIONS: ItemRarity[] = ['common', 'rare', 'epic', 'legendary'];
+const TIER_OPTIONS = [1, 2, 3, 4] as const;
+const SORT_OPTIONS: InventorySortKey[] = [
+  'newest',
+  'level',
+  'rarity',
+  'tier',
+  'rollQuality',
+  'sellValue',
+  'powerScore',
+  'name',
+];
+
+const CARD_HEIGHT = 128;
+const GRID_GAP = 8;
+const ROW_STRIDE = CARD_HEIGHT + GRID_GAP;
+
+function getUnusableReasonShort(
+  lang: 'en' | 'vi',
+  item: ItemInstance,
+  gearLevel: number,
+  gearClassId: string,
+  levelShort: string
+): string {
+  const parts: string[] = [];
+  if (item.classRestriction && item.classRestriction !== gearClassId) {
+    parts.push(getClassName(lang, item.classRestriction));
+  }
+  if (gearLevel < item.requiredLevel) {
+    parts.push(`${levelShort}${item.requiredLevel}`);
+  }
+  return parts.join(' · ');
+}
+
 export function GearView() {
   const { lang, t } = useI18n();
   const pilot = useGameStore((s) => s.pilot);
+  const filterState = useGameStore((s) => s.inventoryFilterState);
+  const quickSellUndo = useGameStore((s) => s.quickSellUndo);
+
   const selectActiveGear = useGameStore((s) => s.selectActiveGear);
   const equipItem = useGameStore((s) => s.equipItem);
   const unequipSlot = useGameStore((s) => s.unequipSlot);
@@ -76,18 +138,93 @@ export function GearView() {
   const enchantEquippedSlot = useGameStore((s) => s.enchantEquippedSlot);
   const setActiveTab = useGameStore((s) => s.setActiveTab);
 
-  const [slotFilter, setSlotFilter] = useState<EquipmentSlot | 'all'>('all');
+  const setInventoryFilterState = useGameStore(
+    (s) => s.setInventoryFilterState
+  );
+  const resetInventoryFilterState = useGameStore(
+    (s) => s.resetInventoryFilterState
+  );
+  const toggleItemLock = useGameStore((s) => s.toggleItemLock);
+  const toggleItemFavorite = useGameStore((s) => s.toggleItemFavorite);
+  const markItemSeen = useGameStore((s) => s.markItemSeen);
+  const bulkSetItemLock = useGameStore((s) => s.bulkSetItemLock);
+  const bulkSellItems = useGameStore((s) => s.bulkSellItems);
+  const sellItem = useGameStore((s) => s.sellItem);
+  const undoQuickSell = useGameStore((s) => s.undoQuickSell);
+  const clearQuickSellUndo = useGameStore((s) => s.clearQuickSellUndo);
+  const useConsumable = useGameStore((s) => s.useConsumable);
+
   const [selection, setSelection] = useState<GearSelection>(null);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [mobileStatsExpanded, setMobileStatsExpanded] = useState(false);
   const [confirmingUnequipSlot, setConfirmingUnequipSlot] =
     useState<EquipmentSlot | null>(null);
+  const [confirmingSellId, setConfirmingSellId] = useState<string | null>(null);
   const [enchantFeedback, setEnchantFeedback] =
     useState<EnchantAttemptResult | null>(null);
+
+  const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
+  const [legendOpen, setLegendOpen] = useState(false);
+  const [multiSelectMode, setMultiSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmBulkRare, setConfirmBulkRare] = useState(false);
+  const [quickSellOpen, setQuickSellOpen] = useState(false);
+  const [inventoryNotice, setInventoryNotice] = useState<string | null>(null);
+  const [undoSecondsLeft, setUndoSecondsLeft] = useState(0);
+
+  // Virtualized grid measurement state
+  const gridContainerRef = useRef<HTMLDivElement | null>(null);
+  const [gridMetrics, setGridMetrics] = useState({
+    width: 640,
+    height: 384,
+    scrollTop: 0,
+  });
 
   const activeGear = pilot.gears[pilot.activeGearId];
   const activeClass = MECH_CLASSES[activeGear.classId];
   const ownedGears = MECH_CLASS_LIST.filter((c) => pilot.gears[c.id].owned);
+
+  // Manage 5-second Quick Sell Undo timer
+  useEffect(() => {
+    if (!quickSellUndo) {
+      setUndoSecondsLeft(0);
+      return;
+    }
+    const updateTimer = () => {
+      const elapsed = Date.now() - quickSellUndo.soldAt;
+      const remaining = Math.max(0, 5000 - elapsed);
+      if (remaining <= 0) {
+        clearQuickSellUndo();
+        setUndoSecondsLeft(0);
+      } else {
+        setUndoSecondsLeft(Math.ceil(remaining / 1000));
+      }
+    };
+    updateTimer();
+    const interval = setInterval(updateTimer, 250);
+    return () => clearInterval(interval);
+  }, [quickSellUndo, clearQuickSellUndo]);
+
+  // Measure virtualized grid container
+  useEffect(() => {
+    const el = gridContainerRef.current;
+    if (!el) return;
+    const syncSize = () => {
+      setGridMetrics((prev) => ({
+        ...prev,
+        width: el.clientWidth || prev.width,
+        height: el.clientHeight || prev.height,
+      }));
+    };
+    syncSize();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(syncSize);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    window.addEventListener('resize', syncSize);
+    return () => window.removeEventListener('resize', syncSize);
+  }, [filterState.slot]);
 
   const equippedMap = useMemo(
     () => getGearEquippedInstances(activeGear, pilot.inventory),
@@ -227,31 +364,107 @@ export function GearView() {
       ) !== activeGear.classId) ||
     Boolean(confirmingUnequipSlot);
 
-  const filteredInventory = useMemo(() => {
-    return pilot.inventory.filter((inst) => {
-      if (slotFilter !== 'all' && inst.slot !== slotFilter) return false;
-      return true;
+  // Per-slot counts across entire inventory
+  const slotCounts = useMemo(() => {
+    const counts: Record<EquipmentSlot, number> = {
+      main_weapon: 0,
+      sub_weapon: 0,
+      armor: 0,
+      engine: 0,
+      cpu: 0,
+      accessory: 0,
+    };
+    for (const inst of pilot.inventory) {
+      counts[inst.slot] += 1;
+    }
+    return counts;
+  }, [pilot.inventory]);
+
+  const consumablesList = pilot.consumables ?? [];
+  const totalConsumablesQty = useMemo(
+    () => consumablesList.reduce((sum, c) => sum + c.quantity, 0),
+    [consumablesList]
+  );
+
+  const activeFilterCount = useMemo(
+    () => countActiveInventoryFilters(filterState),
+    [filterState]
+  );
+
+  // Engine filter & sort pipeline
+  const filteredEntries = useMemo<InventoryEntryView[]>(() => {
+    if (filterState.slot === 'consumables') return [];
+    return filterAndSortInventory(
+      pilot.inventory,
+      filterState,
+      activeGear,
+      pilot.gears,
+      (item) => getItemInstanceName(lang, item, true)
+    );
+  }, [pilot.inventory, filterState, activeGear, pilot.gears, lang]);
+
+  // Prune stale multi-select IDs if inventory shrinks
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const valid = new Set(pilot.inventory.map((i) => i.instanceId));
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (valid.has(id)) next.add(id);
+      }
+      return next.size === prev.size ? prev : next;
     });
-  }, [pilot.inventory, slotFilter]);
+  }, [pilot.inventory]);
+
+  // Virtualization calculations
+  const cols =
+    gridMetrics.width >= 680 ? 4 : gridMetrics.width >= 440 ? 3 : 2;
+  const totalRows = Math.ceil(filteredEntries.length / cols);
+  const totalGridHeight =
+    totalRows > 0 ? totalRows * ROW_STRIDE - GRID_GAP : 0;
+  const startRow = Math.max(
+    0,
+    Math.floor(gridMetrics.scrollTop / ROW_STRIDE) - 2
+  );
+  const visibleRowCount =
+    Math.ceil(gridMetrics.height / ROW_STRIDE) + 4;
+  const endRow = Math.min(totalRows, startRow + visibleRowCount);
+  const visibleEntries = filteredEntries.slice(
+    startRow * cols,
+    endRow * cols
+  );
 
   const handleSelectSlot = (slot: EquipmentSlot) => {
     soundFx.playClick();
     setEnchantFeedback(null);
     setConfirmingUnequipSlot(null);
+    setConfirmingSellId(null);
     if (equippedMap[slot]) {
       setSelection({ kind: 'slot', slot });
       setMobileDetailOpen(true);
     } else {
       setSelection(null);
       setMobileDetailOpen(false);
-      setSlotFilter(slot);
+      setInventoryFilterState({ slot });
     }
   };
 
   const handleSelectInventory = (instanceId: string) => {
     soundFx.playClick();
+    if (multiSelectMode) {
+      setConfirmBulkRare(false);
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(instanceId)) next.delete(instanceId);
+        else next.add(instanceId);
+        return next;
+      });
+      return;
+    }
+    markItemSeen(instanceId);
     setEnchantFeedback(null);
     setConfirmingUnequipSlot(null);
+    setConfirmingSellId(null);
     setSelection((prev) => {
       const same = prev?.kind === 'inventory' && prev.instanceId === instanceId;
       if (same && window.innerWidth >= 1024) {
@@ -267,6 +480,7 @@ export function GearView() {
     const res = equipItem(selectedInventoryInstance.instanceId);
     if (res.canEquip) {
       setSelection({ kind: 'slot', slot: selectedInventoryInstance.slot });
+      setConfirmingSellId(null);
     }
   };
 
@@ -281,6 +495,131 @@ export function GearView() {
   const handleEnchant = (slot: EquipmentSlot) => {
     const res = enchantEquippedSlot(slot);
     if (res) setEnchantFeedback(res);
+  };
+
+  const handleDetailSell = (inst: ItemInstance) => {
+    if (inst.rarity !== 'common' && confirmingSellId !== inst.instanceId) {
+      soundFx.playClick();
+      setConfirmingSellId(inst.instanceId);
+      return;
+    }
+    const name = getItemInstanceName(lang, inst, true);
+    const res = sellItem(inst.instanceId);
+    if (res.ok) {
+      setConfirmingSellId(null);
+      setSelection(null);
+      setMobileDetailOpen(false);
+      setInventoryNotice(
+        t('shop.soldMsg', {
+          item: name,
+          price: res.creditsEarned.toLocaleString(),
+        })
+      );
+    }
+  };
+
+  // Multi-select bulk helpers
+  const selectedEntries = useMemo(
+    () =>
+      pilot.inventory.filter((it) => selectedIds.has(it.instanceId)),
+    [pilot.inventory, selectedIds]
+  );
+  const bulkSellableItems = useMemo(
+    () =>
+      selectedEntries.filter(
+        (it) =>
+          !it.locked &&
+          getItemEquippedByGear(pilot.gears, it.instanceId) === null
+      ),
+    [selectedEntries, pilot.gears]
+  );
+  const bulkHasRareOrHigher = bulkSellableItems.some(
+    (it) => it.rarity !== 'common'
+  );
+
+  const handleBulkSell = () => {
+    if (bulkSellableItems.length === 0) return;
+    if (bulkHasRareOrHigher && !confirmBulkRare) {
+      soundFx.playClick();
+      setConfirmBulkRare(true);
+      return;
+    }
+    const res = bulkSellItems(bulkSellableItems.map((i) => i.instanceId));
+    setConfirmBulkRare(false);
+    setSelectedIds(new Set());
+    if (res.soldCount > 0) {
+      setInventoryNotice(
+        t('inv.bulkSoldFeedback', {
+          count: res.soldCount,
+          credits: res.creditsEarned.toLocaleString(),
+        })
+      );
+    }
+  };
+
+  const handleUseConsumable = (c: ConsumableItem) => {
+    const res = useConsumable(c.id);
+    if (!res.ok) return;
+    if (res.kind === 'equipment_crate' && res.openedItem) {
+      setInventoryNotice(
+        t('inv.consumableOpenedFeedback', {
+          item: getItemInstanceName(lang, res.openedItem, true),
+        })
+      );
+    } else if (res.kind === 'enchant_stone') {
+      setInventoryNotice(
+        t('inv.consumableEnchantFeedback', { pct: c.bonusPct ?? 20 })
+      );
+    } else if (res.kind === 'respec_token') {
+      setInventoryNotice(
+        t('inv.consumableRespecFeedback', {
+          gear: getClassName(lang, activeGear.classId),
+        })
+      );
+    } else if (res.kind === 'exp_boost') {
+      setInventoryNotice(
+        t('inv.consumableExpFeedback', { battles: c.battlesCount ?? 5 })
+      );
+    }
+  };
+
+  const toggleRarityFilter = (rarity: ItemRarity) => {
+    const exists = filterState.rarities.includes(rarity);
+    setInventoryFilterState({
+      rarities: exists
+        ? filterState.rarities.filter((r) => r !== rarity)
+        : [...filterState.rarities, rarity],
+    });
+  };
+
+  const toggleTierFilter = (tier: number) => {
+    const exists = filterState.tiers.includes(tier);
+    setInventoryFilterState({
+      tiers: exists
+        ? filterState.tiers.filter((x) => x !== tier)
+        : [...filterState.tiers, tier],
+    });
+  };
+
+  const renderConsumableText = (c: ConsumableItem) => {
+    const rarityLabel = c.minRarity ? getRarityLabel(lang, c.minRarity) : '';
+    const slotLabel = c.slot ? getSlotLabel(lang, c.slot) : '';
+    const pct = c.bonusPct ?? 20;
+    const battles = c.battlesCount ?? 5;
+    return {
+      name: t(`consumable.${c.kind}.name`, {
+        rarity: rarityLabel,
+        slot: slotLabel,
+        pct,
+        battles,
+      }),
+      desc: t(`consumable.${c.kind}.desc`, {
+        rarity: rarityLabel,
+        slot: slotLabel,
+        pct,
+        battles,
+      }),
+    };
   };
 
   const renderEnchantMessage = (fb: EnchantAttemptResult): string => {
@@ -375,12 +714,20 @@ export function GearView() {
 
   const renderDetailContent = () => {
     if (!activeDetailInstance || !activeDetailStats) return null;
+    const sellPrice = getSellPrice(activeDetailInstance);
+    const isLocked = Boolean(activeDetailInstance.locked);
+    const isFavorited = Boolean(activeDetailInstance.favorited);
+    const isEquippedAny = activeDetailOwnerGear !== null;
+    const canSellThis = !isLocked && !isEquippedAny;
+    const isConfirmingThisSell =
+      confirmingSellId === activeDetailInstance.instanceId;
+
     return (
       <div className="flex-1 flex flex-col justify-between gap-3">
         <div className="space-y-3">
-          {/* Item Header */}
+          {/* Item Header + Lock/Favorite Quick Toggles */}
           <div>
-            <div className="flex items-baseline justify-between gap-2">
+            <div className="flex items-start justify-between gap-2">
               <h3
                 className={`font-display text-xl font-bold leading-tight ${
                   RARITY_META[activeDetailInstance.rarity].textClass
@@ -389,7 +736,7 @@ export function GearView() {
                 {getItemInstanceName(lang, activeDetailInstance, true)}
               </h3>
               <span
-                className={`font-mono-nums text-xs font-semibold shrink-0 ${
+                className={`font-mono-nums text-xs font-semibold shrink-0 pt-0.5 ${
                   activeDetailInstance.rollQuality >= 80
                     ? 'text-amber-400'
                     : activeDetailInstance.rollQuality >= 50
@@ -402,7 +749,7 @@ export function GearView() {
                 })}
               </span>
             </div>
-            <div className="text-xs sm:text-xs text-slate-400 mt-0.5">
+            <div className="text-xs text-slate-400 mt-0.5">
               {getSlotLabel(lang, activeDetailInstance.slot)} ·{' '}
               {getRarityLabel(lang, activeDetailInstance.rarity)} ·{' '}
               {t('common.tier', { tier: activeDetailInstance.tier })} ·{' '}
@@ -417,6 +764,89 @@ export function GearView() {
                     ),
                   })
                 : t('common.allClasses')}
+            </div>
+
+            {/* Protection / Favorite / Sell controls */}
+            <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
+              <button
+                type="button"
+                data-testid="detail-lock-btn"
+                onClick={() => toggleItemLock(activeDetailInstance.instanceId)}
+                className={`min-h-[36px] px-2.5 rounded border text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
+                  isLocked
+                    ? 'border-amber-400/70 bg-amber-500/15 text-amber-200'
+                    : 'border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300'
+                }`}
+              >
+                {isLocked ? (
+                  <Lock className="w-3.5 h-3.5 text-amber-300" />
+                ) : (
+                  <Unlock className="w-3.5 h-3.5 text-slate-400" />
+                )}
+                <span>{isLocked ? t('inv.unlockBtn') : t('inv.lockBtn')}</span>
+              </button>
+
+              <button
+                type="button"
+                data-testid="detail-fav-btn"
+                onClick={() =>
+                  toggleItemFavorite(activeDetailInstance.instanceId)
+                }
+                className={`min-h-[36px] px-2.5 rounded border text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
+                  isFavorited
+                    ? 'border-yellow-400/70 bg-yellow-500/15 text-yellow-200'
+                    : 'border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300'
+                }`}
+              >
+                <Star
+                  className={`w-3.5 h-3.5 ${
+                    isFavorited
+                      ? 'text-yellow-400 fill-yellow-400'
+                      : 'text-slate-400'
+                  }`}
+                />
+                <span>
+                  {isFavorited ? t('inv.unfavoriteBtn') : t('inv.favoriteBtn')}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                data-testid="detail-sell-btn"
+                disabled={!canSellThis}
+                onClick={() => handleDetailSell(activeDetailInstance)}
+                title={
+                  isEquippedAny
+                    ? t('inv.sellDisabledEquipped')
+                    : isLocked
+                    ? t('inv.sellDisabledLocked')
+                    : undefined
+                }
+                className={`min-h-[36px] px-2.5 rounded border text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed ${
+                  isConfirmingThisSell
+                    ? 'border-rose-400 bg-rose-600 text-white'
+                    : 'border-slate-700 bg-slate-900 hover:border-amber-400/70 hover:text-amber-200 text-slate-200'
+                }`}
+              >
+                <Coins className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>
+                  {isEquippedAny
+                    ? t('inv.sellDisabledEquipped')
+                    : isLocked
+                    ? t('inv.sellDisabledLocked')
+                    : isConfirmingThisSell
+                    ? t('inv.sellConfirmRare', {
+                        rarity: getRarityLabel(
+                          lang,
+                          activeDetailInstance.rarity
+                        ),
+                        credits: sellPrice.toLocaleString(),
+                      })
+                    : t('inv.sellForBtn', {
+                        credits: sellPrice.toLocaleString(),
+                      })}
+                </span>
+              </button>
             </div>
           </div>
 
@@ -496,7 +926,7 @@ export function GearView() {
           {activeValidation && !activeValidation.canEquip && (
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded px-3 py-2">
               <div className="flex items-center gap-1.5 min-w-0">
-                <ShieldAlert className="w-4 h-4 shrink-0" />
+                <Ban className="w-4 h-4 shrink-0" />
                 <span>
                   {t('equip.cannotEquip', {
                     reason:
@@ -544,6 +974,11 @@ export function GearView() {
                       }
                     >
                       {activeEnchantMeta.successRate}%
+                      {(pilot.activeEnchantBonusPct ?? 0) > 0 && (
+                        <span className="text-purple-300 ml-1">
+                          (+{pilot.activeEnchantBonusPct}%)
+                        </span>
+                      )}
                     </span>
                     {' · '}
                     <span>{activeEnchantMeta.cost.toLocaleString()} CR</span>
@@ -716,7 +1151,14 @@ export function GearView() {
               strokeWidth="1"
               fill="none"
             />
-            <line x1="30" y1="128" x2="330" y2="128" stroke="#1E293B" strokeWidth="1" />
+            <line
+              x1="30"
+              y1="128"
+              x2="330"
+              y2="128"
+              stroke="#1E293B"
+              strokeWidth="1"
+            />
           </svg>
 
           <div
@@ -854,7 +1296,7 @@ export function GearView() {
             )}
           </div>
 
-          {/* Owned Gears Selector */}
+          {/* Owned Gears Selector (with ClassIcon) */}
           <div className="relative z-10 w-full flex items-center justify-between gap-2 flex-wrap">
             <div className="flex items-center gap-1.5 flex-wrap">
               {ownedGears.map((cls) => {
@@ -868,16 +1310,18 @@ export function GearView() {
                       setSelection(null);
                       setMobileDetailOpen(false);
                       setConfirmingUnequipSlot(null);
+                      setConfirmingSellId(null);
                       setEnchantFeedback(null);
                       selectActiveGear(cls.id);
                     }}
-                    className={`min-h-[44px] lg:min-h-0 lg:h-8 px-3 lg:px-2.5 rounded border text-xs font-display font-semibold transition-colors cursor-pointer ${
+                    className={`min-h-[44px] lg:min-h-0 lg:h-8 px-3 lg:px-2.5 rounded border text-xs font-display font-semibold transition-colors cursor-pointer inline-flex items-center gap-1.5 ${
                       isSelected
                         ? 'bg-slate-800 border-amber-400/80 text-slate-50'
                         : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    {getClassName(lang, cls.id)}{' '}
+                    <ClassIcon classId={cls.id} className="w-3.5 h-3.5 shrink-0" />
+                    <span>{getClassName(lang, cls.id)}</span>
                     <span className="font-mono-nums text-[11px] opacity-80">
                       Lv.{g.level}
                     </span>
@@ -898,7 +1342,7 @@ export function GearView() {
           </div>
         </section>
 
-        {/* COL 1 on Desktop / SECOND on Mobile: 6 Equipment Slots (3x2 Square Tiles on Phone, Vertical Stack on Desktop) */}
+        {/* COL 1 on Desktop / SECOND on Mobile: 6 Equipment Slots */}
         <section className="order-2 lg:order-1 lg:col-span-4 rounded-lg border border-slate-800/90 bg-[#0C121D]/95 p-3.5 flex flex-col justify-between gap-2.5">
           <div className="flex items-center justify-between gap-2 px-0.5">
             <h2 className="font-display text-lg font-bold tracking-wide text-slate-100">
@@ -941,7 +1385,6 @@ export function GearView() {
                       : 'border-slate-800/90 bg-[#080C14] hover:border-slate-700'
                   }`}
                 >
-                  {/* Top/Left Icon + Labels */}
                   <div className="flex flex-col lg:flex-row items-center gap-1 lg:gap-2.5 min-w-0 w-full">
                     <div className="flex items-center justify-between lg:justify-center w-full lg:w-auto">
                       <span
@@ -969,7 +1412,13 @@ export function GearView() {
                           {getSlotLabel(lang, slot)}
                         </span>
                         {slotMeta.classLocked && (
-                          <Lock className="w-2.5 h-2.5 text-slate-500 shrink-0" />
+                          <span
+                            title={t('common.classOnly', {
+                              className: getClassName(lang, activeGear.classId),
+                            })}
+                          >
+                            <Tag className="w-2.5 h-2.5 text-sky-400/80 shrink-0" />
+                          </span>
                         )}
                       </div>
                       <div
@@ -984,9 +1433,11 @@ export function GearView() {
                     </div>
                   </div>
 
-                  {/* Desktop right quality + enchant */}
                   {inst && (
                     <div className="hidden lg:flex items-center gap-1.5 shrink-0 font-mono-nums text-[11px]">
+                      {inst.locked && (
+                        <Lock className="w-3 h-3 text-amber-300 shrink-0" />
+                      )}
                       <span className="text-slate-500">{inst.rollQuality}%</span>
                       {inst.enchantLevel > 0 && (
                         <span className="font-bold text-amber-400">
@@ -1094,10 +1545,11 @@ export function GearView() {
         </section>
       </div>
 
-      {/* ==================== BOTTOM ROW: Shared Cargo Grid | Inline Detail (Desktop) ==================== */}
+      {/* ==================== BOTTOM ROW: Shared Cargo Grid + Controls | Inline Detail (Desktop) ==================== */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
-        {/* Shared Cargo Grid */}
-        <section className="lg:col-span-7 rounded-lg border border-slate-800/90 bg-[#0C121D]/95 p-3.5 sm:p-4 flex flex-col gap-3">
+        {/* Shared Cargo Grid ("Kho đồ chung") */}
+        <section className="lg:col-span-7 rounded-lg border border-slate-800/90 bg-[#0C121D]/95 p-3.5 sm:p-4 flex flex-col gap-3 relative">
+          {/* Header Row */}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-baseline gap-2">
               <h2 className="font-display text-lg font-bold tracking-wide text-slate-100">
@@ -1108,136 +1560,974 @@ export function GearView() {
               </span>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setActiveTab('shop')}
-              className="min-h-[36px] text-xs font-medium text-amber-400 hover:text-amber-300 transition-colors cursor-pointer whitespace-nowrap"
-            >
-              {t('equip.openShop')}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                data-testid="open-quicksell-btn"
+                onClick={() => setQuickSellOpen(true)}
+                className="min-h-[36px] px-2.5 rounded border border-amber-500/50 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+              >
+                <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                <span>{t('qs.btn')}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('shop')}
+                className="min-h-[36px] px-2 text-xs font-medium text-amber-400 hover:text-amber-300 transition-colors cursor-pointer whitespace-nowrap"
+              >
+                {t('equip.openShop')}
+              </button>
+            </div>
           </div>
 
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 tactical-scroll">
+          {/* 5-second Quick Sell Undo Toast */}
+          {quickSellUndo && undoSecondsLeft > 0 && (
+            <div
+              data-testid="quicksell-undo-toast"
+              className="rounded-lg border border-amber-400/60 bg-amber-500/15 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-100"
+            >
+              <span className="font-medium">
+                {t('qs.undoToast', {
+                  count: quickSellUndo.soldItems.length,
+                  credits: quickSellUndo.totalCredits.toLocaleString(),
+                })}{' '}
+                <span className="font-mono-nums text-amber-300">
+                  ({undoSecondsLeft}s)
+                </span>
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  data-testid="quicksell-undo-btn"
+                  onClick={() => {
+                    const res = undoQuickSell();
+                    if (res.ok) {
+                      setInventoryNotice(
+                        t('qs.undoneFeedback', { count: res.restoredCount })
+                      );
+                    }
+                  }}
+                  className="min-h-[34px] px-3 rounded bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs cursor-pointer"
+                >
+                  {t('qs.undoBtn')}
+                </button>
+                <button
+                  type="button"
+                  onClick={clearQuickSellUndo}
+                  aria-label={t('error.closeBtn')}
+                  className="p-1 text-amber-300 hover:text-white cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Inline Action Notice */}
+          {inventoryNotice && (
+            <div className="rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 flex items-center justify-between gap-2 text-xs text-emerald-200">
+              <span>{inventoryNotice}</span>
+              <button
+                type="button"
+                onClick={() => setInventoryNotice(null)}
+                className="text-emerald-300 hover:text-white cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* Wrapped Slot Tabs WITH Shared Icons & Per-Slot Counts (NO horizontal scrollbar) */}
+          <div
+            className="flex flex-wrap items-center gap-1.5"
+            role="tablist"
+            aria-label={t('gear.gridHeading')}
+          >
             <button
               type="button"
-              onClick={() => setSlotFilter('all')}
-              className={`min-h-[44px] lg:min-h-0 lg:h-8 px-3 lg:px-2.5 rounded-lg lg:rounded text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                slotFilter === 'all'
-                  ? 'bg-slate-800 text-slate-100 border border-slate-600'
-                  : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200'
+              onClick={() => setInventoryFilterState({ slot: 'all' })}
+              className={`min-h-[40px] lg:min-h-[34px] px-2.5 rounded-lg lg:rounded text-xs font-medium transition-colors cursor-pointer inline-flex items-center gap-1.5 ${
+                filterState.slot === 'all'
+                  ? 'bg-slate-800 text-slate-100 border border-amber-400/80'
+                  : 'bg-slate-900/70 text-slate-400 border border-slate-800 hover:text-slate-200'
               }`}
             >
-              {t('common.all')}
+              <SlotIcon slot="all" className="w-3.5 h-3.5 shrink-0" />
+              <span>{t('inv.tabAll')}</span>
+              <span className="font-mono-nums text-[11px] opacity-80">
+                ({pilot.inventory.length})
+              </span>
             </button>
+
             {EQUIPMENT_SLOTS.map((slot) => (
               <button
                 key={slot}
                 type="button"
-                onClick={() => setSlotFilter(slot)}
-                className={`min-h-[44px] lg:min-h-0 lg:h-8 px-3 lg:px-2.5 rounded-lg lg:rounded text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                  slotFilter === slot
-                    ? 'bg-slate-800 text-slate-100 border border-slate-600'
-                    : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200'
+                onClick={() => setInventoryFilterState({ slot })}
+                className={`min-h-[40px] lg:min-h-[34px] px-2.5 rounded-lg lg:rounded text-xs font-medium transition-colors cursor-pointer inline-flex items-center gap-1.5 ${
+                  filterState.slot === slot
+                    ? 'bg-slate-800 text-slate-100 border border-amber-400/80'
+                    : 'bg-slate-900/70 text-slate-400 border border-slate-800 hover:text-slate-200'
                 }`}
               >
-                {getSlotShort(lang, slot)}
+                <SlotIcon slot={slot} className="w-3.5 h-3.5 shrink-0" />
+                <span>{getSlotShort(lang, slot)}</span>
+                <span className="font-mono-nums text-[11px] opacity-80">
+                  ({slotCounts[slot]})
+                </span>
               </button>
             ))}
+
+            <button
+              type="button"
+              data-testid="inv-tab-consumables"
+              onClick={() =>
+                setInventoryFilterState({
+                  slot: 'consumables' as InventorySlotFilter,
+                })
+              }
+              className={`min-h-[40px] lg:min-h-[34px] px-2.5 rounded-lg lg:rounded text-xs font-medium transition-colors cursor-pointer inline-flex items-center gap-1.5 ${
+                filterState.slot === 'consumables'
+                  ? 'bg-purple-500/20 text-purple-200 border border-purple-400/80'
+                  : 'bg-slate-900/70 text-slate-400 border border-slate-800 hover:text-slate-200'
+              }`}
+            >
+              <SlotIcon slot="consumables" className="w-3.5 h-3.5 shrink-0" />
+              <span>{t('inv.tabConsumables')}</span>
+              <span className="font-mono-nums text-[11px] opacity-80">
+                ({totalConsumablesQty})
+              </span>
+            </button>
           </div>
 
-          {filteredInventory.length === 0 ? (
-            <div className="flex-1 min-h-[140px] rounded border border-slate-800/80 bg-[#080C14] px-4 py-8 flex items-center justify-center text-center text-sm lg:text-xs text-slate-400">
-              {pilot.inventory.length === 0
-                ? t('equip.inventoryEmpty')
-                : t('equip.inventoryEmptyFilter')}
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2 max-h-72 overflow-y-auto pr-1 tactical-scroll">
-              {filteredInventory.map((inst) => {
-                const ownerGear = getItemEquippedByGear(
-                  pilot.gears,
-                  inst.instanceId
-                );
-                const validation = validateEquipOnGear(
-                  inst,
-                  activeGear,
-                  pilot.gears
-                );
-                const isSelected =
-                  selection?.kind === 'inventory' &&
-                  selection.instanceId === inst.instanceId;
+          {/* Search, Filter Drawer Toggle, Sort, Multi-select & Legend Toolbar */}
+          {filterState.slot !== 'consumables' && (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Search Box */}
+                <div className="relative flex-1 min-w-[170px]">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="search"
+                    data-testid="inv-search-input"
+                    value={filterState.search}
+                    onChange={(e) =>
+                      setInventoryFilterState({ search: e.target.value })
+                    }
+                    placeholder={t('inv.searchPlaceholder')}
+                    className="w-full h-9 pl-8 pr-7 rounded border border-slate-800 bg-[#080C14] text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-amber-400/70"
+                  />
+                  {filterState.search && (
+                    <button
+                      type="button"
+                      onClick={() => setInventoryFilterState({ search: '' })}
+                      aria-label={t('inv.clearSelection')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
 
-                return (
+                {/* Filter Drawer Toggle */}
+                <button
+                  type="button"
+                  data-testid="inv-filter-toggle"
+                  onClick={() => setFilterDrawerOpen((v) => !v)}
+                  className={`h-9 px-2.5 rounded border text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer ${
+                    filterDrawerOpen || activeFilterCount > 0
+                      ? 'border-sky-400/70 bg-sky-500/15 text-sky-200'
+                      : 'border-slate-800 bg-slate-900/70 text-slate-300 hover:text-slate-100'
+                  }`}
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                  <span>{t('inv.filtersBtn')}</span>
+                  {activeFilterCount > 0 && (
+                    <span className="px-1.5 py-0.5 rounded bg-sky-500 text-slate-950 font-mono-nums text-[10px] font-bold leading-none">
+                      {activeFilterCount}
+                    </span>
+                  )}
+                </button>
+
+                {/* Sort Dropdown + Direction */}
+                <div className="flex items-center">
+                  <select
+                    data-testid="inv-sort-select"
+                    aria-label={t('inv.sortLabel')}
+                    value={filterState.sortBy}
+                    onChange={(e) =>
+                      setInventoryFilterState({
+                        sortBy: e.target.value as InventorySortKey,
+                      })
+                    }
+                    className="h-9 px-2 rounded-l border border-slate-800 bg-[#080C14] text-xs text-slate-200 focus:outline-none focus:border-amber-400/70"
+                  >
+                    {SORT_OPTIONS.map((key) => (
+                      <option key={key} value={key}>
+                        {t(`inv.sort.${key}`)}
+                      </option>
+                    ))}
+                  </select>
                   <button
-                    key={inst.instanceId}
                     type="button"
-                    onClick={() => handleSelectInventory(inst.instanceId)}
-                    className={`p-2.5 rounded-lg lg:rounded border text-left transition-colors cursor-pointer flex flex-col justify-between gap-1.5 min-h-[92px] ${
-                      isSelected
-                        ? 'border-amber-400 bg-amber-500/15 shadow-[0_0_0_1px_rgba(251,191,36,0.3)]'
-                        : `${RARITY_META[inst.rarity].borderClass} ${RARITY_META[inst.rarity].bgTintClass} hover:bg-slate-900/90`
+                    data-testid="inv-sort-dir-btn"
+                    onClick={() =>
+                      setInventoryFilterState({
+                        sortDir: filterState.sortDir === 'desc' ? 'asc' : 'desc',
+                      })
+                    }
+                    title={
+                      filterState.sortDir === 'desc'
+                        ? t('inv.sortDesc')
+                        : t('inv.sortAsc')
+                    }
+                    aria-label={
+                      filterState.sortDir === 'desc'
+                        ? t('inv.sortDesc')
+                        : t('inv.sortAsc')
+                    }
+                    className="h-9 w-9 rounded-r border border-l-0 border-slate-800 bg-slate-900/80 hover:bg-slate-800 text-slate-200 flex items-center justify-center cursor-pointer"
+                  >
+                    {filterState.sortDir === 'desc' ? (
+                      <ArrowDownWideNarrow className="w-3.5 h-3.5 text-amber-400" />
+                    ) : (
+                      <ArrowUpNarrowWide className="w-3.5 h-3.5 text-sky-400" />
+                    )}
+                  </button>
+                </div>
+
+                {/* Multi-select Toggle */}
+                <button
+                  type="button"
+                  data-testid="inv-multiselect-btn"
+                  onClick={() => {
+                    setMultiSelectMode((v) => !v);
+                    setSelectedIds(new Set());
+                    setConfirmBulkRare(false);
+                  }}
+                  className={`h-9 px-2.5 rounded border text-xs font-semibold cursor-pointer ${
+                    multiSelectMode
+                      ? 'border-amber-400 bg-amber-500/20 text-amber-200'
+                      : 'border-slate-800 bg-slate-900/70 text-slate-300 hover:text-slate-100'
+                  }`}
+                >
+                  {multiSelectMode
+                    ? t('inv.multiSelectDone')
+                    : t('inv.multiSelect')}
+                </button>
+
+                {/* Legend Popover Toggle */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    data-testid="inv-legend-btn"
+                    onClick={() => setLegendOpen((v) => !v)}
+                    className={`h-9 px-2.5 rounded border text-xs font-semibold inline-flex items-center gap-1 cursor-pointer ${
+                      legendOpen
+                        ? 'border-amber-400 bg-amber-500/15 text-amber-200'
+                        : 'border-slate-800 bg-slate-900/70 text-slate-300 hover:text-slate-100'
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-1">
-                      <span
-                        className={`inline-flex items-center gap-1 text-[11px] font-mono-nums ${
-                          RARITY_META[inst.rarity].textClass
-                        }`}
-                      >
-                        <SlotIcon slot={inst.slot} className="w-3.5 h-3.5" />
-                        <span>T{inst.tier}</span>
-                      </span>
+                    <HelpCircle className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">{t('inv.legendBtn')}</span>
+                  </button>
 
-                      <div className="flex items-center gap-1 font-mono-nums text-[11px]">
-                        <span className="text-slate-400">
-                          {inst.rollQuality}%
+                  {legendOpen && (
+                    <div
+                      data-testid="inv-legend-popover"
+                      className="absolute right-0 top-11 z-30 w-72 rounded-lg border border-slate-700 bg-[#0A101B] p-3 shadow-2xl space-y-2 text-xs"
+                    >
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                        <span className="font-bold text-amber-300">
+                          {t('inv.legendTitle')}
                         </span>
-                        {inst.enchantLevel > 0 && (
-                          <span className="font-bold text-amber-400">
-                            +{inst.enchantLevel}
-                          </span>
-                        )}
-                        {!validation.canEquip &&
-                          ownerGear !== activeGear.classId && (
-                            <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
-                          )}
+                        <button
+                          type="button"
+                          onClick={() => setLegendOpen(false)}
+                          className="text-slate-400 hover:text-white cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <ul className="space-y-1.5 text-[11px] text-slate-300">
+                        <li className="flex items-center gap-2">
+                          <span className="w-3 h-3 rounded border-2 border-emerald-400 bg-emerald-500/20 shrink-0" />
+                          <span>{t('inv.legendEquipped')}</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span className="w-3 h-3 rounded border-2 border-amber-400 bg-amber-500/20 shrink-0" />
+                          <span>{t('inv.legendSelected')}</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <ArrowUp className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span>{t('inv.legendUpgrade')}</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 shrink-0 mx-0.5" />
+                          <span>{t('inv.legendNew')}</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <Lock className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                          <span>{t('inv.legendLocked')}</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <Star className="w-3.5 h-3.5 text-yellow-400 fill-yellow-400 shrink-0" />
+                          <span>{t('inv.legendFavorite')}</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <Ban className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span>{t('inv.legendUnusable')}</span>
+                        </li>
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Collapsible Filter Drawer */}
+              {filterDrawerOpen && (
+                <div
+                  data-testid="inv-filter-drawer"
+                  className="rounded-lg border border-slate-800 bg-[#080C14] p-3 space-y-3 text-xs"
+                >
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* Rarity multi */}
+                    <div className="space-y-1">
+                      <div className="text-[11px] font-semibold text-slate-400">
+                        {t('inv.filterRarity')}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {RARITY_OPTIONS.map((r) => {
+                          const active = filterState.rarities.includes(r);
+                          return (
+                            <button
+                              key={r}
+                              type="button"
+                              onClick={() => toggleRarityFilter(r)}
+                              className={`h-7 px-2 rounded border text-[11px] font-semibold cursor-pointer ${
+                                active
+                                  ? `${RARITY_META[r].borderClass} bg-slate-800 ${RARITY_META[r].textClass}`
+                                  : 'border-slate-800 bg-slate-900/70 text-slate-400 hover:text-slate-200'
+                              }`}
+                            >
+                              {getRarityLabel(lang, r)}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
 
-                    <div
-                      className={`text-xs font-semibold leading-snug line-clamp-2 ${
-                        RARITY_META[inst.rarity].textClass
-                      }`}
-                    >
-                      {getItemInstanceName(lang, inst)}
+                    {/* Tier multi */}
+                    <div className="space-y-1">
+                      <div className="text-[11px] font-semibold text-slate-400">
+                        {t('inv.filterTier')}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {TIER_OPTIONS.map((tier) => {
+                          const active = filterState.tiers.includes(tier);
+                          return (
+                            <button
+                              key={tier}
+                              type="button"
+                              onClick={() => toggleTierFilter(tier)}
+                              className={`h-7 px-2.5 rounded border font-mono-nums text-[11px] font-semibold cursor-pointer ${
+                                active
+                                  ? 'border-amber-400 bg-amber-500/20 text-amber-200'
+                                  : 'border-slate-800 bg-slate-900/70 text-slate-400 hover:text-slate-200'
+                              }`}
+                            >
+                              T{tier}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
 
-                    <div className="text-[11px] font-mono-nums flex items-center justify-between gap-1">
-                      {ownerGear ? (
-                        <span
-                          className={`truncate font-semibold ${
-                            ownerGear === activeGear.classId
-                              ? 'text-emerald-400'
-                              : 'text-sky-300'
+                    {/* Required-level range */}
+                    <div className="space-y-1">
+                      <div className="text-[11px] font-semibold text-slate-400">
+                        {t('inv.filterLevelRange')}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min={1}
+                          max={50}
+                          placeholder="Min"
+                          value={filterState.minLevel ?? ''}
+                          onChange={(e) =>
+                            setInventoryFilterState({
+                              minLevel:
+                                e.target.value === ''
+                                  ? null
+                                  : Math.max(1, Number(e.target.value) || 1),
+                            })
+                          }
+                          className="w-20 h-8 px-2 rounded border border-slate-700 bg-slate-900 font-mono-nums text-xs"
+                        />
+                        <span className="text-slate-500">–</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={50}
+                          placeholder="Max"
+                          value={filterState.maxLevel ?? ''}
+                          onChange={(e) =>
+                            setInventoryFilterState({
+                              maxLevel:
+                                e.target.value === ''
+                                  ? null
+                                  : Math.max(1, Number(e.target.value) || 1),
+                            })
+                          }
+                          className="w-20 h-8 px-2 rounded border border-slate-700 bg-slate-900 font-mono-nums text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Roll quality range */}
+                    <div className="space-y-1">
+                      <div className="text-[11px] font-semibold text-slate-400">
+                        {t('inv.filterQualityRange')}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={filterState.minQuality}
+                          onChange={(e) =>
+                            setInventoryFilterState({
+                              minQuality: Math.max(
+                                0,
+                                Math.min(100, Number(e.target.value) || 0)
+                              ),
+                            })
+                          }
+                          className="w-20 h-8 px-2 rounded border border-slate-700 bg-slate-900 font-mono-nums text-xs"
+                        />
+                        <span className="text-slate-500">–</span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={filterState.maxQuality}
+                          onChange={(e) =>
+                            setInventoryFilterState({
+                              maxQuality: Math.max(
+                                0,
+                                Math.min(
+                                  100,
+                                  e.target.value === ''
+                                    ? 100
+                                    : Number(e.target.value)
+                                )
+                              ),
+                            })
+                          }
+                          className="w-20 h-8 px-2 rounded border border-slate-700 bg-slate-900 font-mono-nums text-xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Usability segmented control */}
+                  <div className="space-y-1">
+                    <div className="text-[11px] font-semibold text-slate-400">
+                      {t('inv.filterUsability')}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(
+                        ['all', 'selected_gear', 'any_gear'] as const
+                      ).map((u) => (
+                        <button
+                          key={u}
+                          type="button"
+                          onClick={() =>
+                            setInventoryFilterState({ usability: u })
+                          }
+                          className={`h-8 px-2.5 rounded border text-xs font-medium cursor-pointer ${
+                            filterState.usability === u
+                              ? 'border-sky-400 bg-sky-500/20 text-sky-200'
+                              : 'border-slate-800 bg-slate-900/70 text-slate-400 hover:text-slate-200'
                           }`}
                         >
-                          {t('common.equippedOnGear', {
-                            gear: getClassName(lang, ownerGear),
-                          })}
-                        </span>
-                      ) : (
-                        <span className="text-slate-400 truncate">
-                          {t('common.levelShort')}
-                          {inst.requiredLevel}
-                          {inst.classRestriction
-                            ? ` · ${getClassName(lang, inst.classRestriction)}`
-                            : ''}
-                        </span>
-                      )}
+                          {t(`inv.usability.${u}`)}
+                        </button>
+                      ))}
                     </div>
-                  </button>
-                );
-              })}
+                  </div>
+
+                  {/* Toggles + Reset */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={filterState.onlyUpgrades}
+                          onChange={(e) =>
+                            setInventoryFilterState({
+                              onlyUpgrades: e.target.checked,
+                            })
+                          }
+                          className="w-4 h-4 accent-emerald-400"
+                        />
+                        <span>{t('inv.onlyUpgrades')}</span>
+                      </label>
+
+                      <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={filterState.lockedOnly}
+                          onChange={(e) =>
+                            setInventoryFilterState({
+                              lockedOnly: e.target.checked,
+                            })
+                          }
+                          className="w-4 h-4 accent-amber-400"
+                        />
+                        <span>{t('inv.lockedOnly')}</span>
+                      </label>
+
+                      <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={filterState.newOnly}
+                          onChange={(e) =>
+                            setInventoryFilterState({
+                              newOnly: e.target.checked,
+                            })
+                          }
+                          className="w-4 h-4 accent-cyan-400"
+                        />
+                        <span>{t('inv.newOnly')}</span>
+                      </label>
+
+                      <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={filterState.pinEquippedFirst}
+                          onChange={(e) =>
+                            setInventoryFilterState({
+                              pinEquippedFirst: e.target.checked,
+                            })
+                          }
+                          className="w-4 h-4 accent-sky-400"
+                        />
+                        <span>{t('inv.pinEquippedFirst')}</span>
+                      </label>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => resetInventoryFilterState()}
+                      className="h-8 px-2.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-xs text-slate-300 cursor-pointer"
+                    >
+                      {t('inv.filtersReset')}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Multi-Select Bulk Action Bar */}
+              {multiSelectMode && (
+                <div
+                  data-testid="inv-bulk-bar"
+                  className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-amber-200">
+                      {t('inv.selectedCount', { count: selectedIds.size })}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConfirmBulkRare(false);
+                        setSelectedIds(
+                          new Set(
+                            filteredEntries.map((e) => e.item.instanceId)
+                          )
+                        );
+                      }}
+                      className="text-sky-300 hover:text-sky-200 font-medium cursor-pointer"
+                    >
+                      {t('inv.selectAllVisible')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConfirmBulkRare(false);
+                        setSelectedIds(new Set());
+                      }}
+                      className="text-slate-400 hover:text-slate-200 cursor-pointer"
+                    >
+                      {t('inv.clearSelection')}
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={selectedIds.size === 0}
+                      onClick={() =>
+                        bulkSetItemLock(Array.from(selectedIds), true)
+                      }
+                      className="h-8 px-2.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-amber-200 font-semibold inline-flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>{t('inv.bulkLock')}</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={selectedIds.size === 0}
+                      onClick={() =>
+                        bulkSetItemLock(Array.from(selectedIds), false)
+                      }
+                      className="h-8 px-2.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-slate-200 font-semibold inline-flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      <Unlock className="w-3.5 h-3.5" />
+                      <span>{t('inv.bulkUnlock')}</span>
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="inv-bulk-sell-btn"
+                      disabled={bulkSellableItems.length === 0}
+                      onClick={handleBulkSell}
+                      className={`h-8 px-3 rounded font-bold inline-flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                        confirmBulkRare
+                          ? 'bg-rose-600 hover:bg-rose-500 text-white'
+                          : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                      }`}
+                    >
+                      <Coins className="w-3.5 h-3.5" />
+                      <span>
+                        {confirmBulkRare
+                          ? t('inv.bulkSellConfirmRare', {
+                              count: bulkSellableItems.length,
+                              rarity: getRarityLabel(lang, 'rare'),
+                            })
+                          : t('inv.bulkSell', {
+                              count: bulkSellableItems.length,
+                            })}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Showing count + Pin Equipped quick indicator */}
+              <div className="flex items-center justify-between text-[11px] text-slate-400">
+                <span>
+                  {t('inv.showingCount', {
+                    shown: filteredEntries.length,
+                    total: pilot.inventory.length,
+                  })}
+                </span>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={filterState.pinEquippedFirst}
+                    onChange={(e) =>
+                      setInventoryFilterState({
+                        pinEquippedFirst: e.target.checked,
+                      })
+                    }
+                    className="w-3.5 h-3.5 accent-sky-400"
+                  />
+                  <span>{t('inv.pinEquippedFirst')}</span>
+                </label>
+              </div>
+            </div>
+          )}
+
+          {/* ==================== CONSUMABLES TAB CONTENT ==================== */}
+          {filterState.slot === 'consumables' ? (
+            <div className="space-y-3">
+              {((pilot.activeEnchantBonusPct ?? 0) > 0 ||
+                (pilot.activeExpBoostBattles ?? 0) > 0) && (
+                <div className="flex flex-wrap gap-2">
+                  {(pilot.activeEnchantBonusPct ?? 0) > 0 && (
+                    <div className="rounded border border-purple-500/40 bg-purple-500/10 px-3 py-1.5 text-xs text-purple-200 inline-flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-purple-300" />
+                      <span>
+                        {t('inv.enchantBonusReady', {
+                          pct: pilot.activeEnchantBonusPct ?? 0,
+                        })}
+                      </span>
+                    </div>
+                  )}
+                  {(pilot.activeExpBoostBattles ?? 0) > 0 && (
+                    <div className="rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-200 inline-flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-emerald-300" />
+                      <span>
+                        {t('inv.expBoostActive', {
+                          battles: pilot.activeExpBoostBattles ?? 0,
+                        })}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {consumablesList.length === 0 ? (
+                <div className="min-h-[160px] rounded border border-slate-800/80 bg-[#080C14] px-4 py-8 flex items-center justify-center text-center text-sm lg:text-xs text-slate-400">
+                  {t('inv.consumablesEmpty')}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[380px] overflow-y-auto pr-1 tactical-scroll">
+                  {consumablesList.map((c) => {
+                    const { name, desc } = renderConsumableText(c);
+                    return (
+                      <div
+                        key={c.id}
+                        className="rounded-lg border border-purple-500/35 bg-[#080C14] p-3 flex flex-col justify-between gap-2.5"
+                      >
+                        <div className="flex items-start gap-2.5">
+                          <span className="h-9 w-9 rounded border border-purple-400/40 bg-purple-500/15 text-purple-300 flex items-center justify-center shrink-0">
+                            <ConsumableIcon kind={c.kind} className="w-4 h-4" />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs font-bold text-slate-100 truncate">
+                                {name}
+                              </span>
+                              <span className="font-mono-nums text-xs font-bold text-purple-300 shrink-0">
+                                {t('inv.consumableQty', { qty: c.quantity })}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                              {desc}
+                            </p>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          data-testid={`use-consumable-${c.kind}`}
+                          onClick={() => handleUseConsumable(c)}
+                          className="min-h-[36px] px-3 rounded bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold cursor-pointer"
+                        >
+                          {c.kind === 'equipment_crate'
+                            ? t('inv.consumableOpenBtn')
+                            : t('inv.consumableUseBtn')}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : filteredEntries.length === 0 ? (
+            <div className="flex-1 min-h-[160px] rounded border border-slate-800/80 bg-[#080C14] px-4 py-8 flex items-center justify-center text-center text-sm lg:text-xs text-slate-400">
+              {pilot.inventory.length === 0
+                ? t('equip.inventoryEmpty')
+                : t('inv.noMatch')}
+            </div>
+          ) : (
+            /* ==================== VIRTUALIZED FIXED-HEIGHT GRID ==================== */
+            <div
+              ref={gridContainerRef}
+              data-testid="inv-virtual-grid"
+              onScroll={(e) => {
+                const target = e.currentTarget;
+                setGridMetrics((prev) => ({
+                  ...prev,
+                  scrollTop: target.scrollTop,
+                }));
+              }}
+              className="h-[384px] sm:h-[420px] overflow-y-auto pr-1 tactical-scroll"
+            >
+              <div
+                style={{ height: `${totalGridHeight}px` }}
+                className="relative w-full"
+              >
+                <div
+                  style={{
+                    transform: `translateY(${startRow * ROW_STRIDE}px)`,
+                    gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+                    gap: `${GRID_GAP}px`,
+                  }}
+                  className="grid w-full"
+                >
+                  {visibleEntries.map((entry) => {
+                    const inst = entry.item;
+                    const isSelected =
+                      selection?.kind === 'inventory' &&
+                      selection.instanceId === inst.instanceId;
+                    const isChecked = selectedIds.has(inst.instanceId);
+                    const isEquippedSelected = entry.equippedOnSelected;
+                    const isEquippedOther =
+                      entry.equippedBy !== null && !entry.equippedOnSelected;
+                    const isUnusable = !entry.usableBySelected;
+                    const unusableReason = isUnusable
+                      ? getUnusableReasonShort(
+                          lang,
+                          inst,
+                          activeGear.level,
+                          activeGear.classId,
+                          t('common.levelShort')
+                        )
+                      : '';
+
+                    const frameClasses = isSelected
+                      ? 'border-amber-400 bg-amber-500/15 ring-2 ring-amber-400/60'
+                      : isChecked
+                      ? 'border-amber-400 bg-amber-500/10'
+                      : isEquippedSelected
+                      ? 'border-emerald-400 bg-emerald-500/12 ring-1 ring-emerald-400/50'
+                      : isEquippedOther
+                      ? 'border-sky-400/75 bg-sky-500/10'
+                      : isUnusable
+                      ? 'border-slate-700/80 bg-slate-900/90 grayscale-[75%] opacity-75'
+                      : `${RARITY_META[inst.rarity].borderClass} ${
+                          RARITY_META[inst.rarity].bgTintClass
+                        } hover:bg-slate-900/90`;
+
+                    return (
+                      <button
+                        key={inst.instanceId}
+                        type="button"
+                        data-testid={`inv-card-${inst.instanceId}`}
+                        title={entry.displayName}
+                        onClick={() => handleSelectInventory(inst.instanceId)}
+                        className={`relative h-[128px] overflow-hidden p-2.5 rounded-lg lg:rounded border text-left transition-colors cursor-pointer flex flex-col justify-between ${frameClasses}`}
+                      >
+                        {/* Striped overlay for unusable items */}
+                        {isUnusable && (
+                          <div
+                            aria-hidden="true"
+                            className="pointer-events-none absolute inset-0 bg-[repeating-linear-gradient(135deg,rgba(148,163,184,0.09)_0px,rgba(148,163,184,0.09)_6px,transparent_6px,transparent_12px)]"
+                          />
+                        )}
+
+                        {/* EQUIPPED Corner Ribbon */}
+                        {entry.equippedBy && (
+                          <div
+                            className={`absolute top-0 right-0 z-10 px-1.5 py-0.5 rounded-bl text-[9px] font-bold tracking-tight inline-flex items-center gap-1 max-w-[85%] ${
+                              isEquippedSelected
+                                ? 'bg-emerald-500 text-slate-950'
+                                : 'bg-sky-500/90 text-slate-950'
+                            }`}
+                          >
+                            <ClassIcon
+                              classId={entry.equippedBy}
+                              colored={false}
+                              className="w-2.5 h-2.5 shrink-0"
+                            />
+                            <span className="truncate">
+                              {isEquippedSelected
+                                ? t('inv.ribbonEquipped')
+                                : t('inv.ribbonOnGear', {
+                                    gear: getClassName(lang, entry.equippedBy),
+                                  })}
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Top Metadata Row */}
+                        <div className="relative z-10 flex items-center justify-between gap-1 pt-0.5">
+                          <span
+                            className={`inline-flex items-center gap-1 text-[11px] font-mono-nums ${
+                              RARITY_META[inst.rarity].textClass
+                            }`}
+                          >
+                            {multiSelectMode && (
+                              <span
+                                className={`w-3.5 h-3.5 rounded border inline-flex items-center justify-center shrink-0 ${
+                                  isChecked
+                                    ? 'border-amber-400 bg-amber-400 text-slate-950'
+                                    : 'border-slate-500 bg-slate-950/80'
+                                }`}
+                              >
+                                {isChecked && <Check className="w-2.5 h-2.5" />}
+                              </span>
+                            )}
+                            <SlotIcon
+                              slot={inst.slot}
+                              className="w-3.5 h-3.5 shrink-0"
+                            />
+                            <span>T{inst.tier}</span>
+                            {inst.isNew && (
+                              <span
+                                title={t('inv.badgeNew')}
+                                className="w-2 h-2 rounded-full bg-cyan-400 shrink-0"
+                              />
+                            )}
+                          </span>
+
+                          <div
+                            className={`flex items-center gap-1 font-mono-nums text-[11px] ${
+                              entry.equippedBy ? 'mt-3' : ''
+                            }`}
+                          >
+                            {entry.isUpgrade && (
+                              <span
+                                title={t('inv.badgeUpgrade', {
+                                  gear: getClassName(lang, activeGear.classId),
+                                })}
+                              >
+                                <ArrowUp className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                              </span>
+                            )}
+                            {inst.locked && (
+                              <span title={t('inv.badgeLocked')}>
+                                <Lock className="w-3 h-3 text-amber-300 shrink-0" />
+                              </span>
+                            )}
+                            {inst.favorited && (
+                              <span title={t('inv.badgeFavorited')}>
+                                <Star className="w-3 h-3 text-yellow-400 fill-yellow-400 shrink-0" />
+                              </span>
+                            )}
+                            {inst.enchantLevel > 0 && (
+                              <span className="font-bold text-amber-400">
+                                +{inst.enchantLevel}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Clamped 2-Line Item Name + Tooltip */}
+                        <div
+                          title={entry.displayName}
+                          className={`relative z-10 text-xs font-semibold leading-snug line-clamp-2 ${
+                            isUnusable
+                              ? 'text-slate-300'
+                              : RARITY_META[inst.rarity].textClass
+                          }`}
+                        >
+                          {entry.displayName}
+                        </div>
+
+                        {/* Bottom Reason / Quality + Level Line */}
+                        <div className="relative z-10 text-[11px] font-mono-nums flex items-center justify-between gap-1">
+                          {isUnusable ? (
+                            <span className="inline-flex items-center gap-1 text-rose-300/90 truncate">
+                              <Ban className="w-3 h-3 shrink-0" />
+                              <span className="truncate">{unusableReason}</span>
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 truncate">
+                              {t('common.levelShort')}
+                              {inst.requiredLevel}
+                              {inst.classRestriction
+                                ? ` · ${getClassName(
+                                    lang,
+                                    inst.classRestriction
+                                  )}`
+                                : ''}
+                            </span>
+                          )}
+                          <span className="text-slate-400 shrink-0">
+                            {inst.rollQuality}%
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           )}
         </section>
@@ -1281,6 +2571,7 @@ export function GearView() {
           onClose={() => {
             setMobileDetailOpen(false);
             setConfirmingUnequipSlot(null);
+            setConfirmingSellId(null);
           }}
           title={
             activeDetailInstance
@@ -1300,6 +2591,12 @@ export function GearView() {
           {renderDetailContent()}
         </BottomSheet>
       </div>
+
+      {/* Quick Sell Modal */}
+      <QuickSellModal
+        open={quickSellOpen}
+        onClose={() => setQuickSellOpen(false)}
+      />
     </div>
   );
 }

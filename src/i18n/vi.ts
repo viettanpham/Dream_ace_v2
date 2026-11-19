@@ -1027,6 +1027,8 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'inv.favoriteBtn': 'Yêu thích',
   'inv.unfavoriteBtn': 'Bỏ yêu thích',
   'inv.sellForBtn': 'Bán (+{credits} CR)',
+  'inv.sellConfirmRare': 'Xác nhận bán đồ {rarity} (+{credits} CR)',
+  'inv.bulkSellConfirmRare': 'Xác nhận bán {count} món (có {rarity}+)',
   'inv.sellDisabledLocked': 'Mở khóa trước khi bán',
   'inv.sellDisabledEquipped': 'Tháo trang bị trước khi bán',
   'inv.powerScoreShort': 'LC {score}',
