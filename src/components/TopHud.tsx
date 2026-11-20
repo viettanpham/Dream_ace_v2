@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   Award,
@@ -43,7 +43,6 @@ export function TopHud() {
   const startBattle = useGameStore((s) => s.startBattle);
   const setBattleViewMode = useGameStore((s) => s.setBattleViewMode);
   const toggleAdminPanel = useGameStore((s) => s.toggleAdminPanel);
-  const unlockAdminMode = useGameStore((s) => s.unlockAdminMode);
 
   const layoutMode = useBattleLayoutMode();
   const isPhoneBattle = screen === 'BATTLE' && layoutMode === 'phone-portrait';
@@ -52,17 +51,6 @@ export function TopHud() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [leaveConfirmDest, setLeaveConfirmDest] =
     useState<LeaveDestination | null>(null);
-  const tapCountRef = useRef(0);
-  const lastTapRef = useRef(0);
-  const titleNavTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (titleNavTimerRef.current) {
-        clearTimeout(titleNavTimerRef.current);
-      }
-    };
-  }, []);
 
   // Dismiss leave-battle dialog on Escape
   useEffect(() => {
@@ -99,46 +87,13 @@ export function TopHud() {
   };
 
   const handleBrandTap = () => {
-    if (titleNavTimerRef.current) {
-      clearTimeout(titleNavTimerRef.current);
-      titleNavTimerRef.current = null;
-    }
-
     // During an active battle, tapping the logo MUST ALWAYS show confirm dialog and never exit immediately.
     if (isBattleActive) {
       setLeaveConfirmDest('HANGAR');
       return;
     }
 
-    if (!ENABLE_ADMIN_CP) {
-      setScreen('TITLE');
-      return;
-    }
-
-    const now = Date.now();
-    if (now - lastTapRef.current > 2500) {
-      tapCountRef.current = 0;
-    }
-    lastTapRef.current = now;
-    tapCountRef.current += 1;
-
-    if (tapCountRef.current >= 7) {
-      tapCountRef.current = 0;
-      unlockAdminMode(true);
-      return;
-    }
-
-    // Single tap navigates to Title screen after a short multi-tap window;
-    // rapid 7-taps cancel navigation so Admin unlocks in place.
-    if (tapCountRef.current === 1) {
-      titleNavTimerRef.current = setTimeout(() => {
-        titleNavTimerRef.current = null;
-        if (tapCountRef.current === 1) {
-          tapCountRef.current = 0;
-          setScreen('TITLE');
-        }
-      }, 320);
-    }
+    setScreen('TITLE');
   };
 
   const activeGear = pilot.gears[pilot.activeGearId];
@@ -503,9 +458,10 @@ export function TopHud() {
               </span>
             </button>
 
-            {ENABLE_ADMIN_CP && adminUnlocked && (
+            {ENABLE_ADMIN_CP && (
               <button
                 type="button"
+                data-testid="tophud-settings-admin-btn"
                 onClick={() => {
                   setSettingsOpen(false);
                   toggleAdminPanel();

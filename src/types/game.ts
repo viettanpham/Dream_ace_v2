@@ -645,6 +645,16 @@ export interface AutoRepeatSession {
   stopReason: AutoStopReason | null;
 }
 
+export interface AutoRepeatRunToast {
+  id: string;
+  runNumber: number;
+  outcome: 'victory' | 'defeat';
+  expGained: number;
+  creditsGained: number;
+  warPointsGained: number;
+  lootCount: number;
+}
+
 export type TeamColorRole = 'me' | 'ally' | 'enemy' | 'boss';
 
 export interface TurnQueueEntry {

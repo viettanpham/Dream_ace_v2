@@ -8,10 +8,12 @@ import {
   Clock,
   Coins,
   KeyRound,
+  Lock,
   Package,
   RefreshCw,
   ShoppingBag,
   Sparkles,
+  Unlock,
 } from 'lucide-react';
 import { BALANCE_CONFIG } from '../data/balance';
 import { MECH_CLASS_LIST, STAT_KEYS } from '../data/classes';
@@ -66,7 +68,7 @@ type NoticeAction = 'gear' | 'skill' | 'consumables' | 'none';
 
 type MobileShopSheetState =
   | { kind: 'buy'; itemId: string }
-  | { kind: 'sell'; item: ItemInstance }
+  | { kind: 'sell'; itemId: string }
   | { kind: 'wp'; cardId: string }
   | { kind: 'wpOffer'; offerId: string }
   | null;
@@ -113,6 +115,10 @@ export function ShopScreen() {
   const buyWpMarketOffer = useGameStore((s) => s.buyWpMarketOffer);
   const refreshWpMarket = useGameStore((s) => s.refreshWpMarket);
   const sellItem = useGameStore((s) => s.sellItem);
+  const unequipInstanceEverywhere = useGameStore(
+    (s) => s.unequipInstanceEverywhere
+  );
+  const toggleItemLock = useGameStore((s) => s.toggleItemLock);
   const buyOpeningCardAction = useGameStore((s) => s.buyOpeningCardAction);
   const setActiveTab = useGameStore((s) => s.setActiveTab);
   const setInventoryFilterState = useGameStore(
@@ -182,11 +188,13 @@ export function ShopScreen() {
     });
   }, [shopStock, slotFilter, classFilter, activeGear, pilot.gears]);
 
-  const unequippedInventory = useMemo(
+  const sellableInventoryCount = useMemo(
     () =>
       pilot.inventory.filter(
-        (inst) => getItemEquippedByGear(pilot.gears, inst.instanceId) === null
-      ),
+        (inst) =>
+          !inst.locked &&
+          getItemEquippedByGear(pilot.gears, inst.instanceId) === null
+      ).length,
     [pilot.inventory, pilot.gears]
   );
 
@@ -195,18 +203,18 @@ export function ShopScreen() {
     for (const slot of EQUIPMENT_SLOTS) {
       counts[slot] = 0;
     }
-    for (const inst of unequippedInventory) {
+    for (const inst of pilot.inventory) {
       counts[inst.slot] = (counts[inst.slot] ?? 0) + 1;
     }
     return counts;
-  }, [unequippedInventory]);
+  }, [pilot.inventory]);
 
   const filteredSellInventory = useMemo(() => {
-    return unequippedInventory.filter((inst) => {
+    return pilot.inventory.filter((inst) => {
       if (slotFilter !== 'all' && inst.slot !== slotFilter) return false;
       return true;
     });
-  }, [unequippedInventory, slotFilter]);
+  }, [pilot.inventory, slotFilter]);
 
   const filteredOpeningCards = useMemo(() => {
     return OPENING_CARDS_LIST.filter((card) => {
@@ -302,6 +310,11 @@ export function ShopScreen() {
   const activeBuyItem =
     mobileSheet?.kind === 'buy'
       ? shopStock.find((it) => it.instanceId === mobileSheet.itemId) ?? null
+      : null;
+
+  const activeSellItem =
+    mobileSheet?.kind === 'sell'
+      ? pilot.inventory.find((it) => it.instanceId === mobileSheet.itemId) ?? null
       : null;
 
   const activeWpCard =
@@ -437,7 +450,7 @@ export function ShopScreen() {
               >
                 <Coins className="w-3.5 h-3.5 shrink-0" />
                 <span className="truncate">
-                  {t('shop.tabSell', { count: unequippedInventory.length })}
+                  {t('shop.tabSell', { count: sellableInventoryCount })}
                 </span>
               </button>
 
@@ -510,7 +523,7 @@ export function ShopScreen() {
               onClick={() => setShopSubTab('sell')}
               className="font-semibold text-amber-300 hover:text-amber-200 cursor-pointer whitespace-nowrap"
             >
-              {t('shop.tabSell', { count: unequippedInventory.length })} →
+              {t('shop.tabSell', { count: sellableInventoryCount })} →
             </button>
           </div>
         )}
@@ -538,7 +551,7 @@ export function ShopScreen() {
                 <span className="font-mono-nums text-[11px] opacity-80">
                   {shopSubTab === 'buy'
                     ? `(${availableShopCount}/${shopStock.length})`
-                    : `(${unequippedInventory.length})`}
+                    : `(${pilot.inventory.length})`}
                 </span>
               </button>
 
@@ -1435,12 +1448,12 @@ export function ShopScreen() {
           </>
         )}
 
-        {/* SELL UNEQUIPPED CARGO */}
+        {/* SELL CARGO (including equipped & locked protection labels + shortcuts) */}
         {shopSubTab === 'sell' && (
           <div className="rounded-lg border border-slate-800/90 bg-[#0D131D]/95 overflow-hidden md:p-4">
             {filteredSellInventory.length === 0 ? (
               <div className="py-10 px-4 text-center text-sm text-slate-400">
-                {unequippedInventory.length === 0
+                {pilot.inventory.length === 0
                   ? t('shop.sellEmpty')
                   : t('shop.sellEmptyFilter')}
               </div>
@@ -1449,40 +1462,104 @@ export function ShopScreen() {
                 {filteredSellInventory.map((inst) => {
                   const sellPrice = getSellPrice(inst);
                   const effStats = getEffectiveItemStats(inst);
+                  const equippedByGear = getItemEquippedByGear(
+                    pilot.gears,
+                    inst.instanceId
+                  );
+                  const isLocked = Boolean(inst.locked);
+                  const canSell = equippedByGear === null && !isLocked;
 
                   return (
                     <div
                       key={inst.instanceId}
+                      data-testid={`shop-sell-row-${inst.instanceId}`}
                       className="px-3.5 py-3 md:px-0 flex items-center justify-between gap-3"
                     >
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setMobileSheet({ kind: 'sell', item: inst })
-                        }
-                        className="min-w-0 flex-1 space-y-1 text-left cursor-pointer md:cursor-default"
-                      >
-                        <div className="flex flex-wrap items-baseline gap-2">
-                          <span
-                            className={`font-semibold text-sm ${
-                              RARITY_META[inst.rarity].textClass
-                            }`}
-                          >
-                            {getItemInstanceName(lang, inst, true)}
-                          </span>
-                          <span className="text-xs text-slate-400">
-                            {getSlotShort(lang, inst.slot)} · T{inst.tier} ·{' '}
-                            {inst.rollQuality}%
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-x-3 text-xs font-mono-nums text-slate-300">
-                          {STAT_KEYS.filter((k) => effStats[k] > 0).map((k) => (
-                            <span key={k}>
-                              +{effStats[k]} {getStatShort(lang, k)}
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setMobileSheet({
+                              kind: 'sell',
+                              itemId: inst.instanceId,
+                            })
+                          }
+                          className="w-full min-w-0 space-y-1 text-left cursor-pointer md:cursor-default"
+                        >
+                          <div className="flex flex-wrap items-baseline gap-2">
+                            <span
+                              className={`font-semibold text-sm ${
+                                RARITY_META[inst.rarity].textClass
+                              }`}
+                            >
+                              {getItemInstanceName(lang, inst, true)}
                             </span>
-                          ))}
-                        </div>
-                      </button>
+                            <span className="text-xs text-slate-400">
+                              {getSlotShort(lang, inst.slot)} · T{inst.tier} ·{' '}
+                              {inst.rollQuality}%
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-x-3 text-xs font-mono-nums text-slate-300">
+                            {STAT_KEYS.filter((k) => effStats[k] > 0).map(
+                              (k) => (
+                                <span key={k}>
+                                  +{effStats[k]} {getStatShort(lang, k)}
+                                </span>
+                              )
+                            )}
+                          </div>
+                        </button>
+
+                        {(equippedByGear !== null || isLocked) && (
+                          <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                            {equippedByGear !== null && (
+                              <span
+                                data-testid={`shop-sell-equipped-badge-${inst.instanceId}`}
+                                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border border-sky-500/50 bg-sky-500/12 text-[11px] font-semibold text-sky-200"
+                              >
+                                <ClassIcon
+                                  classId={equippedByGear}
+                                  colored={false}
+                                  className="w-3 h-3 shrink-0"
+                                />
+                                <span>
+                                  {t('shop.equippedOnGear', {
+                                    gear: getClassName(lang, equippedByGear),
+                                  })}
+                                </span>
+                                <button
+                                  type="button"
+                                  data-testid={`shop-sell-unequip-${inst.instanceId}`}
+                                  onClick={() =>
+                                    unequipInstanceEverywhere(inst.instanceId)
+                                  }
+                                  className="ml-0.5 px-1.5 py-0.5 rounded bg-sky-500/25 hover:bg-sky-500/40 text-sky-100 font-bold cursor-pointer"
+                                >
+                                  {t('shop.unequipShortcut')}
+                                </button>
+                              </span>
+                            )}
+                            {isLocked && (
+                              <span
+                                data-testid={`shop-sell-locked-badge-${inst.instanceId}`}
+                                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border border-amber-500/50 bg-amber-500/12 text-[11px] font-semibold text-amber-200"
+                              >
+                                <Lock className="w-3 h-3 shrink-0" />
+                                <span>{t('shop.lockedProtectBadge')}</span>
+                                <button
+                                  type="button"
+                                  data-testid={`shop-sell-unlock-${inst.instanceId}`}
+                                  onClick={() => toggleItemLock(inst.instanceId)}
+                                  className="ml-0.5 px-1.5 py-0.5 rounded bg-amber-500/25 hover:bg-amber-500/40 text-amber-100 font-bold cursor-pointer inline-flex items-center gap-1"
+                                >
+                                  <Unlock className="w-3 h-3" />
+                                  <span>{t('shop.unlockShortcut')}</span>
+                                </button>
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
 
                       <div className="flex items-center gap-2.5 sm:gap-4 shrink-0">
                         <div className="text-right font-mono-nums">
@@ -1498,8 +1575,17 @@ export function ShopScreen() {
 
                         <button
                           type="button"
+                          data-testid={`shop-sell-btn-${inst.instanceId}`}
+                          disabled={!canSell}
+                          title={
+                            equippedByGear !== null
+                              ? t('inv.sellDisabledEquipped')
+                              : isLocked
+                              ? t('inv.sellDisabledLocked')
+                              : undefined
+                          }
                           onClick={() => handleSell(inst)}
-                          className="min-h-[44px] md:min-h-0 md:h-10 px-4 rounded-lg md:rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold text-xs transition-colors cursor-pointer whitespace-nowrap"
+                          className="min-h-[44px] md:min-h-0 md:h-10 px-4 rounded-lg md:rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 disabled:border-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-slate-100 font-semibold text-xs transition-colors cursor-pointer whitespace-nowrap"
                         >
                           {t('shop.sellBtn')}
                         </button>
@@ -1516,13 +1602,16 @@ export function ShopScreen() {
       {/* Mobile Bottom Sheet for Shop Buy / Sell / WP Card / WP Offer */}
       <div className="md:hidden">
         <BottomSheet
-          open={Boolean(mobileSheet)}
+          open={
+            Boolean(mobileSheet) &&
+            (mobileSheet?.kind !== 'sell' || Boolean(activeSellItem))
+          }
           onClose={() => setMobileSheet(null)}
           title={
             mobileSheet?.kind === 'buy' && activeBuyItem
               ? getItemInstanceName(lang, activeBuyItem, true)
-              : mobileSheet?.kind === 'sell'
-              ? getItemInstanceName(lang, mobileSheet.item, true)
+              : mobileSheet?.kind === 'sell' && activeSellItem
+              ? getItemInstanceName(lang, activeSellItem, true)
               : activeWpOffer
               ? getWpOfferText(lang, t, activeWpOffer).name
               : activeWpCard
@@ -1535,11 +1624,11 @@ export function ShopScreen() {
                   lang,
                   activeBuyItem.rarity
                 )} · ${t('common.tier', { tier: activeBuyItem.tier })}`
-              : mobileSheet?.kind === 'sell'
-              ? `${getSlotLabel(lang, mobileSheet.item.slot)} · ${getRarityLabel(
+              : mobileSheet?.kind === 'sell' && activeSellItem
+              ? `${getSlotLabel(lang, activeSellItem.slot)} · ${getRarityLabel(
                   lang,
-                  mobileSheet.item.rarity
-                )} · ${t('common.tier', { tier: mobileSheet.item.tier })}`
+                  activeSellItem.rarity
+                )} · ${t('common.tier', { tier: activeSellItem.tier })}`
               : activeWpOffer
               ? activeWpOffer.slot
                 ? getSlotLabel(lang, activeWpOffer.slot)
@@ -1674,10 +1763,18 @@ export function ShopScreen() {
             })()}
 
           {mobileSheet?.kind === 'sell' &&
+            activeSellItem &&
             (() => {
-              const inst = mobileSheet.item;
+              const inst = activeSellItem;
               const sellPrice = getSellPrice(inst);
               const effStats = getEffectiveItemStats(inst);
+              const equippedByGear = getItemEquippedByGear(
+                pilot.gears,
+                inst.instanceId
+              );
+              const isLocked = Boolean(inst.locked);
+              const canSell = equippedByGear === null && !isLocked;
+
               return (
                 <div className="space-y-4">
                   <p className="text-sm text-slate-300">
@@ -1690,12 +1787,54 @@ export function ShopScreen() {
                       </span>
                     ))}
                   </div>
+                  {(equippedByGear !== null || isLocked) && (
+                    <div className="space-y-2">
+                      {equippedByGear !== null && (
+                        <div className="flex items-center justify-between gap-2 rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-xs text-sky-200">
+                          <span className="font-semibold">
+                            {t('shop.equippedOnGear', {
+                              gear: getClassName(lang, equippedByGear),
+                            })}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              unequipInstanceEverywhere(inst.instanceId)
+                            }
+                            className="min-h-[36px] px-3 rounded bg-sky-500/25 hover:bg-sky-500/40 text-sky-100 font-bold cursor-pointer"
+                          >
+                            {t('shop.unequipShortcut')}
+                          </button>
+                        </div>
+                      )}
+                      {isLocked && (
+                        <div className="flex items-center justify-between gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                          <span className="font-semibold inline-flex items-center gap-1.5">
+                            <Lock className="w-3.5 h-3.5" />
+                            {t('shop.lockedProtectBadge')}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => toggleItemLock(inst.instanceId)}
+                            className="min-h-[36px] px-3 rounded bg-amber-500/25 hover:bg-amber-500/40 text-amber-100 font-bold cursor-pointer"
+                          >
+                            {t('shop.unlockShortcut')}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <button
                     type="button"
+                    disabled={!canSell}
                     onClick={() => handleSell(inst)}
-                    className="w-full min-h-[48px] px-4 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm cursor-pointer"
+                    className="w-full min-h-[48px] px-4 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-slate-950 font-bold text-sm cursor-pointer"
                   >
-                    {t('shop.sellBtn')} (+{sellPrice.toLocaleString()} CR)
+                    {equippedByGear !== null
+                      ? t('inv.sellDisabledEquipped')
+                      : isLocked
+                      ? t('inv.sellDisabledLocked')
+                      : `${t('shop.sellBtn')} (+${sellPrice.toLocaleString()} CR)`}
                   </button>
                 </div>
               );

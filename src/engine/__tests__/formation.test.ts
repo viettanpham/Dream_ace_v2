@@ -379,6 +379,40 @@ describe('3-Row Formation System', () => {
       expect(secondMove.units.find((u) => u.id === 'u4')?.row).toBe('front');
     });
 
+    it('swaps units cleanly when swapIfFull is enabled and target row is at capacity', () => {
+      const cfg = cloneFormationConfig(DEFAULT_FORMATION_CONFIG); // 3 / 3 / 2
+      const units: SquadFormationUnit[] = [
+        { id: 'u1', name: 'A1', callsign: 'L1', classId: 'striker', isPlayer: true, row: 'front', formationCol: 0 },
+        { id: 'u2', name: 'A2', callsign: 'L2', classId: 'striker', isPlayer: false, row: 'front', formationCol: 1 },
+        { id: 'u3', name: 'A3', callsign: 'L3', classId: 'interceptor', isPlayer: false, row: 'front', formationCol: 2 },
+        { id: 'u4', name: 'A4', callsign: 'L4', classId: 'support', isPlayer: false, row: 'middle', formationCol: 0 },
+        { id: 'u5', name: 'A5', callsign: 'L5', classId: 'siege', isPlayer: false, row: 'back', formationCol: 0 },
+        { id: 'u6', name: 'A6', callsign: 'L6', classId: 'siege', isPlayer: false, row: 'back', formationCol: 1 },
+      ];
+
+      // Explicit swapWithUnitId: move u1 (front) -> back, swapping with u5 (back)
+      const explicitSwap = moveUnitToRow(units, 'u1', 'back', cfg, {
+        swapIfFull: true,
+        swapWithUnitId: 'u5',
+      });
+      expect(explicitSwap.ok).toBe(true);
+      expect(explicitSwap.swappedWithUnitId).toBe('u5');
+      expect(explicitSwap.units.find((u) => u.id === 'u1')?.row).toBe('back');
+      expect(explicitSwap.units.find((u) => u.id === 'u5')?.row).toBe('front');
+      expect(explicitSwap.units.filter((u) => u.row === 'back')).toHaveLength(2);
+      expect(explicitSwap.units.filter((u) => u.row === 'front')).toHaveLength(3);
+
+      // Default row swap (no swapWithUnitId): move u4 (middle) -> back, swaps with last unit in back (u6 at formationCol 1)
+      const rowSlotSwap = moveUnitToRow(explicitSwap.units, 'u4', 'back', cfg, {
+        swapIfFull: true,
+      });
+      expect(rowSlotSwap.ok).toBe(true);
+      expect(rowSlotSwap.swappedWithUnitId).toBe('u6');
+      expect(rowSlotSwap.units.find((u) => u.id === 'u4')?.row).toBe('back');
+      expect(rowSlotSwap.units.find((u) => u.id === 'u6')?.row).toBe('middle');
+      expect(rowSlotSwap.units.filter((u) => u.row === 'back')).toHaveLength(2);
+    });
+
     it('rebalances overflow safely when Admin CP lowers row capacities', () => {
       const squad = createDefaultSquadFormation('Pilot', 'striker');
       const tightCfg = sanitizeFormationConfig({

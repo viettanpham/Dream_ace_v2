@@ -1371,6 +1371,22 @@ export const EN_TRANSLATIONS = {
   'log.roundHeader': 'Round {round}',
   'log.roundEntriesCount': '{count} entries',
   'log.spCostTag': '-{cost} SP',
+
+  // F2a+: Formation swap, selling protections, battle loop summary/toast
+  'formation.swapHere': 'Tap to swap here',
+  'formation.swappedMsg': 'Swapped {unitA} ↔ {unitB}.',
+  'shop.equippedOnGear': 'Equipped: {gear}',
+  'shop.unequipShortcut': 'Unequip',
+  'shop.lockedProtectBadge': 'Protected Lock',
+  'shop.unlockShortcut': 'Unlock',
+  'inv.bulkSkippedNotice': 'Skipped {skipped} protected ({equipped} equipped, {locked} locked)',
+  'inv.bulkSoldWithSkippedFeedback': 'Sold {count} items (+{credits} CR). Skipped {skipped} equipped/locked.',
+  'inv.bulkAllSkippedFeedback': 'No items sold — {skipped} selected items are equipped or locked.',
+  'qs.soldWithSkippedNotice': 'Quick-sold {count} items (+{credits} CR). Skipped {skipped} equipped/locked.',
+  'battle.loopStopOnDefeat': 'Stop on defeat',
+  'battle.loopToastRun': 'Run #{run}: {outcome} · +{exp} EXP · +{credits} CR · +{wp} WP · {loot} loot',
+  'battle.loopToastVictory': 'Victory',
+  'battle.loopToastDefeat': 'Defeat',
 } as const;
 
 export type TranslationKey = keyof typeof EN_TRANSLATIONS;

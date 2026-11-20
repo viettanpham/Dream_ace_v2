@@ -203,6 +203,7 @@ export interface MoveUnitResult<T> {
   units: T[];
   currentCount: number;
   capacity: number;
+  swappedWithUnitId?: string;
 }
 
 /**
@@ -235,7 +236,8 @@ export function canMoveUnitToRow(
 }
 
 /**
- * Moves a unit to `targetRow` if capacity allows, and refreshes `formationCol` indices.
+ * Moves a unit to `targetRow` if capacity allows, or swaps with a unit in `targetRow`
+ * when `options.swapIfFull` is true, and refreshes `formationCol` indices.
  */
 export function moveUnitToRow<
   T extends { id: string; row: CombatRow; formationCol?: number }
@@ -243,25 +245,53 @@ export function moveUnitToRow<
   units: T[],
   unitId: string,
   targetRow: CombatRow,
-  config: FormationConfig = DEFAULT_FORMATION_CONFIG
+  config: FormationConfig = DEFAULT_FORMATION_CONFIG,
+  options?: { swapIfFull?: boolean; swapWithUnitId?: string }
 ): MoveUnitResult<T> {
   const check = canMoveUnitToRow(units, unitId, targetRow, config);
-  if (!check.ok) {
+  if (check.ok) {
+    const updated = units.map((u) =>
+      u.id === unitId ? { ...u, row: targetRow } : u
+    );
     return {
-      ok: false,
-      reason: check.reason,
-      units,
-      currentCount: check.currentCount,
+      ok: true,
+      units: assignFormationColumns(updated),
+      currentCount: check.currentCount + 1,
       capacity: check.capacity,
     };
   }
-  const updated = units.map((u) =>
-    u.id === unitId ? { ...u, row: targetRow } : u
-  );
+
+  if (check.reason === 'row_full' && options?.swapIfFull && check.capacity > 0) {
+    const sourceUnit = units.find((u) => u.id === unitId);
+    const targetRowUnits = units
+      .filter((u) => u.row === targetRow)
+      .sort((a, b) => (a.formationCol ?? 0) - (b.formationCol ?? 0));
+    const swapTarget =
+      (options.swapWithUnitId
+        ? targetRowUnits.find((u) => u.id === options.swapWithUnitId)
+        : undefined) ?? targetRowUnits[targetRowUnits.length - 1];
+
+    if (sourceUnit && swapTarget) {
+      const updated = units.map((u) => {
+        if (u.id === sourceUnit.id) return { ...u, row: targetRow };
+        if (u.id === swapTarget.id) return { ...u, row: sourceUnit.row };
+        return u;
+      });
+      return {
+        ok: true,
+        units: assignFormationColumns(updated),
+        currentCount: targetRowUnits.length,
+        capacity: check.capacity,
+        swappedWithUnitId: swapTarget.id,
+      };
+    }
+  }
+
   return {
-    ok: true,
-    units: assignFormationColumns(updated),
-    currentCount: check.currentCount + 1,
+    ok: false,
+    reason: check.reason,
+    units,
+    currentCount: check.currentCount,
     capacity: check.capacity,
   };
 }

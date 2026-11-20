@@ -533,26 +533,57 @@ export function GearView() {
       ),
     [selectedEntries, pilot.gears]
   );
+  const bulkSkippedEquippedCount = useMemo(
+    () =>
+      selectedEntries.filter(
+        (it) => getItemEquippedByGear(pilot.gears, it.instanceId) !== null
+      ).length,
+    [selectedEntries, pilot.gears]
+  );
+  const bulkSkippedLockedCount = useMemo(
+    () =>
+      selectedEntries.filter(
+        (it) =>
+          Boolean(it.locked) &&
+          getItemEquippedByGear(pilot.gears, it.instanceId) === null
+      ).length,
+    [selectedEntries, pilot.gears]
+  );
+  const bulkSkippedTotal = selectedEntries.length - bulkSellableItems.length;
   const bulkHasRareOrHigher = bulkSellableItems.some(
     (it) => it.rarity !== 'common'
   );
 
   const handleBulkSell = () => {
-    if (bulkSellableItems.length === 0) return;
+    if (bulkSellableItems.length === 0) {
+      if (bulkSkippedTotal > 0) {
+        setInventoryNotice(
+          t('inv.bulkAllSkippedFeedback', { skipped: bulkSkippedTotal })
+        );
+      }
+      return;
+    }
     if (bulkHasRareOrHigher && !confirmBulkRare) {
       soundFx.playClick();
       setConfirmBulkRare(true);
       return;
     }
+    const skippedCount = bulkSkippedTotal;
     const res = bulkSellItems(bulkSellableItems.map((i) => i.instanceId));
     setConfirmBulkRare(false);
     setSelectedIds(new Set());
     if (res.soldCount > 0) {
       setInventoryNotice(
-        t('inv.bulkSoldFeedback', {
-          count: res.soldCount,
-          credits: res.creditsEarned.toLocaleString(),
-        })
+        skippedCount > 0
+          ? t('inv.bulkSoldWithSkippedFeedback', {
+              count: res.soldCount,
+              credits: res.creditsEarned.toLocaleString(),
+              skipped: skippedCount,
+            })
+          : t('inv.bulkSoldFeedback', {
+              count: res.soldCount,
+              credits: res.creditsEarned.toLocaleString(),
+            })
       );
     }
   };
@@ -848,6 +879,46 @@ export function GearView() {
                 </span>
               </button>
             </div>
+
+            {(activeDetailOwnerGear !== null || isLocked) && (
+              <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                {activeDetailOwnerGear !== null && (
+                  <span
+                    data-testid="detail-equipped-badge"
+                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded border border-sky-500/45 bg-sky-500/12 text-xs font-semibold text-sky-200"
+                  >
+                    <span>
+                      {t('shop.equippedOnGear', {
+                        gear: getClassName(lang, activeDetailOwnerGear),
+                      })}
+                    </span>
+                    <button
+                      type="button"
+                      data-testid="detail-unequip-shortcut"
+                      onClick={() => {
+                        const instId = activeDetailInstance.instanceId;
+                        unequipInstanceEverywhere(instId);
+                        if (selection?.kind === 'slot') {
+                          setSelection({ kind: 'inventory', instanceId: instId });
+                        }
+                      }}
+                      className="px-2 py-0.5 rounded bg-sky-500/25 hover:bg-sky-500/40 text-sky-100 font-bold cursor-pointer"
+                    >
+                      {t('shop.unequipShortcut')}
+                    </button>
+                  </span>
+                )}
+                {isLocked && (
+                  <span
+                    data-testid="detail-locked-badge"
+                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded border border-amber-500/45 bg-amber-500/12 text-xs font-semibold text-amber-200"
+                  >
+                    <Lock className="w-3 h-3 shrink-0" />
+                    <span>{t('shop.lockedProtectBadge')}</span>
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           <p className="text-sm lg:text-xs text-slate-300 leading-relaxed">
@@ -2134,85 +2205,100 @@ export function GearView() {
               {multiSelectMode && (
                 <div
                   data-testid="inv-bulk-bar"
-                  className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs"
+                  className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 flex flex-col gap-1.5 text-xs"
                 >
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-amber-200">
-                      {t('inv.selectedCount', { count: selectedIds.size })}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setConfirmBulkRare(false);
-                        setSelectedIds(
-                          new Set(
-                            filteredEntries.map((e) => e.item.instanceId)
-                          )
-                        );
-                      }}
-                      className="text-sky-300 hover:text-sky-200 font-medium cursor-pointer"
-                    >
-                      {t('inv.selectAllVisible')}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setConfirmBulkRare(false);
-                        setSelectedIds(new Set());
-                      }}
-                      className="text-slate-400 hover:text-slate-200 cursor-pointer"
-                    >
-                      {t('inv.clearSelection')}
-                    </button>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <button
-                      type="button"
-                      disabled={selectedIds.size === 0}
-                      onClick={() =>
-                        bulkSetItemLock(Array.from(selectedIds), true)
-                      }
-                      className="h-8 px-2.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-amber-200 font-semibold inline-flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
-                    >
-                      <Lock className="w-3.5 h-3.5" />
-                      <span>{t('inv.bulkLock')}</span>
-                    </button>
-                    <button
-                      type="button"
-                      disabled={selectedIds.size === 0}
-                      onClick={() =>
-                        bulkSetItemLock(Array.from(selectedIds), false)
-                      }
-                      className="h-8 px-2.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-slate-200 font-semibold inline-flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
-                    >
-                      <Unlock className="w-3.5 h-3.5" />
-                      <span>{t('inv.bulkUnlock')}</span>
-                    </button>
-                    <button
-                      type="button"
-                      data-testid="inv-bulk-sell-btn"
-                      disabled={bulkSellableItems.length === 0}
-                      onClick={handleBulkSell}
-                      className={`h-8 px-3 rounded font-bold inline-flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-                        confirmBulkRare
-                          ? 'bg-rose-600 hover:bg-rose-500 text-white'
-                          : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
-                      }`}
-                    >
-                      <Coins className="w-3.5 h-3.5" />
-                      <span>
-                        {confirmBulkRare
-                          ? t('inv.bulkSellConfirmRare', {
-                              count: bulkSellableItems.length,
-                              rarity: getRarityLabel(lang, 'rare'),
-                            })
-                          : t('inv.bulkSell', {
-                              count: bulkSellableItems.length,
-                            })}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-amber-200">
+                        {t('inv.selectedCount', { count: selectedIds.size })}
                       </span>
-                    </button>
+                      <button
+                        type="button"
+                        data-testid="inv-select-all-btn"
+                        onClick={() => {
+                          setConfirmBulkRare(false);
+                          setSelectedIds(
+                            new Set(
+                              filteredEntries.map((e) => e.item.instanceId)
+                            )
+                          );
+                        }}
+                        className="text-sky-300 hover:text-sky-200 font-medium cursor-pointer"
+                      >
+                        {t('inv.selectAllVisible')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConfirmBulkRare(false);
+                          setSelectedIds(new Set());
+                        }}
+                        className="text-slate-400 hover:text-slate-200 cursor-pointer"
+                      >
+                        {t('inv.clearSelection')}
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={selectedIds.size === 0}
+                        onClick={() =>
+                          bulkSetItemLock(Array.from(selectedIds), true)
+                        }
+                        className="h-8 px-2.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-amber-200 font-semibold inline-flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
+                      >
+                        <Lock className="w-3.5 h-3.5" />
+                        <span>{t('inv.bulkLock')}</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={selectedIds.size === 0}
+                        onClick={() =>
+                          bulkSetItemLock(Array.from(selectedIds), false)
+                        }
+                        className="h-8 px-2.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-slate-200 font-semibold inline-flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
+                      >
+                        <Unlock className="w-3.5 h-3.5" />
+                        <span>{t('inv.bulkUnlock')}</span>
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="inv-bulk-sell-btn"
+                        disabled={bulkSellableItems.length === 0}
+                        onClick={handleBulkSell}
+                        className={`h-8 px-3 rounded font-bold inline-flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                          confirmBulkRare
+                            ? 'bg-rose-600 hover:bg-rose-500 text-white'
+                            : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                        }`}
+                      >
+                        <Coins className="w-3.5 h-3.5" />
+                        <span>
+                          {confirmBulkRare
+                            ? t('inv.bulkSellConfirmRare', {
+                                count: bulkSellableItems.length,
+                                rarity: getRarityLabel(lang, 'rare'),
+                              })
+                            : t('inv.bulkSell', {
+                                count: bulkSellableItems.length,
+                              })}
+                        </span>
+                      </button>
+                    </div>
                   </div>
+                  {bulkSkippedTotal > 0 && (
+                    <div
+                      data-testid="inv-bulk-skipped"
+                      className="text-[11px] font-medium text-amber-300"
+                    >
+                      {t('inv.bulkSkippedNotice', {
+                        skipped: bulkSkippedTotal,
+                        equipped: bulkSkippedEquippedCount,
+                        locked: bulkSkippedLockedCount,
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -2596,6 +2682,20 @@ export function GearView() {
       <QuickSellModal
         open={quickSellOpen}
         onClose={() => setQuickSellOpen(false)}
+        onSold={(count, credits, skipped) => {
+          setInventoryNotice(
+            skipped > 0
+              ? t('qs.soldWithSkippedNotice', {
+                  count,
+                  credits: credits.toLocaleString(),
+                  skipped,
+                })
+              : t('inv.bulkSoldFeedback', {
+                  count,
+                  credits: credits.toLocaleString(),
+                })
+          );
+        }}
       />
     </div>
   );

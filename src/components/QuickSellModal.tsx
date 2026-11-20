@@ -22,7 +22,7 @@ import { SlotIcon } from './GameIcons';
 interface QuickSellModalProps {
   open: boolean;
   onClose: () => void;
-  onSold?: (count: number, credits: number) => void;
+  onSold?: (count: number, credits: number, skippedCount: number) => void;
 }
 
 const RARITY_OPTIONS: ItemRarity[] = ['common', 'rare', 'epic', 'legendary'];
@@ -104,9 +104,11 @@ export function QuickSellModal({ open, onClose, onSold }: QuickSellModalProps) {
   const handleConfirmSell = () => {
     const ids = selectedItems.map((it) => it.instanceId);
     const res = executeQuickSell(ids);
+    const skippedCount =
+      evaluation.excludedStats.equipped + evaluation.excludedStats.locked;
     setConfirmStep(false);
     if (res.soldCount > 0) {
-      onSold?.(res.soldCount, res.creditsEarned);
+      onSold?.(res.soldCount, res.creditsEarned, skippedCount);
       onClose();
     }
   };

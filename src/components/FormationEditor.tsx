@@ -1,6 +1,5 @@
 import { useMemo, useState, type DragEvent } from 'react';
 import {
-  AlertCircle,
   ArrowRight,
   CheckCircle2,
   GripVertical,
@@ -69,10 +68,7 @@ export function FormationEditor() {
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
   const [draggingUnitId, setDraggingUnitId] = useState<string | null>(null);
   const [dragOverRow, setDragOverRow] = useState<CombatRow | null>(null);
-  const [feedback, setFeedback] = useState<{
-    kind: 'error' | 'info';
-    message: string;
-  } | null>(null);
+  const [feedback, setFeedback] = useState<string | null>(null);
 
   const formationConfig = useMemo(
     () => sanitizeFormationConfig(adminConfig.formation),
@@ -135,34 +131,54 @@ export function FormationEditor() {
     return parts.length > 0 ? `${parts.join(' · ')} — ${hint}` : hint;
   };
 
-  const attemptMove = (unitId: string, targetRow: CombatRow) => {
-    const res = moveSquadUnitRow(unitId, targetRow);
+  const attemptMove = (
+    unitId: string,
+    targetRow: CombatRow,
+    swapWithUnitId?: string
+  ) => {
+    const res = moveSquadUnitRow(unitId, targetRow, swapWithUnitId);
     if (res.ok) {
       setSelectedUnitId(null);
+      if (res.swappedWithUnitId) {
+        const movedUnit = squadUnits.find((u) => u.id === unitId);
+        const swappedUnit = squadUnits.find(
+          (u) => u.id === res.swappedWithUnitId
+        );
+        if (movedUnit && swappedUnit) {
+          setFeedback(
+            t('formation.swappedMsg', {
+              unitA: movedUnit.name,
+              unitB: swappedUnit.name,
+            })
+          );
+          return;
+        }
+      }
       setFeedback(null);
       return;
     }
-    if (res.reason === 'row_full') {
-      setFeedback({
-        kind: 'error',
-        message: t('formation.rowFullError', {
-          row: getRowLabel(targetRow),
-          count: res.currentCount,
-          cap: res.capacity,
-        }),
-      });
-    } else if (res.reason === 'same_row') {
+    if (res.reason === 'same_row') {
       setSelectedUnitId(null);
     }
   };
 
   const handleUnitTap = (unit: SquadFormationUnit) => {
     setFeedback(null);
+    if (
+      selectedUnit &&
+      selectedUnit.id !== unit.id &&
+      selectedUnit.row !== unit.row &&
+      rowCounts[unit.row] >= formationConfig.rowCapacities[unit.row]
+    ) {
+      attemptMove(selectedUnit.id, unit.row, unit.id);
+      return;
+    }
     setSelectedUnitId((prev) => (prev === unit.id ? null : unit.id));
   };
 
   const handleRowTap = (targetRow: CombatRow) => {
     if (!selectedUnitId) return;
+    if ((formationConfig.rowCapacities[targetRow] ?? 0) <= 0) return;
     attemptMove(selectedUnitId, targetRow);
   };
 
@@ -209,10 +225,7 @@ export function FormationEditor() {
   const handleAutoArrange = () => {
     autoArrangeSquadFormation();
     setSelectedUnitId(null);
-    setFeedback({
-      kind: 'info',
-      message: t('formation.autoArrangedMsg'),
-    });
+    setFeedback(t('formation.autoArrangedMsg'));
   };
 
   return (
@@ -253,19 +266,11 @@ export function FormationEditor() {
       {/* Live Selection Hint / Feedback Banner */}
       {feedback && (
         <div
-          role={feedback.kind === 'error' ? 'alert' : 'status'}
-          className={`rounded-lg border px-3.5 py-2.5 flex items-center gap-2.5 text-[13px] font-medium ${
-            feedback.kind === 'error'
-              ? 'border-red-500/60 bg-red-500/15 text-red-200'
-              : 'border-emerald-500/50 bg-emerald-500/15 text-emerald-200'
-          }`}
+          role="status"
+          className="rounded-lg border px-3.5 py-2.5 flex items-center gap-2.5 text-[13px] font-medium border-emerald-500/50 bg-emerald-500/15 text-emerald-200"
         >
-          {feedback.kind === 'error' ? (
-            <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-          ) : (
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-          )}
-          <span>{feedback.message}</span>
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{feedback}</span>
         </div>
       )}
 
@@ -289,7 +294,9 @@ export function FormationEditor() {
           const isFull = count >= capacity;
           const isDropTarget = dragOverRow === row;
           const canTapRowToMove =
-            selectedUnit !== null && selectedUnit.row !== row;
+            selectedUnit !== null &&
+            selectedUnit.row !== row &&
+            capacity > 0;
           const accent = ROW_ACCENT[row];
 
           return (
@@ -306,7 +313,7 @@ export function FormationEditor() {
                   : accent.border
               } ${canTapRowToMove ? 'cursor-pointer' : ''}`}
             >
-              {/* Row Header: Name, Effect Line, Capacity 2/3, Move Button */}
+              {/* Row Header: Name, Effect Line, Capacity 2/3, Move/Swap Button */}
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="min-w-0 flex-1 space-y-0.5">
                   <div className="flex flex-wrap items-center gap-2">
@@ -323,14 +330,14 @@ export function FormationEditor() {
                       data-testid={`row-capacity-${row}`}
                       className={`font-mono-nums text-[13px] font-bold px-2 py-0.5 rounded border ${
                         isFull
-                          ? 'border-red-500/50 bg-red-500/15 text-red-200'
+                          ? 'border-amber-500/50 bg-amber-500/15 text-amber-200'
                           : accent.badge
                       }`}
                     >
                       {count}/{capacity}
                     </span>
                     {isFull && (
-                      <span className="font-mono-nums text-[13px] font-bold text-red-300">
+                      <span className="font-mono-nums text-[13px] font-bold text-amber-300">
                         {t('formation.rowFullBadge')}
                       </span>
                     )}
@@ -350,12 +357,14 @@ export function FormationEditor() {
                     }}
                     className={`min-h-[44px] px-3.5 inline-flex items-center gap-1.5 rounded-lg border text-[13px] font-semibold transition-colors cursor-pointer shrink-0 ${
                       isFull
-                        ? 'border-red-500/50 bg-red-500/15 text-red-200 hover:bg-red-500/25'
+                        ? 'border-amber-400/70 bg-amber-500/20 text-amber-100 hover:bg-amber-500/30'
                         : 'border-sky-400/70 bg-sky-500/20 text-sky-100 hover:bg-sky-500/30'
                     }`}
                   >
                     <ArrowRight className="w-4 h-4 shrink-0" />
-                    <span>{t('formation.moveHere')}</span>
+                    <span>
+                      {isFull ? t('formation.swapHere') : t('formation.moveHere')}
+                    </span>
                   </button>
                 )}
               </div>

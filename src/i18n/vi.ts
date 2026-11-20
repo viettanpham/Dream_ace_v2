@@ -1373,5 +1373,21 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'log.roundHeader': 'Vòng {round}',
   'log.roundEntriesCount': '{count} dòng',
   'log.spCostTag': '-{cost} SP',
+
+  // F2a+: Hoán đổi đội hình, quy tắc bán đồ, thông báo/tổng kết vòng lặp
+  'formation.swapHere': 'Chạm để hoán đổi vào đây',
+  'formation.swappedMsg': 'Đã đổi chỗ {unitA} ↔ {unitB}.',
+  'shop.equippedOnGear': 'Đang lắp: {gear}',
+  'shop.unequipShortcut': 'Gỡ ra',
+  'shop.lockedProtectBadge': 'Khóa bảo vệ',
+  'shop.unlockShortcut': 'Mở khóa',
+  'inv.bulkSkippedNotice': 'Bỏ qua {skipped} món bảo vệ ({equipped} đang lắp, {locked} khóa)',
+  'inv.bulkSoldWithSkippedFeedback': 'Đã bán {count} linh kiện (+{credits} CR). Bỏ qua {skipped} món đang lắp/khóa.',
+  'inv.bulkAllSkippedFeedback': 'Chưa bán món nào — {skipped} món đã chọn đang lắp hoặc khóa.',
+  'qs.soldWithSkippedNotice': 'Đã bán nhanh {count} linh kiện (+{credits} CR). Bỏ qua {skipped} món đang lắp/khóa.',
+  'battle.loopStopOnDefeat': 'Dừng khi thua',
+  'battle.loopToastRun': 'Trận #{run}: {outcome} · +{exp} EXP · +{credits} CR · +{wp} WP · {loot} vật phẩm',
+  'battle.loopToastVictory': 'Thắng',
+  'battle.loopToastDefeat': 'Thua',
 };
 

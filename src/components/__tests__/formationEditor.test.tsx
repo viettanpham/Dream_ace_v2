@@ -68,7 +68,7 @@ describe('FormationEditor UI (3-Row Squad Editor)', () => {
     expect(autoBtn?.className).toContain('min-h-[44px]');
   });
 
-  it('blocks moving a unit into a full row with a clear alert message, and allows tap-to-move into an open row', () => {
+  it('swaps cleanly when moving into a full row (unit tap & row button) and allows tap-to-move into an open row', () => {
     // Increase middle capacity to 4 so middle has an open slot while front (3/3) and back (2/2) are full
     useGameStore.getState().adminUpdateConfig({
       formation: {
@@ -93,25 +93,81 @@ describe('FormationEditor UI (3-Row Squad Editor)', () => {
     });
     expect(leadBtn!.getAttribute('aria-pressed')).toBe('true');
 
-    // Attempt to tap full Back row (2/2) -> blocked with clear role="alert" message
+    // Back row is full (2/2) -> button offers "Tap to swap here", never shows a dead-end alert
+    const backUnitsBefore = (useGameStore.getState().pilot.squadFormation ?? []).filter(
+      (u) => u.row === 'back'
+    );
+    expect(backUnitsBefore).toHaveLength(2);
+    const targetBackUnit = backUnitsBefore[0];
+    const lastBackUnit = [...backUnitsBefore].sort(
+      (a, b) => a.formationCol - b.formationCol
+    )[1];
+
     const moveToBackBtn = container.querySelector<HTMLButtonElement>(
       '[data-testid="move-to-back"]'
     );
     expect(moveToBackBtn).not.toBeNull();
+    expect(moveToBackBtn!.textContent).toContain('Tap to swap here');
+
+    // Tap a specific unit in the full Back row -> swaps lead unit with that tapped unit
+    const tappedBackUnitBtn = container.querySelector<HTMLButtonElement>(
+      `[data-testid="formation-unit-${targetBackUnit.id}"]`
+    );
+    expect(tappedBackUnitBtn).not.toBeNull();
     act(() => {
-      moveToBackBtn!.click();
+      tappedBackUnitBtn!.click();
     });
 
-    const alertEl = container.querySelector('[role="alert"]');
-    expect(alertEl).not.toBeNull();
-    expect(alertEl?.textContent).toContain('Back Row is full (2/2)');
+    expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(
       useGameStore
         .getState()
         .pilot.squadFormation?.find((u) => u.id === 'ally_player')?.row
+    ).toBe('back');
+    expect(
+      useGameStore
+        .getState()
+        .pilot.squadFormation?.find((u) => u.id === targetBackUnit.id)?.row
+    ).toBe('front');
+    expect(
+      container.querySelector('[data-testid="row-capacity-back"]')?.textContent
+    ).toBe('2/2');
+    expect(
+      container.querySelector('[data-testid="row-capacity-front"]')?.textContent
+    ).toBe('3/3');
+
+    // Now select the swapped unit (now in front) and tap move-to-back row button -> swaps with last unit in back row
+    const swappedBackInFrontBtn = container.querySelector<HTMLButtonElement>(
+      `[data-testid="formation-unit-${targetBackUnit.id}"]`
+    );
+    act(() => {
+      swappedBackInFrontBtn!.click();
+    });
+    const moveToBackBtn2 = container.querySelector<HTMLButtonElement>(
+      '[data-testid="move-to-back"]'
+    );
+    act(() => {
+      moveToBackBtn2!.click();
+    });
+
+    expect(
+      useGameStore
+        .getState()
+        .pilot.squadFormation?.find((u) => u.id === targetBackUnit.id)?.row
+    ).toBe('back');
+    expect(
+      useGameStore
+        .getState()
+        .pilot.squadFormation?.find((u) => u.id === lastBackUnit.id)?.row
     ).toBe('front');
 
-    // Now tap open Middle row (3/4) -> move succeeds and front becomes 2/3, middle becomes 4/4
+    // Tap lead unit (still in back) and tap open Middle row (3/4) -> moves cleanly into open slot
+    const leadNow = container.querySelector<HTMLButtonElement>(
+      '[data-testid="formation-unit-ally_player"]'
+    );
+    act(() => {
+      leadNow!.click();
+    });
     const moveToMidBtn = container.querySelector<HTMLButtonElement>(
       '[data-testid="move-to-middle"]'
     );
@@ -126,8 +182,8 @@ describe('FormationEditor UI (3-Row Squad Editor)', () => {
         .pilot.squadFormation?.find((u) => u.id === 'ally_player')?.row
     ).toBe('middle');
     expect(
-      container.querySelector('[data-testid="row-capacity-front"]')?.textContent
-    ).toBe('2/3');
+      container.querySelector('[data-testid="row-capacity-back"]')?.textContent
+    ).toBe('1/2');
     expect(
       container.querySelector('[data-testid="row-capacity-middle"]')?.textContent
     ).toBe('4/4');

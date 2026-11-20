@@ -91,6 +91,7 @@ import type {
   ActionType,
   AdminConfig,
   AutoRepeatLimit,
+  AutoRepeatRunToast,
   AutoRepeatSession,
   AutoSafetyConfig,
   AutoStopReason,
@@ -185,7 +186,9 @@ interface GameStoreState {
   autoBattleEnabled: boolean;
   tacticsModalOpen: boolean;
   autoRepeatLimit: AutoRepeatLimit;
+  autoRepeatStopOnDefeat: boolean;
   autoRepeatSession: AutoRepeatSession | null;
+  autoRepeatToast: AutoRepeatRunToast | null;
   quickSellUndo: QuickSellUndoState | null;
 
   // Language
@@ -216,12 +219,14 @@ interface GameStoreState {
   // 3-Row Squad Formation actions
   moveSquadUnitRow: (
     unitId: string,
-    targetRow: CombatRow
+    targetRow: CombatRow,
+    swapWithUnitId?: string
   ) => {
     ok: boolean;
     reason?: 'not_found' | 'same_row' | 'row_full';
     currentCount: number;
     capacity: number;
+    swappedWithUnitId?: string;
   };
   autoArrangeSquadFormation: () => void;
 
@@ -252,9 +257,11 @@ interface GameStoreState {
   reorderTacticsRules: (fromIndex: number, toIndex: number) => void;
   updateTacticsSafety: (patch: Partial<AutoSafetyConfig>) => void;
   setAutoRepeatLimit: (limit: AutoRepeatLimit) => void;
+  setAutoRepeatStopOnDefeat: (stopOnDefeat: boolean) => void;
   startAutoRepeat: (limit?: AutoRepeatLimit, sectorId?: string) => void;
   stopAutoRepeat: (reason?: AutoStopReason) => void;
   clearAutoRepeatSummary: () => void;
+  clearAutoRepeatToast: () => void;
 
   // Equipment, Inventory, Quick Sell, Shop, WP Market & Consumables actions
   setInventoryFilterState: (patch: Partial<InventoryFilterState>) => void;
@@ -553,9 +560,14 @@ function finalizeBattleOutcome(
   const enemies = updatedUnits.filter((u) => u.side === 'enemy');
   const aliveAllies = updatedUnits.filter((u) => u.side === 'ally' && u.alive);
 
-  // Update Auto-Repeat batch session if active
+  // Update Auto-Repeat batch session if active (or stopped manually during current run)
   let nextAutoRepeat = state.autoRepeatSession;
-  if (state.autoRepeatSession?.active) {
+  let nextAutoRepeatToast: AutoRepeatRunToast | null = null;
+  if (
+    state.autoRepeatSession &&
+    (state.autoRepeatSession.active ||
+      state.autoRepeatSession.stopReason === 'manual_stop')
+  ) {
     const updatedSession: AutoRepeatSession = {
       ...state.autoRepeatSession,
       completedRuns: state.autoRepeatSession.completedRuns + 1,
@@ -566,20 +578,38 @@ function finalizeBattleOutcome(
         state.autoRepeatSession.totalWarPoints + rewards.warPointsGained,
       totalDrops: [...state.autoRepeatSession.totalDrops, ...droppedItems],
     };
-    const stopCheck = shouldStopAutoRepeat(
-      updatedSession,
-      won ? 'victory' : 'defeat',
-      retreated,
-      nextPilot.inventory.length,
-      BALANCE_CONFIG.maxInventorySize
-    );
-    nextAutoRepeat = stopCheck.stop
-      ? {
+    if (state.autoRepeatSession.active) {
+      const stopCheck = shouldStopAutoRepeat(
+        updatedSession,
+        won ? 'victory' : 'defeat',
+        retreated,
+        nextPilot.inventory.length,
+        BALANCE_CONFIG.maxInventorySize,
+        state.autoRepeatStopOnDefeat
+      );
+      if (stopCheck.stop) {
+        nextAutoRepeat = {
           ...updatedSession,
           active: false,
           stopReason: updatedSession.stopReason ?? stopCheck.reason,
-        }
-      : updatedSession;
+        };
+        nextAutoRepeatToast = null;
+      } else {
+        nextAutoRepeat = updatedSession;
+        nextAutoRepeatToast = {
+          id: `loop_toast_${Date.now()}_${updatedSession.completedRuns}`,
+          runNumber: updatedSession.completedRuns,
+          outcome: won ? 'victory' : 'defeat',
+          expGained: effectiveExpGained,
+          creditsGained: rewards.creditsGained,
+          warPointsGained: rewards.warPointsGained,
+          lootCount: droppedItems.length,
+        };
+      }
+    } else {
+      nextAutoRepeat = updatedSession;
+      nextAutoRepeatToast = null;
+    }
   }
 
   return {
@@ -591,6 +621,7 @@ function finalizeBattleOutcome(
       : nextBattlesUntilRestock,
     hasSaveData: true,
     autoRepeatSession: nextAutoRepeat,
+    autoRepeatToast: nextAutoRepeatToast,
     battle: {
       ...battle,
       units: updatedUnits,
@@ -646,7 +677,9 @@ export const useGameStore = create<GameStoreState>()(
       autoBattleEnabled: false,
       tacticsModalOpen: false,
       autoRepeatLimit: 1,
+      autoRepeatStopOnDefeat: true,
       autoRepeatSession: null,
+      autoRepeatToast: null,
       quickSellUndo: null,
 
       setLanguage: (language) => {
@@ -727,6 +760,9 @@ export const useGameStore = create<GameStoreState>()(
           screen: 'TITLE',
           activeTab: 'gear',
           shopSubTab: 'buy',
+          autoRepeatSession: null,
+          autoRepeatToast: null,
+          autoRepeatStopOnDefeat: true,
         });
       },
 
@@ -824,7 +860,7 @@ export const useGameStore = create<GameStoreState>()(
         return { ok: true, cost };
       },
 
-      moveSquadUnitRow: (unitId, targetRow) => {
+      moveSquadUnitRow: (unitId, targetRow, swapWithUnitId) => {
         const state = get();
         const formationCfg = sanitizeFormationConfig(state.adminConfig.formation);
         const currentFormation =
@@ -839,7 +875,8 @@ export const useGameStore = create<GameStoreState>()(
           currentFormation,
           unitId,
           targetRow,
-          formationCfg
+          formationCfg,
+          { swapIfFull: true, swapWithUnitId }
         );
         if (result.ok) {
           soundFx.playClick();
@@ -857,6 +894,7 @@ export const useGameStore = create<GameStoreState>()(
           reason: result.reason,
           currentCount: result.currentCount,
           capacity: result.capacity,
+          swappedWithUnitId: result.swappedWithUnitId,
         };
       },
 
@@ -1174,6 +1212,11 @@ export const useGameStore = create<GameStoreState>()(
         set({ autoRepeatLimit });
       },
 
+      setAutoRepeatStopOnDefeat: (autoRepeatStopOnDefeat) => {
+        soundFx.playClick();
+        set({ autoRepeatStopOnDefeat });
+      },
+
       startAutoRepeat: (limit, sectorId) => {
         const state = get();
         const chosenLimit = limit ?? state.autoRepeatLimit;
@@ -1183,6 +1226,7 @@ export const useGameStore = create<GameStoreState>()(
         if (state.pilot.inventory.length >= BALANCE_CONFIG.maxInventorySize) {
           set({
             autoRepeatLimit: chosenLimit,
+            autoRepeatToast: null,
             autoRepeatSession: {
               active: false,
               limit: chosenLimit,
@@ -1203,6 +1247,7 @@ export const useGameStore = create<GameStoreState>()(
         set({
           autoRepeatLimit: chosenLimit,
           autoBattleEnabled: true,
+          autoRepeatToast: null,
           autoRepeatSession: {
             active: true,
             limit: chosenLimit,
@@ -1238,8 +1283,10 @@ export const useGameStore = create<GameStoreState>()(
 
       clearAutoRepeatSummary: () => {
         soundFx.playClick();
-        set({ autoRepeatSession: null });
+        set({ autoRepeatSession: null, autoRepeatToast: null });
       },
+
+      clearAutoRepeatToast: () => set({ autoRepeatToast: null }),
 
       selectSector: (sectorId) => {
         const state = get();
@@ -1887,6 +1934,9 @@ export const useGameStore = create<GameStoreState>()(
             ...outcomePatch,
             selectedSectorId: targetSectorId,
             screen: 'BATTLE',
+            ...(!state.autoRepeatSession?.active
+              ? { autoRepeatSession: null, autoRepeatToast: null }
+              : {}),
           });
           return;
         }
@@ -1896,6 +1946,9 @@ export const useGameStore = create<GameStoreState>()(
           battle: battleState,
           screen: 'BATTLE',
           hasSaveData: true,
+          ...(!state.autoRepeatSession?.active
+            ? { autoRepeatSession: null, autoRepeatToast: null }
+            : {}),
         });
       },
 
@@ -2589,6 +2642,7 @@ export const useGameStore = create<GameStoreState>()(
           battle: null,
           screen: 'HANGAR',
           autoRepeatSession: null,
+          autoRepeatToast: null,
         });
       },
 
@@ -3201,6 +3255,7 @@ export const useGameStore = create<GameStoreState>()(
         skipAnimations: state.skipAnimations,
         battleViewMode: state.battleViewMode,
         language: state.language,
+        autoRepeatStopOnDefeat: state.autoRepeatStopOnDefeat,
         adminConfig: state.adminConfig,
       }),
       migrate: (persistedState: unknown, version: number) =>
@@ -3322,6 +3377,10 @@ export const useGameStore = create<GameStoreState>()(
           state.adminUnlocked = readPersistedAdminUnlock();
           state.muted = Boolean(state.muted);
           state.skipAnimations = Boolean(state.skipAnimations);
+          if (typeof state.autoRepeatStopOnDefeat !== 'boolean') {
+            state.autoRepeatStopOnDefeat = true;
+          }
+          state.autoRepeatToast = null;
           soundFx.setMuted(state.muted);
         }
       },

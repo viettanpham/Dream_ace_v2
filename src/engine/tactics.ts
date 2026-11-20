@@ -1126,18 +1126,22 @@ export function evaluateAutoSafety(
 
 /**
  * Pure check for whether an Auto-Repeat batch should stop after a battle concludes.
+ * Inventory full ALWAYS stops the loop regardless of `stopOnDefeat`.
  */
 export function shouldStopAutoRepeat(
   session: AutoRepeatSession,
   outcome: 'victory' | 'defeat',
   retreated: boolean,
   inventoryCount: number,
-  maxInventorySize: number = BALANCE_CONFIG.maxInventorySize
+  maxInventorySize: number = BALANCE_CONFIG.maxInventorySize,
+  stopOnDefeat: boolean = true
 ): { stop: boolean; reason: AutoStopReason | null } {
   if (retreated) return { stop: true, reason: 'retreat' };
-  if (outcome === 'defeat') return { stop: true, reason: 'defeat' };
   if (inventoryCount >= maxInventorySize) {
     return { stop: true, reason: 'inventory_full' };
+  }
+  if (outcome === 'defeat' && stopOnDefeat) {
+    return { stop: true, reason: 'defeat' };
   }
   if (session.limit !== 'infinite' && session.completedRuns >= session.limit) {
     return { stop: true, reason: 'completed' };

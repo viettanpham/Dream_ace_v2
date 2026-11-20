@@ -121,7 +121,9 @@ export function BattleScreen() {
   const skipAnimations = useGameStore((s) => s.skipAnimations);
   const autoBattleEnabled = useGameStore((s) => s.autoBattleEnabled);
   const autoRepeatLimit = useGameStore((s) => s.autoRepeatLimit);
+  const autoRepeatStopOnDefeat = useGameStore((s) => s.autoRepeatStopOnDefeat);
   const autoRepeatSession = useGameStore((s) => s.autoRepeatSession);
+  const autoRepeatToast = useGameStore((s) => s.autoRepeatToast);
   const tacticsModalOpen = useGameStore((s) => s.tacticsModalOpen);
   const battleViewMode = useGameStore((s) => s.battleViewMode);
   const selectTarget = useGameStore((s) => s.selectTarget);
@@ -144,9 +146,13 @@ export function BattleScreen() {
   const toggleAutoBattle = useGameStore((s) => s.toggleAutoBattle);
   const setTacticsModalOpen = useGameStore((s) => s.setTacticsModalOpen);
   const setAutoRepeatLimit = useGameStore((s) => s.setAutoRepeatLimit);
+  const setAutoRepeatStopOnDefeat = useGameStore(
+    (s) => s.setAutoRepeatStopOnDefeat
+  );
   const startAutoRepeat = useGameStore((s) => s.startAutoRepeat);
   const stopAutoRepeat = useGameStore((s) => s.stopAutoRepeat);
   const clearAutoRepeatSummary = useGameStore((s) => s.clearAutoRepeatSummary);
+  const clearAutoRepeatToast = useGameStore((s) => s.clearAutoRepeatToast);
 
   const layoutMode = useBattleLayoutMode();
   const isPhonePortrait = layoutMode === 'phone-portrait';
@@ -181,6 +187,14 @@ export function BattleScreen() {
   useEffect(() => {
     setSelectedLoopCount(autoRepeatLimit);
   }, [autoRepeatLimit]);
+
+  useEffect(() => {
+    if (!autoRepeatToast) return;
+    const timer = window.setTimeout(() => {
+      clearAutoRepeatToast();
+    }, 4200);
+    return () => window.clearTimeout(timer);
+  }, [autoRepeatToast, clearAutoRepeatToast]);
 
   useEffect(() => {
     if (!loopPopoverOpen) return;
@@ -692,7 +706,7 @@ export function BattleScreen() {
             role="dialog"
             data-testid="battle-loop-popover"
             aria-label={t('battle.loopTitle')}
-            className="absolute right-0 top-full mt-1.5 z-50 w-[236px] rounded-lg border border-slate-700 bg-[#0B111D] p-3 shadow-2xl space-y-2.5"
+            className="absolute right-0 top-full mt-1.5 z-50 w-[252px] rounded-lg border border-slate-700 bg-[#0B111D] p-3 shadow-2xl space-y-2.5"
           >
             <div className="flex items-center justify-between gap-2">
               <span className="text-[13px] font-bold text-slate-100">
@@ -729,6 +743,20 @@ export function BattleScreen() {
               })}
             </div>
 
+            <label
+              data-testid="battle-loop-stop-on-defeat-label"
+              className="flex items-center justify-between gap-2 rounded-md border border-slate-800 bg-slate-900/70 px-2.5 py-2 text-[12px] text-slate-200 cursor-pointer select-none"
+            >
+              <span>{t('battle.loopStopOnDefeat')}</span>
+              <input
+                type="checkbox"
+                data-testid="battle-loop-stop-on-defeat"
+                checked={autoRepeatStopOnDefeat}
+                onChange={(e) => setAutoRepeatStopOnDefeat(e.target.checked)}
+                className="h-4 w-4 accent-emerald-400 cursor-pointer"
+              />
+            </label>
+
             <button
               type="button"
               data-testid="battle-loop-start"
@@ -758,7 +786,9 @@ export function BattleScreen() {
 
   const canPlayerManualAct = isPlayerTurn && !autoBattleEnabled;
   const showRepeatBatchSummary = Boolean(
-    battle.summary && autoRepeatSession && !autoRepeatSession.active
+    autoRepeatSession &&
+      !autoRepeatSession.active &&
+      (battle.summary || autoRepeatSession.stopReason === 'inventory_full')
   );
 
   const allyRemainingHp = allies.reduce(
@@ -2507,6 +2537,54 @@ export function BattleScreen() {
           </div>
         )}
       </BottomSheet>
+
+      {/* ==================== AUTO-REPEAT PER-BATTLE TOAST ==================== */}
+      {autoRepeatToast && !showRepeatBatchSummary && (
+        <div
+          role="status"
+          aria-live="polite"
+          data-testid="battle-loop-toast"
+          className={`fixed top-14 left-1/2 -translate-x-1/2 z-50 w-[min(94vw,480px)] rounded-lg border px-3 py-2 shadow-2xl flex items-center justify-between gap-2 text-[12px] font-medium backdrop-blur-sm ${
+            autoRepeatToast.outcome === 'victory'
+              ? 'border-emerald-400/70 bg-[#0B1814]/95 text-emerald-100'
+              : 'border-amber-400/70 bg-[#1B130B]/95 text-amber-100'
+          }`}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <Repeat
+              className={`w-4 h-4 shrink-0 ${
+                autoRepeatToast.outcome === 'victory'
+                  ? 'text-emerald-400'
+                  : 'text-amber-400'
+              }`}
+              aria-hidden="true"
+            />
+            <span className="truncate">
+              {t('battle.loopToastRun', {
+                run: autoRepeatToast.runNumber,
+                outcome: t(
+                  autoRepeatToast.outcome === 'victory'
+                    ? 'battle.loopToastVictory'
+                    : 'battle.loopToastDefeat'
+                ),
+                exp: autoRepeatToast.expGained.toLocaleString(),
+                credits: autoRepeatToast.creditsGained.toLocaleString(),
+                wp: autoRepeatToast.warPointsGained.toLocaleString(),
+                loot: autoRepeatToast.lootCount,
+              })}
+            </span>
+          </div>
+          <button
+            type="button"
+            data-testid="battle-loop-toast-close"
+            onClick={clearAutoRepeatToast}
+            aria-label={t('common.close')}
+            className="min-w-[28px] min-h-[28px] inline-flex items-center justify-center rounded hover:bg-white/10 text-slate-300 cursor-pointer shrink-0"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* ==================== AUTO-REPEAT BATCH SUMMARY MODAL ==================== */}
       <ErrorBoundary
