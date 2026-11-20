@@ -118,6 +118,7 @@ export function createDefaultAdminConfig(): AdminConfig {
     formation: cloneFormationConfig(DEFAULT_FORMATION_CONFIG),
     autoEquip: cloneAutoEquipConfig(DEFAULT_AUTO_EQUIP_CONFIG),
     starterSet: cloneStarterSetConfig(DEFAULT_STARTER_SET_CONFIG),
+    iconCatalogMods: [],
     showRawI18nKeys: false,
   };
 }
@@ -404,6 +405,9 @@ export function migrateSaveData(
     formation: sanitizeFormationConfig(rawAdmin as Record<string, unknown>),
     autoEquip: sanitizeAutoEquipConfig(rawAdmin.autoEquip),
     starterSet: sanitizeStarterSetConfig(rawAdmin.starterSet),
+    iconCatalogMods: Array.isArray(rawAdmin.iconCatalogMods)
+      ? rawAdmin.iconCatalogMods
+      : [],
     showRawI18nKeys: Boolean(rawAdmin.showRawI18nKeys),
   };
 

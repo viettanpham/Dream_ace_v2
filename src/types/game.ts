@@ -1156,6 +1156,48 @@ export interface StarterSetConfig {
   boostScope: StarterBoostScope;
 }
 
+export type IconCatalogKind = 'normal' | 'buff' | 'debuff';
+
+export type IconCatalogGroupId =
+  | 'BS'
+  | 'SS'
+  | 'BF'
+  | 'DB'
+  | 'DT'
+  | 'CC'
+  | 'EV'
+  | 'RW';
+
+export type IconCatalogTag = 'sys' | 'mods';
+
+export interface IconCatalogLayer {
+  symbol: string;
+  color: string;
+  opacity: number;
+}
+
+export interface IconCatalogRow {
+  id: string;
+  nameVi: string;
+  group: IconCatalogGroupId;
+  symbol?: string;
+  layers?: IconCatalogLayer[];
+  color: string;
+  kind: IconCatalogKind;
+  tag: IconCatalogTag;
+}
+
+export interface IconCatalogModRow {
+  id: string;
+  nameVi?: string;
+  group?: IconCatalogGroupId;
+  symbol?: string;
+  layers?: IconCatalogLayer[];
+  color?: string;
+  kind?: IconCatalogKind;
+  tag?: 'mods';
+}
+
 export interface AdminConfig {
   godMode: boolean;
   oneHitKills: boolean;
@@ -1174,6 +1216,7 @@ export interface AdminConfig {
   formation: FormationConfig;
   autoEquip?: AutoEquipConfig;
   starterSet?: StarterSetConfig;
+  iconCatalogMods?: IconCatalogModRow[];
   showRawI18nKeys: boolean;
 }
 
