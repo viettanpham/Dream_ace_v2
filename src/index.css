@@ -1035,3 +1035,9 @@
 .tactical-scroll::-webkit-scrollbar-thumb:hover {
   background: rgba(148, 163, 184, 0.7);
 }
+
+/* Status catalog debuff hexagon frame clip */
+.status-hex-frame {
+  clip-path: polygon(25% 3%, 75% 3%, 98% 50%, 75% 97%, 25% 97%, 2% 50%);
+}
+

@@ -69,6 +69,7 @@ import {
 } from './starter';
 import { createDefaultGearUnit, createDefaultPilotAccount } from './stats';
 import { createDefaultTacticsForClass, sanitizeGearTactics } from './tactics';
+import { sanitizeStatusDisplayDefaults } from '../utils/statusDisplayPrefs';
 
 export const CURRENT_SAVE_VERSION = 9;
 
@@ -408,6 +409,9 @@ export function migrateSaveData(
     iconCatalogMods: Array.isArray(rawAdmin.iconCatalogMods)
       ? rawAdmin.iconCatalogMods
       : [],
+    statusDisplayDefaults: sanitizeStatusDisplayDefaults(
+      rawAdmin.statusDisplayDefaults
+    ),
     showRawI18nKeys: Boolean(rawAdmin.showRawI18nKeys),
   };
 

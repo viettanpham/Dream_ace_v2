@@ -25,7 +25,16 @@ import {
   useI18n,
 } from '../i18n';
 import type { ActiveStatusEffect, CombatUnit, TeamColorRole } from '../types/game';
+import {
+  getCatalogRowForStatus,
+  getFirstExpiringTurns,
+  getStatusVisualKind,
+  sortStatusEffects,
+} from '../data/statusIconMap';
+import { useGameStore } from '../store/useGameStore';
+import { useStatusDisplaySettings } from '../utils/statusDisplayPrefs';
 import { BottomSheet } from './BottomSheet';
+import { CatalogIcon } from './CatalogIcon';
 import { FighterSvg } from './FighterSvg';
 import { SkillIcon } from './SkillIcon';
 import { StatBar } from './StatBar';
@@ -74,6 +83,12 @@ export function UnitDetailSheet({
   onLockAlly,
 }: UnitDetailSheetProps) {
   const { lang, t } = useI18n();
+  const adminStatusDefaults = useGameStore(
+    (s) => s.adminConfig.statusDisplayDefaults
+  );
+  const iconMods = useGameStore((s) => s.adminConfig.iconCatalogMods);
+  const { settings: statusSettings } =
+    useStatusDisplaySettings(adminStatusDefaults);
 
   if (!unit) return null;
 
@@ -311,22 +326,43 @@ export function UnitDetailSheet({
             </div>
           ) : (
             <div className="space-y-1.5">
-              {unit.statuses.map((st) => {
+              {sortStatusEffects(unit.statuses, iconMods).map((st) => {
                 const detail = formatStatusEffectDetail(lang, st, unit);
+                const catalogRow = getCatalogRowForStatus(st.type, iconMods);
+                const visualKind = getStatusVisualKind(st, catalogRow);
+                const turnsLeft = getFirstExpiringTurns(st, undefined, false);
                 return (
                   <div
                     key={st.type}
                     data-testid={`detail-status-${st.type}`}
-                    className={`rounded border px-3 py-2 flex items-start justify-between gap-2 ${
-                      st.isDebuff
+                    className={`rounded border px-3 py-2 flex items-start justify-between gap-2.5 ${
+                      visualKind === 'debuff'
                         ? 'border-red-500/40 bg-red-500/10'
+                        : visualKind === 'buff'
+                        ? 'border-emerald-500/35 bg-emerald-500/10'
                         : 'border-sky-500/35 bg-sky-500/10'
                     }`}
                   >
-                    <div className="min-w-0">
+                    <div className="pt-0.5 shrink-0">
+                      <CatalogIcon
+                        row={catalogRow}
+                        fallbackStatusType={st.type}
+                        kindOverride={visualKind}
+                        size="md"
+                        badgeLayout={statusSettings.badgeLayout}
+                        turnsLeft={turnsLeft}
+                        stacks={1}
+                        allowStack={false}
+                      />
+                    </div>
+                    <div className="min-w-0 flex-1">
                       <div
                         className={`text-xs font-bold font-mono-nums ${
-                          st.isDebuff ? 'text-red-300' : 'text-sky-200'
+                          visualKind === 'debuff'
+                            ? 'text-red-300'
+                            : visualKind === 'buff'
+                            ? 'text-emerald-200'
+                            : 'text-sky-200'
                         }`}
                       >
                         {detail.fullText}

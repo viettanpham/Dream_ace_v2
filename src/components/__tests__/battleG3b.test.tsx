@@ -410,7 +410,7 @@ describe('G3b Components — Radar rings, zero "!" badges, TurnQueueBar & Loop b
       container!.querySelector('[data-testid="radar-status-overflow-p1"]')?.textContent
     ).toBe('+1');
 
-    // Clicking a status icon opens the status tooltip with name, strength, and rounds
+    // Clicking the first sorted status icon (vulnerable, 1 turn debuff sorts first) opens the status tooltip with name, strength, and rounds
     act(() => {
       statusIcons[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -418,8 +418,8 @@ describe('G3b Components — Radar rings, zero "!" badges, TurnQueueBar & Loop b
       '[data-testid="radar-status-tooltip"]'
     );
     expect(statusTooltip).not.toBeNull();
-    expect(statusTooltip!.textContent).toContain('30%');
-    expect(statusTooltip!.textContent).toContain('2 round(s) left');
+    expect(statusTooltip!.textContent).toContain('25%');
+    expect(statusTooltip!.textContent).toContain('1 round(s) left');
 
     // Marker hover tooltip includes full HP, SHD, and SP values
     const p1Marker = container!.querySelector('[data-testid="radar-unit-p1"]');

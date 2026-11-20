@@ -1,43 +1,16 @@
 import { memo, useRef } from 'react';
-import {
-  Anchor,
-  BatteryCharging,
-  Castle,
-  Crosshair,
-  EyeOff,
-  Flame,
-  Gauge,
-  Heart,
-  Info,
-  Lock,
-  Radio,
-  RotateCcw,
-  Shield,
-  ShieldAlert,
-  ShieldOff,
-  Skull,
-  Snowflake,
-  Sparkles,
-  Sun,
-  Swords,
-  Target,
-  Wind,
-  X,
-  Zap,
-} from 'lucide-react';
+import { Crosshair, Info, Lock, Skull, X } from 'lucide-react';
 import { getTeamColorRole, hasStatus } from '../engine/combat';
 import {
-  formatStatusEffectDetail,
   getArchetypeLabel,
   getClassName,
   useI18n,
 } from '../i18n';
+import { useGameStore } from '../store/useGameStore';
 import type {
-  ActiveStatusEffect,
   CombatUnit,
   FloatingPopup,
   MechClassId,
-  StatusEffectType,
   TeamColorRole,
 } from '../types/game';
 import {
@@ -46,6 +19,8 @@ import {
   usePrefersReducedMotion,
 } from '../utils/battleDisplay';
 import { resolveReducedMotion, useFxSettings } from '../utils/battleVfx';
+import { useStatusDisplaySettings } from '../utils/statusDisplayPrefs';
+import { FixedStatusArea } from './FixedStatusArea';
 
 interface BattleUnitCardProps {
   unit: CombatUnit;
@@ -132,80 +107,6 @@ function getPopupColor(tone: FloatingPopup['tone']): string {
       return 'text-sky-200';
     case 'status':
       return 'text-orange-300';
-  }
-}
-
-function getStatusBadgeStyle(st: ActiveStatusEffect): string {
-  switch (st.type) {
-    case 'burn':
-      return 'border-orange-500/50 bg-orange-500/15 text-orange-300';
-    case 'shield_break':
-    case 'def_down':
-    case 'vulnerable':
-      return 'border-red-500/50 bg-red-500/15 text-red-300';
-    case 'slow':
-      return 'border-cyan-500/50 bg-cyan-500/15 text-cyan-300';
-    case 'silence':
-      return 'border-fuchsia-500/50 bg-fuchsia-500/15 text-fuchsia-300';
-    case 'stealth':
-      return 'border-purple-400/60 bg-purple-500/15 text-purple-200';
-    case 'siege_mode':
-    case 'siege_defense':
-    case 'charging':
-      return 'border-amber-400/60 bg-amber-500/15 text-amber-300';
-    case 'invincible':
-    case 'evade_all':
-    case 'regen_hp':
-      return 'border-emerald-400/60 bg-emerald-500/15 text-emerald-300';
-    default:
-      return 'border-sky-400/50 bg-sky-500/15 text-sky-200';
-  }
-}
-
-function StatusMiniIcon({ type }: { type: StatusEffectType }) {
-  const cls = 'w-3 h-3 shrink-0';
-  switch (type) {
-    case 'burn':
-      return <Flame className={cls} />;
-    case 'shield_break':
-      return <ShieldOff className={cls} />;
-    case 'slow':
-      return <Snowflake className={cls} />;
-    case 'silence':
-      return <Radio className={cls} />;
-    case 'stealth':
-      return <EyeOff className={cls} />;
-    case 'vulnerable':
-    case 'def_down':
-      return <ShieldAlert className={cls} />;
-    case 'siege_mode':
-      return <Anchor className={cls} />;
-    case 'siege_defense':
-      return <Castle className={cls} />;
-    case 'charging':
-      return <BatteryCharging className={cls} />;
-    case 'sure_hit':
-      return <Target className={cls} />;
-    case 'counter':
-      return <RotateCcw className={cls} />;
-    case 'evade_all':
-      return <Sparkles className={cls} />;
-    case 'invincible':
-      return <Sun className={cls} />;
-    case 'regen_hp':
-      return <Heart className={cls} />;
-    case 'spd_up':
-      return <Gauge className={cls} />;
-    case 'eva_up':
-      return <Wind className={cls} />;
-    case 'atk_up':
-    case 'primary_dmg_up':
-      return <Swords className={cls} />;
-    case 'skill_dmg_up':
-      return <Zap className={cls} />;
-    case 'def_up':
-    default:
-      return <Shield className={cls} />;
   }
 }
 
@@ -309,6 +210,12 @@ export const BattleUnitCard = memo(function BattleUnitCard({
 }: BattleUnitCardProps) {
   const { lang, t } = useI18n();
   const [fxSettings] = useFxSettings();
+  const adminStatusDefaults = useGameStore(
+    (s) => s.adminConfig.statusDisplayDefaults
+  );
+  const iconMods = useGameStore((s) => s.adminConfig.iconCatalogMods);
+  const { settings: statusSettings, activeUnitRows } =
+    useStatusDisplaySettings(adminStatusDefaults);
   const osReducedMotion = usePrefersReducedMotion();
   const resolvedReducedMotion = resolveReducedMotion(
     fxSettings.reducedMotionMode,
@@ -332,7 +239,7 @@ export const BattleUnitCard = memo(function BattleUnitCard({
         data-unit-down="true"
         onClick={onInspect}
         title={`${unit.name} · ${t('battle.unitDown')}`}
-        className="h-[28px] max-h-[28px] rounded-md border border-slate-800/70 bg-[#070B12]/70 px-2 flex items-center justify-between gap-2 text-[12px] text-slate-500 select-none cursor-pointer hover:bg-slate-900/60"
+        className="w-full min-w-0 h-[28px] max-h-[28px] rounded-md border border-slate-800/70 bg-[#070B12]/70 px-2 flex items-center justify-between gap-2 text-[12px] text-slate-500 select-none cursor-pointer hover:bg-slate-900/60"
       >
         <div className="flex items-center gap-1.5 min-w-0">
           <X className="w-3.5 h-3.5 text-slate-600 shrink-0" aria-hidden="true" />
@@ -422,8 +329,6 @@ export const BattleUnitCard = memo(function BattleUnitCard({
   };
 
   const isClickable = (canTarget && Boolean(onSelect)) || Boolean(onInspect);
-  const visibleStatuses = unit.statuses.slice(0, 3);
-  const overflowStatuses = Math.max(0, unit.statuses.length - 3);
   const roleLabel = unit.archetype
     ? getArchetypeLabel(lang, unit.archetype)
     : getClassName(lang, unit.classId);
@@ -454,36 +359,42 @@ export const BattleUnitCard = memo(function BattleUnitCard({
       onPointerCancel={cancelLongPress}
       onPointerLeave={cancelLongPress}
       style={rowStyle}
-      className={`relative min-h-[50px] rounded-lg border px-2 py-1 flex flex-col gap-1 transition-colors select-none ${rowClass} ${
+      className={`relative w-full min-w-0 overflow-hidden min-h-[50px] rounded-lg border px-2 py-1 flex flex-col gap-1 transition-colors select-none ${rowClass} ${
         isClickable ? 'cursor-pointer' : ''
       } ${isStealthed ? 'border-dashed opacity-75' : ''} ${
         frontBlocked ? 'opacity-65' : ''
       } ${getAnimClass(unit, skipCardMotion)}`}
     >
-      {/* Compact Staggered Floating Popups (max 6, tight-anchored for buffs/status; kept visible under reduced motion as fade-only) */}
-      {!skipAnimations &&
-        popups.slice(-6).map((pop, idx) => {
-          const isSmall = isCompactPopupTone(pop.tone);
-          return (
-            <div
-              key={pop.id}
-              data-testid="damage-popup"
-              data-popup-compact={isSmall ? 'true' : 'false'}
-              style={{
-                top: `${-4 - idx * 16}px`,
-                animationDelay: `${idx * 100}ms`,
-                animationDuration: '800ms',
-              }}
-              className={`pointer-events-none absolute left-1/2 z-20 font-display font-bold tracking-wide drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] whitespace-nowrap ${
-                isSmall
-                  ? 'text-[12px] anim-popup-tight'
-                  : 'text-[15px] anim-popup'
-              } ${getPopupColor(pop.tone)}`}
-            >
-              {pop.text}
-            </div>
-          );
-        })}
+      {/* Compact Staggered Floating Popups strictly clipped & contained inside this card */}
+      {!skipAnimations && popups.length > 0 && (
+        <div
+          data-testid={`card-popups-container-${unit.id}`}
+          className="pointer-events-none absolute inset-0 overflow-hidden z-20"
+        >
+          {popups.slice(-6).map((pop, idx) => {
+            const isSmall = isCompactPopupTone(pop.tone);
+            return (
+              <div
+                key={pop.id}
+                data-testid="damage-popup"
+                data-popup-compact={isSmall ? 'true' : 'false'}
+                style={{
+                  top: `${2 + (idx % 3) * 14}px`,
+                  animationDelay: `${idx * 100}ms`,
+                  animationDuration: '800ms',
+                }}
+                className={`pointer-events-none absolute left-1/2 -translate-x-1/2 font-display font-bold tracking-wide drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] whitespace-nowrap ${
+                  isSmall
+                    ? 'text-[12px] anim-popup-tight'
+                    : 'text-[15px] anim-popup'
+                } ${getPopupColor(pop.tone)}`}
+              >
+                {pop.text}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div className="flex items-center gap-2 min-w-0">
         {/* 1. Role / Team Shape Icon */}
@@ -624,43 +535,22 @@ export const BattleUnitCard = memo(function BattleUnitCard({
         </div>
       </div>
 
-      {/* Dedicated Status Chips Line with exact engine effect values */}
-      {visibleStatuses.length > 0 && (
-        <div
-          data-testid={`card-status-row-${unit.id}`}
-          className="flex flex-wrap items-center gap-1 pl-9"
-        >
-          {visibleStatuses.map((st, idx) => {
-            const detail = formatStatusEffectDetail(lang, st, unit);
-            return (
-              <span
-                key={`${st.type}-${idx}`}
-                data-testid={`card-status-chip-${unit.id}-${idx}`}
-                data-status-type={st.type}
-                title={detail.fullText}
-                className={`px-1.5 py-0.5 rounded border inline-flex items-center gap-1 text-[10px] font-semibold leading-tight font-mono-nums ${getStatusBadgeStyle(
-                  st
-                )}`}
-              >
-                <StatusMiniIcon type={st.type} />
-                {showStatusLabels && (
-                  <span data-testid={`card-status-label-${unit.id}-${idx}`}>
-                    {detail.fullText}
-                  </span>
-                )}
-              </span>
-            );
-          })}
-          {overflowStatuses > 0 && (
-            <span
-              data-testid={`card-status-overflow-${unit.id}`}
-              className="text-[10px] font-mono-nums font-bold text-slate-300 px-0.5"
-            >
-              +{overflowStatuses}
-            </span>
-          )}
-        </div>
-      )}
+      {/* Fixed-Height Status Area (always reserves N rows even when 0 effects) */}
+      <FixedStatusArea
+        statuses={unit.statuses}
+        rows={activeUnitRows}
+        unit={unit}
+        unitTitle={unit.name}
+        badgeLayout={statusSettings.badgeLayout}
+        iconMods={iconMods}
+        showLabels={showStatusLabels}
+        fallbackWidthPx={280}
+        rootTestId={`card-status-row-${unit.id}`}
+        chipTestIdPrefix={`card-status-chip-${unit.id}`}
+        labelTestIdPrefix={`card-status-label-${unit.id}`}
+        overflowTestId={`card-status-overflow-${unit.id}`}
+        className="pl-1"
+      />
     </div>
   );
 });

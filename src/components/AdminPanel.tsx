@@ -56,6 +56,12 @@ import {
   type AppErrorLogEntry,
 } from '../utils/errorLog';
 import { ClassIcon, SlotIcon } from './GameIcons';
+import {
+  BUILTIN_STATUS_DISPLAY_DEFAULTS,
+  clampPlayerStatusRows,
+  clampStatusAreaRows,
+} from '../utils/statusDisplayPrefs';
+import type { StatusBadgeLayout, StatusDisplayDefaults } from '../types/game';
 
 type AdminTab =
   | 'pilot'
@@ -1477,6 +1483,166 @@ export function AdminPanel() {
                   ))}
                 </div>
               </div>
+
+              {/* Status Display Defaults ("Mặc định trạng thái") */}
+              {(() => {
+                const effDefaults: Required<StatusDisplayDefaults> = {
+                  ...BUILTIN_STATUS_DISPLAY_DEFAULTS,
+                  ...(adminConfig.statusDisplayDefaults ?? {}),
+                };
+                const patchStatusDefaults = (
+                  patch: Partial<StatusDisplayDefaults>
+                ) => {
+                  adminUpdateConfig({
+                    statusDisplayDefaults: {
+                      ...effDefaults,
+                      ...patch,
+                    },
+                  });
+                };
+                return (
+                  <div
+                    data-testid="admin-status-defaults-section"
+                    className="p-3.5 rounded-lg border border-slate-800 bg-[#0D1422] space-y-3"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                          {t('admin.statusDefaultsTitle')}
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                          {t('admin.statusDefaultsSubtitle')}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        data-testid="admin-status-defaults-reset"
+                        onClick={() => {
+                          adminUpdateConfig({
+                            statusDisplayDefaults: {
+                              ...BUILTIN_STATUS_DISPLAY_DEFAULTS,
+                            },
+                          });
+                          flash(t('admin.statusDefaultsReset'));
+                        }}
+                        className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-xs font-semibold cursor-pointer shrink-0"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>{t('admin.statusDefaultsReset')}</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                      <label className="space-y-1 block">
+                        <span className="text-[11px] text-slate-400 block">
+                          {t('admin.statusDefaultsBadgeLayout')}
+                        </span>
+                        <select
+                          data-testid="admin-status-default-layout"
+                          value={effDefaults.badgeLayout}
+                          onChange={(e) =>
+                            patchStatusDefaults({
+                              badgeLayout: e.target.value as StatusBadgeLayout,
+                            })
+                          }
+                          className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs"
+                        >
+                          <option value="B">B (Default)</option>
+                          <option value="A">A</option>
+                        </select>
+                      </label>
+
+                      <label className="space-y-1 block">
+                        <span className="text-[11px] text-slate-400 block">
+                          {t('admin.statusDefaultsPhoneRows')}
+                        </span>
+                        <input
+                          type="number"
+                          data-testid="admin-status-default-phone-rows"
+                          min={1}
+                          max={5}
+                          value={effDefaults.phoneRows}
+                          onChange={(e) =>
+                            patchStatusDefaults({
+                              phoneRows: clampStatusAreaRows(
+                                e.target.value,
+                                effDefaults.phoneRows
+                              ),
+                            })
+                          }
+                          className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                        />
+                      </label>
+
+                      <label className="space-y-1 block">
+                        <span className="text-[11px] text-slate-400 block">
+                          {t('admin.statusDefaultsDesktopRows')}
+                        </span>
+                        <input
+                          type="number"
+                          data-testid="admin-status-default-desktop-rows"
+                          min={1}
+                          max={5}
+                          value={effDefaults.desktopRows}
+                          onChange={(e) =>
+                            patchStatusDefaults({
+                              desktopRows: clampStatusAreaRows(
+                                e.target.value,
+                                effDefaults.desktopRows
+                              ),
+                            })
+                          }
+                          className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                        />
+                      </label>
+
+                      <label className="space-y-1 block">
+                        <span className="text-[11px] text-slate-400 block">
+                          {t('admin.statusDefaultsPlayerPhoneRows')}
+                        </span>
+                        <input
+                          type="number"
+                          data-testid="admin-status-default-player-phone-rows"
+                          min={1}
+                          max={2}
+                          value={effDefaults.playerPhoneRows}
+                          onChange={(e) =>
+                            patchStatusDefaults({
+                              playerPhoneRows: clampPlayerStatusRows(
+                                e.target.value,
+                                effDefaults.playerPhoneRows
+                              ),
+                            })
+                          }
+                          className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                        />
+                      </label>
+
+                      <label className="space-y-1 block">
+                        <span className="text-[11px] text-slate-400 block">
+                          {t('admin.statusDefaultsPlayerDesktopRows')}
+                        </span>
+                        <input
+                          type="number"
+                          data-testid="admin-status-default-player-desktop-rows"
+                          min={1}
+                          max={2}
+                          value={effDefaults.playerDesktopRows}
+                          onChange={(e) =>
+                            patchStatusDefaults({
+                              playerDesktopRows: clampPlayerStatusRows(
+                                e.target.value,
+                                effDefaults.playerDesktopRows
+                              ),
+                            })
+                          }
+                          className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Active Battle Live Controls */}
               <div className="p-3.5 rounded-lg border border-amber-500/30 bg-[#0D1422] flex flex-wrap items-center justify-between gap-3">

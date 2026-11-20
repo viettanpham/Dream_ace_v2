@@ -1198,6 +1198,18 @@ export interface IconCatalogModRow {
   tag?: 'mods';
 }
 
+export type StatusBadgeLayout = 'A' | 'B';
+
+export interface StatusDisplaySettings {
+  badgeLayout: StatusBadgeLayout;
+  phoneRows: number;
+  desktopRows: number;
+  playerPhoneRows: number;
+  playerDesktopRows: number;
+}
+
+export type StatusDisplayDefaults = Partial<StatusDisplaySettings>;
+
 export interface AdminConfig {
   godMode: boolean;
   oneHitKills: boolean;
@@ -1217,6 +1229,7 @@ export interface AdminConfig {
   autoEquip?: AutoEquipConfig;
   starterSet?: StarterSetConfig;
   iconCatalogMods?: IconCatalogModRow[];
+  statusDisplayDefaults?: StatusDisplayDefaults;
   showRawI18nKeys: boolean;
 }
 

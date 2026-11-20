@@ -191,7 +191,7 @@ const STATUS_SHORT_LABELS: Record<
   slow: { en: 'Slow', vi: 'Chậm' },
   silence: { en: 'Silence', vi: 'Câm' },
   stealth: { en: 'Stealth', vi: 'Ẩn' },
-  vulnerable: { en: 'Expose', vi: 'Lộ' },
+  vulnerable: { en: 'Vuln', vi: 'TổnTh' },
   def_up: { en: 'DEF+', vi: 'THỦ+' },
   def_down: { en: 'DEF-', vi: 'THỦ-' },
   eva_up: { en: 'EVA+', vi: 'NÉ+' },

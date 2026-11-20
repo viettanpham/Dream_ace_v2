@@ -24,6 +24,7 @@ import {
   Settings,
   Shield,
   ShieldAlert,
+  Sliders,
   Sparkles,
   Square,
   X,
@@ -46,7 +47,6 @@ import { getEffectiveItemStats } from '../engine/equipment';
 import { canUnitUseSkill } from '../engine/skills';
 import {
   formatCombatLogMessage,
-  formatStatusEffectDetail,
   getAutoStopReasonLabel,
   getBattleSkillReason,
   getClassName,
@@ -61,7 +61,7 @@ import {
   getTeamTagLabel,
   useI18n,
 } from '../i18n';
-import { useGameStore } from '../store/useGameStore';
+import { ENABLE_ADMIN_CP, useGameStore } from '../store/useGameStore';
 import type {
   AutoRepeatLimit,
   BattleSpeed,
@@ -91,6 +91,7 @@ import {
   type CombatLogChannel,
   type CombatLogDisplayMode,
 } from '../utils/combatLogFormat';
+import { useStatusDisplaySettings } from '../utils/statusDisplayPrefs';
 import { BattleRadarView } from './BattleRadarView';
 import { BattleStatsModal } from './BattleStatsModal';
 import { BattleUnitCard } from './BattleUnitCard';
@@ -98,6 +99,7 @@ import { BottomSheet } from './BottomSheet';
 import { CombatLogList } from './CombatLogList';
 import { EffectsSettingsPanel } from './EffectsSettingsPanel';
 import { ErrorBoundary } from './ErrorBoundary';
+import { FixedStatusArea } from './FixedStatusArea';
 import { SkillIcon } from './SkillIcon';
 import { StatBar } from './StatBar';
 import { TurnQueueBar } from './TurnQueueBar';
@@ -157,9 +159,15 @@ export function BattleScreen() {
   const stopAutoRepeat = useGameStore((s) => s.stopAutoRepeat);
   const clearAutoRepeatSummary = useGameStore((s) => s.clearAutoRepeatSummary);
   const clearAutoRepeatToast = useGameStore((s) => s.clearAutoRepeatToast);
+  const toggleAdminPanel = useGameStore((s) => s.toggleAdminPanel);
 
   const layoutMode = useBattleLayoutMode();
   const isPhonePortrait = layoutMode === 'phone-portrait';
+  const {
+    settings: statusSettings,
+    activeUnitRows,
+    activePlayerRows,
+  } = useStatusDisplaySettings(adminConfig.statusDisplayDefaults);
 
   const [inspectedSkillId, setInspectedSkillId] = useState<string | null>(null);
   const [inspectedUnitId, setInspectedUnitId] = useState<string | null>(null);
@@ -1162,7 +1170,7 @@ export function BattleScreen() {
           style={{ touchAction: 'pan-y' }}
           className="flex-1 min-h-0 overflow-y-auto tactical-scroll touch-pan-y p-1"
         >
-          <div className="grid grid-cols-2 gap-2 items-start">
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2 items-start">
             {renderThreeRowCardSide('ally', allies, false)}
             {renderThreeRowCardSide('enemy', enemies, false)}
           </div>
@@ -1315,26 +1323,19 @@ export function BattleScreen() {
             </div>
           )}
 
-          {sidebarUnit.statuses.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {sidebarUnit.statuses.slice(0, 4).map((st) => {
-                const detail = formatStatusEffectDetail(lang, st, sidebarUnit);
-                return (
-                  <span
-                    key={st.type}
-                    data-testid={`sidebar-status-chip-${st.type}`}
-                    className={`px-1.5 py-0.5 rounded border text-[11px] font-mono-nums ${
-                      st.isDebuff
-                        ? 'border-red-500/45 bg-red-500/12 text-red-200'
-                        : 'border-sky-500/45 bg-sky-500/12 text-sky-200'
-                    }`}
-                  >
-                    {detail.fullText}
-                  </span>
-                );
-              })}
-            </div>
-          )}
+          <FixedStatusArea
+            statuses={sidebarUnit.statuses}
+            rows={activeUnitRows}
+            unit={sidebarUnit}
+            unitTitle={sidebarUnit.name}
+            badgeLayout={statusSettings.badgeLayout}
+            iconMods={adminConfig.iconCatalogMods}
+            showLabels={fxSettings.showStatusLabels}
+            fallbackWidthPx={290}
+            rootTestId="sidebar-status-area"
+            chipTestIdPrefix="sidebar-status-chip"
+            overflowTestId="sidebar-status-overflow"
+          />
         </div>
 
         <div className="shrink-0 min-h-[36px] flex items-end">
@@ -1395,83 +1396,95 @@ export function BattleScreen() {
           data-testid="battle-player-status-bar"
           data-collapsed="true"
           data-destroyed={isDestroyed ? 'true' : 'false'}
-          className={`shrink-0 mx-1.5 mt-1 rounded border px-2 py-1 flex items-center justify-between gap-2 text-[11px] font-mono-nums ${
+          className={`shrink-0 mx-1.5 mt-1 rounded border px-2 py-1 space-y-1 text-[11px] font-mono-nums ${
             isDestroyed
               ? 'border-slate-700 bg-slate-900/85 text-slate-400 grayscale'
               : 'border-emerald-500/35 bg-[#09121D] text-slate-100'
           }`}
         >
-          <div className="flex items-center gap-1.5 min-w-0 shrink">
-            <span
-              className={`font-semibold truncate ${
-                isDestroyed
-                  ? 'text-slate-400 line-through max-w-[160px]'
-                  : 'text-emerald-300 max-w-[92px]'
-              }`}
-            >
-              {ownUnit.name}
-            </span>
-            {isDestroyed && (
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 min-w-0 shrink">
               <span
-                data-testid="battle-player-destroyed-badge"
-                className="px-1.5 py-0.2 rounded bg-slate-800 border border-slate-600 text-slate-300 text-[10px] font-bold shrink-0"
+                className={`font-semibold truncate ${
+                  isDestroyed
+                    ? 'text-slate-400 line-through max-w-[160px]'
+                    : 'text-emerald-300 max-w-[92px]'
+                }`}
               >
-                {t('battle.playerDestroyed')}
+                {ownUnit.name}
               </span>
+              {isDestroyed && (
+                <span
+                  data-testid="battle-player-destroyed-badge"
+                  className="px-1.5 py-0.2 rounded bg-slate-800 border border-slate-600 text-slate-300 text-[10px] font-bold shrink-0"
+                >
+                  {t('battle.playerDestroyed')}
+                </span>
+              )}
+            </div>
+
+            {!isDestroyed && (
+              <>
+                <div className="flex-1 min-w-[90px] flex flex-col gap-0.5">
+                  <div
+                    data-testid="battle-player-hp-shield-bar"
+                    className="relative h-2 w-full rounded-full bg-slate-900 border border-slate-800 overflow-hidden"
+                  >
+                    <div
+                      data-testid="battle-player-hp-fill"
+                      style={{ width: `${hpPct}%` }}
+                      className={`h-full transition-all duration-200 ${hpFillClass}`}
+                    />
+                    {shieldOverlayPct > 0 && (
+                      <div
+                        data-testid="battle-player-shield-overlay"
+                        style={{ width: `${shieldOverlayPct}%` }}
+                        className="absolute inset-y-0 left-0 bg-sky-400/70 border-r border-cyan-200 transition-all duration-200"
+                      />
+                    )}
+                  </div>
+                  <div
+                    data-testid="battle-player-sp-bar"
+                    className="h-1 w-full rounded-full bg-slate-900 overflow-hidden"
+                  >
+                    <div
+                      style={{ width: `${spPct}%` }}
+                      className="h-full transition-all duration-200 bg-purple-400"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0 text-[10px]">
+                  <span data-testid="battle-player-hp-numbers" className="text-slate-200">
+                    {ownUnit.hp}/{ownUnit.derived.maxHp}
+                  </span>
+                  {ownUnit.shield > 0 && (
+                    <span data-testid="battle-player-shield-numbers" className="text-sky-300">
+                      +{ownUnit.shield}
+                    </span>
+                  )}
+                  <span data-testid="battle-player-sp-numbers" className="text-purple-300">
+                    SP {ownUnit.sp}
+                  </span>
+                </div>
+              </>
             )}
           </div>
 
-          {!isDestroyed && (
-            <>
-              <div className="flex-1 min-w-[90px] flex flex-col gap-0.5">
-                <div
-                  data-testid="battle-player-hp-shield-bar"
-                  className="relative h-2 w-full rounded-full bg-slate-900 border border-slate-800 overflow-hidden"
-                >
-                  <div
-                    data-testid="battle-player-hp-fill"
-                    style={{ width: `${hpPct}%` }}
-                    className={`h-full transition-all duration-200 ${hpFillClass}`}
-                  />
-                  {shieldOverlayPct > 0 && (
-                    <div
-                      data-testid="battle-player-shield-overlay"
-                      style={{ width: `${shieldOverlayPct}%` }}
-                      className="absolute inset-y-0 left-0 bg-sky-400/70 border-r border-cyan-200 transition-all duration-200"
-                    />
-                  )}
-                </div>
-                <div
-                  data-testid="battle-player-sp-bar"
-                  className="h-1 w-full rounded-full bg-slate-900 overflow-hidden"
-                >
-                  <div
-                    style={{ width: `${spPct}%` }}
-                    className="h-full transition-all duration-200 bg-purple-400"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center gap-1.5 shrink-0 text-[10px]">
-                <span data-testid="battle-player-hp-numbers" className="text-slate-200">
-                  {ownUnit.hp}/{ownUnit.derived.maxHp}
-                </span>
-                {ownUnit.shield > 0 && (
-                  <span data-testid="battle-player-shield-numbers" className="text-sky-300">
-                    +{ownUnit.shield}
-                  </span>
-                )}
-                <span data-testid="battle-player-sp-numbers" className="text-purple-300">
-                  SP {ownUnit.sp}
-                </span>
-                {ownUnit.statuses.length > 0 && (
-                  <span className="px-1 rounded bg-slate-800 text-amber-200 text-[10px]">
-                    {formatStatusEffectDetail(lang, ownUnit.statuses[0], ownUnit).shortText}
-                  </span>
-                )}
-              </div>
-            </>
-          )}
+          <FixedStatusArea
+            statuses={isDestroyed ? [] : ownUnit.statuses}
+            rows={activePlayerRows}
+            unit={ownUnit}
+            unitTitle={ownUnit.name}
+            badgeLayout={statusSettings.badgeLayout}
+            iconMods={adminConfig.iconCatalogMods}
+            showLabels={fxSettings.showStatusLabels}
+            fallbackWidthPx={320}
+            compact
+            rootTestId="battle-player-status-effects"
+            chipTestIdPrefix="player-status-chip"
+            overflowTestId="player-status-overflow"
+          />
         </div>
       );
     }
@@ -1557,28 +1570,20 @@ export function BattleScreen() {
           </div>
         )}
 
-        {ownUnit.statuses.length > 0 && !isDestroyed && (
-          <div
-            data-testid="battle-player-status-effects"
-            className="flex flex-wrap gap-1 pt-0.5"
-          >
-            {ownUnit.statuses.map((st) => {
-              const detail = formatStatusEffectDetail(lang, st, ownUnit);
-              return (
-                <span
-                  key={st.type}
-                  className={`px-1.5 py-0.5 rounded border text-[11px] font-mono-nums ${
-                    st.isDebuff
-                      ? 'border-red-500/45 bg-red-500/12 text-red-200'
-                      : 'border-sky-500/45 bg-sky-500/12 text-sky-200'
-                  }`}
-                >
-                  {detail.fullText}
-                </span>
-              );
-            })}
-          </div>
-        )}
+        <FixedStatusArea
+          statuses={isDestroyed ? [] : ownUnit.statuses}
+          rows={activePlayerRows}
+          unit={ownUnit}
+          unitTitle={ownUnit.name}
+          badgeLayout={statusSettings.badgeLayout}
+          iconMods={adminConfig.iconCatalogMods}
+          showLabels={fxSettings.showStatusLabels}
+          fallbackWidthPx={440}
+          compact
+          rootTestId="battle-player-status-effects"
+          chipTestIdPrefix="player-status-chip"
+          overflowTestId="player-status-overflow"
+        />
       </div>
     );
   };
@@ -2514,6 +2519,23 @@ export function BattleScreen() {
                   <span>{t('battle.retreat')}</span>
                 </button>
               ))}
+
+            {ENABLE_ADMIN_CP && (
+              <div className="pt-2 border-t border-slate-800/70">
+                <button
+                  type="button"
+                  data-testid="battle-more-admin-btn"
+                  onClick={() => {
+                    closeMoreActions();
+                    toggleAdminPanel();
+                  }}
+                  className="w-full min-h-[38px] px-3 rounded-lg border border-slate-800/80 bg-slate-950/60 hover:bg-slate-900 text-slate-400 hover:text-slate-200 text-[12px] font-medium flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                >
+                  <Sliders className="w-3.5 h-3.5 text-slate-500" />
+                  <span>{t('statusUi.adminBtnMuted')}</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </BottomSheet>

@@ -82,6 +82,7 @@ import {
   learnOrUpgradeSkillOnGear,
   unequipSkillFromGearBar,
 } from '../engine/skills';
+import { sanitizeStatusDisplayDefaults } from '../utils/statusDisplayPrefs';
 import {
   fillEmptyStarterSlotsForPilot,
   grantStarterSetToGear,
@@ -3393,12 +3394,19 @@ export const useGameStore = create<GameStoreState>()(
           const nextStarterSet = patch.starterSet
             ? sanitizeStarterSetConfig(patch.starterSet)
             : sanitizeStarterSetConfig(state.adminConfig.starterSet);
+          const nextStatusDefaults =
+            patch.statusDisplayDefaults !== undefined
+              ? sanitizeStatusDisplayDefaults(patch.statusDisplayDefaults)
+              : sanitizeStatusDisplayDefaults(
+                  state.adminConfig.statusDisplayDefaults
+                );
           const nextAdminConfig: AdminConfig = {
             ...state.adminConfig,
             ...patch,
             formation: nextFormation,
             autoEquip: nextAutoEquip,
             starterSet: nextStarterSet,
+            statusDisplayDefaults: nextStatusDefaults,
           };
           let updatedPilot =
             patch.formation &&
@@ -3688,6 +3696,9 @@ export const useGameStore = create<GameStoreState>()(
               formation: sanitizedFormation,
               autoEquip: sanitizeAutoEquipConfig(rawAdmin.autoEquip),
               starterSet: sanitizeStarterSetConfig(rawAdmin.starterSet),
+              statusDisplayDefaults: sanitizeStatusDisplayDefaults(
+                rawAdmin.statusDisplayDefaults
+              ),
               rewardMultiplier:
                 typeof state.adminConfig.rewardMultiplier === 'number' &&
                 Number.isFinite(state.adminConfig.rewardMultiplier) &&

@@ -337,7 +337,7 @@ describe('Task G3d — i18n audit, detailed status chips, readable combat log, p
     expect(shieldBreakDetail.fullText).toBe('Vỡ Khiên: Khóa Khiên (2 lượt)');
     expect(defDownDetail.fullText).toBe('Giảm Giáp: -30% Giáp (2 lượt)');
 
-    // Card view shows full value text on chips
+    // Card view shows compact StatusChip value text ONLY (no effect names or "(N lượt)")
     act(() => {
       root!.render(
         createElement(BattleUnitCard, {
@@ -352,8 +352,10 @@ describe('Task G3d — i18n audit, detailed status chips, readable combat log, p
         })
       );
     });
-    expect(container!.textContent).toContain('Làm chậm: -30% Tốc (2 lượt)');
-    expect(container!.textContent).toContain('Hồi Phục HP: +93/lượt (2 lượt)');
+    expect(container!.textContent).toContain('-30% Tốc');
+    expect(container!.textContent).toContain('+93 HP/lượt');
+    expect(container!.textContent).not.toContain('Làm chậm:');
+    expect(container!.textContent).not.toContain('(2 lượt)');
 
     // UnitDetailSheet shows full value text
     act(() => {
@@ -402,13 +404,17 @@ describe('Task G3d — i18n audit, detailed status chips, readable combat log, p
     });
 
     const slowChip = container!.querySelector(
-      '[data-testid="radar-status-icon-u_status-0"]'
+      '[data-testid^="radar-status-icon-u_status-"][data-status-type="slow"]'
     ) as SVGGElement;
     expect(slowChip).not.toBeNull();
-    // Radar chip stays compact (visible <text> is just the symbol, optional label is short)
-    expect(slowChip.querySelector('text')?.textContent).toBe('❄');
+    // Radar chip stays compact with Material Symbol catalog icon (no full name on radar)
+    expect(slowChip.getAttribute('data-status-symbol')).toBe('ac_unit');
+    const visibleForeignText =
+      slowChip.querySelector('foreignObject')?.textContent ?? '';
+    expect(visibleForeignText).toContain('ac_unit');
+    expect(visibleForeignText).not.toContain('Làm chậm:');
     const shortRadarLabel = container!.querySelector(
-      '[data-testid="radar-status-label-u_status-0"]'
+      '[data-testid="radar-status-label-u_status-2"]'
     );
     if (shortRadarLabel) {
       expect(shortRadarLabel.textContent).not.toContain('Làm chậm:');
@@ -613,7 +619,7 @@ describe('Task G3d — i18n audit, detailed status chips, readable combat log, p
     expect(
       playerBar.querySelector('[data-testid="battle-player-status-effects"]')
         ?.textContent
-    ).toContain('Làm chậm: -30% Tốc (2 lượt)');
+    ).toContain('-30% Tốc');
 
     // Destroyed state turns gray with "Đã phát nổ"
     const destroyedPlayer = makeUnit('u_player', 'Kaelen', 'ally', {
