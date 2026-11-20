@@ -1,6 +1,7 @@
 import { BALANCE_CONFIG } from '../data/balance';
 import { EMPTY_STAT_BLOCK, MECH_CLASS_LIST } from '../data/classes';
 import {
+  BUILTIN_ITEM_REGISTRY_TAG,
   EMPTY_EQUIPPED_SLOT_IDS,
   EQUIPMENT_SLOTS,
   getItemTemplate,
@@ -33,6 +34,7 @@ import type {
   PilotAccount,
   QuickSellFilterConfig,
   ShopItemListing,
+  StarterSetConfig,
   WpMarketOffer,
 } from '../types/game';
 import {
@@ -41,6 +43,11 @@ import {
   sanitizeAutoEquipConfig,
 } from '../data/autoEquipConfig';
 import { cloneFormationConfig, DEFAULT_FORMATION_CONFIG } from '../data/formationConfig';
+import {
+  cloneStarterSetConfig,
+  DEFAULT_STARTER_SET_CONFIG,
+  sanitizeStarterSetConfig,
+} from '../data/starterConfig';
 import { generateItemInstance } from './equipment';
 import {
   createDefaultSquadFormation,
@@ -56,10 +63,14 @@ import {
   hasOperationalShipyard,
 } from './shop';
 import { isSkillAllowedForClass, MAX_ACTIVE_SKILL_BAR } from './skills';
+import {
+  fillEmptyStarterSlotsForPilot,
+  grantStarterSetToGear,
+} from './starter';
 import { createDefaultGearUnit, createDefaultPilotAccount } from './stats';
 import { createDefaultTacticsForClass, sanitizeGearTactics } from './tactics';
 
-export const CURRENT_SAVE_VERSION = 8;
+export const CURRENT_SAVE_VERSION = 9;
 
 export interface PersistedCampaignState {
   pilot: PilotAccount;
@@ -106,6 +117,7 @@ export function createDefaultAdminConfig(): AdminConfig {
     shopPriceMultiplier: 1.0,
     formation: cloneFormationConfig(DEFAULT_FORMATION_CONFIG),
     autoEquip: cloneAutoEquipConfig(DEFAULT_AUTO_EQUIP_CONFIG),
+    starterSet: cloneStarterSetConfig(DEFAULT_STARTER_SET_CONFIG),
     showRawI18nKeys: false,
   };
 }
@@ -113,24 +125,25 @@ export function createDefaultAdminConfig(): AdminConfig {
 export function createFreshCampaignState(
   name = 'Vance',
   starterClassId: MechClassId = 'striker',
-  rng: () => number = Math.random
+  rng: () => number = Math.random,
+  starterConfig?: StarterSetConfig
 ): PersistedCampaignState {
-  const starterWeapon = generateItemInstance(
-    {
-      templateId: 'tpl_mw_pulse_cannon',
-      tier: 1,
-      rarity: 'common',
-      requiredLevel: 1,
-    },
-    rng
-  );
-  const pilot: PilotAccount = {
-    ...createDefaultPilotAccount(name, starterClassId, [starterWeapon]),
+  const adminConfig = createDefaultAdminConfig();
+  if (starterConfig) {
+    adminConfig.starterSet = sanitizeStarterSetConfig(starterConfig);
+  }
+  const basePilot: PilotAccount = {
+    ...createDefaultPilotAccount(name, starterClassId, []),
     consumables: [],
     activeExpBoostBattles: 0,
     activeEnchantBonusPct: 0,
   };
-  const adminConfig = createDefaultAdminConfig();
+  const { pilot } = grantStarterSetToGear(
+    basePilot,
+    starterClassId,
+    adminConfig.starterSet ?? DEFAULT_STARTER_SET_CONFIG,
+    rng
+  );
   return {
     pilot,
     shopStock: generateCategorizedShopStock(
@@ -233,6 +246,7 @@ function convertLegacyItemInstance(
     typeof obj.rolledBaseStats === 'object'
   ) {
     const tpl = getItemTemplate(obj.templateId)!;
+    const isStarter = Boolean(obj.isStarter);
     return {
       instanceId: obj.instanceId,
       templateId: tpl.id,
@@ -251,12 +265,19 @@ function convertLegacyItemInstance(
       affixes: Array.isArray(obj.affixes) ? obj.affixes : [],
       suffixId: typeof obj.suffixId === 'string' ? obj.suffixId : null,
       rollQuality: Math.max(1, Math.min(100, Number(obj.rollQuality) || 50)),
-      price: Math.max(60, Number(obj.price) || tpl.basePrice),
+      price: isStarter
+        ? Math.max(1, Number(obj.price) || 12)
+        : Math.max(60, Number(obj.price) || tpl.basePrice),
       enchantLevel: Math.max(
         0,
         Math.min(BALANCE_CONFIG.enchantMaxLevel, Number(obj.enchantLevel) || 0)
       ),
       specialTraits: tpl.specialTraits ? { ...tpl.specialTraits } : undefined,
+      isStarter,
+      registryTag:
+        typeof obj.registryTag === 'string' && obj.registryTag.trim().length > 0
+          ? obj.registryTag
+          : (tpl.registryTag ?? BUILTIN_ITEM_REGISTRY_TAG),
       locked: Boolean(obj.locked),
       favorited: Boolean(obj.favorited),
       isNew: Boolean(obj.isNew),
@@ -382,6 +403,7 @@ export function migrateSaveData(
         : 1.0,
     formation: sanitizeFormationConfig(rawAdmin as Record<string, unknown>),
     autoEquip: sanitizeAutoEquipConfig(rawAdmin.autoEquip),
+    starterSet: sanitizeStarterSetConfig(rawAdmin.starterSet),
     showRawI18nKeys: Boolean(rawAdmin.showRawI18nKeys),
   };
 
@@ -620,6 +642,15 @@ export function migrateSaveData(
       formationCustomized,
     };
 
+    const finalMigratedPilot =
+      version < CURRENT_SAVE_VERSION && adminConfig.starterSet?.enabled
+        ? fillEmptyStarterSlotsForPilot(
+            migratedPilot,
+            adminConfig.starterSet,
+            rng
+          ).pilot
+        : migratedPilot;
+
     const rawWpOffers: WpMarketOffer[] = Array.isArray(raw.wpMarketOffers)
       ? (raw.wpMarketOffers as WpMarketOffer[]).filter(
           (o) => Boolean(o && typeof o === 'object' && typeof o.id === 'string')
@@ -629,20 +660,20 @@ export function migrateSaveData(
     const hasAvailableShopStock = rawShop.some((it) => !it.soldOut);
 
     return {
-      pilot: migratedPilot,
+      pilot: finalMigratedPilot,
       shopStock:
         rawShop.length > 0 && hasAvailableShopStock
           ? rawShop
           : generateCategorizedShopStock(
               activeGearLevel,
-              buildShopOptionsFromState(migratedPilot, adminConfig),
+              buildShopOptionsFromState(finalMigratedPilot, adminConfig),
               rng
             ),
       wpMarketOffers:
         rawWpOffers.length > 0
           ? rawWpOffers
           : generateWpMarketOffers(
-              { shipyardBonus: hasOperationalShipyard(migratedPilot) },
+              { shipyardBonus: hasOperationalShipyard(finalMigratedPilot) },
               rng
             ),
       battlesUntilRestock,
@@ -780,15 +811,24 @@ export function migrateSaveData(
     formationCustomized: false,
   };
 
+  const finalLegacyPilot =
+    version < CURRENT_SAVE_VERSION && adminConfig.starterSet?.enabled
+      ? fillEmptyStarterSlotsForPilot(
+          legacyPilot,
+          adminConfig.starterSet,
+          rng
+        ).pilot
+      : legacyPilot;
+
   return {
-    pilot: legacyPilot,
+    pilot: finalLegacyPilot,
     shopStock: generateCategorizedShopStock(
       migratedLevel,
-      buildShopOptionsFromState(legacyPilot, adminConfig),
+      buildShopOptionsFromState(finalLegacyPilot, adminConfig),
       rng
     ),
     wpMarketOffers: generateWpMarketOffers(
-      { shipyardBonus: hasOperationalShipyard(legacyPilot) },
+      { shipyardBonus: hasOperationalShipyard(finalLegacyPilot) },
       rng
     ),
     battlesUntilRestock,

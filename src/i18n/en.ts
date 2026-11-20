@@ -1416,7 +1416,32 @@ export const EN_TRANSLATIONS = {
   'ae.traitSpRegen': 'SP/turn',
   'ae.traitEvaMod': 'EVA mod',
   'ae.traitLongRange': 'Long Range',
+
+  // Starter Set (ST1) & Combat Log Expand/Collapse All
+  'inv.starterBadge': 'Starter',
+  'admin.tab.starter': 'Starter Set',
+  'admin.starter.title': 'Starter Equipment Set',
+  'admin.starter.subtitle':
+    'Common Lv1 gear auto-granted and equipped on new game, Gear unlock, or filling empty slots on save migration.',
+  'admin.starter.enabledLabel': 'Enable Starter Set Auto-Grant',
+  'admin.starter.slotsTitle': 'Per-Slot Starter Config (6 Fixed Slots)',
+  'admin.starter.templateLabel': 'Item Template',
+  'admin.starter.levelLabel': 'Level',
+  'admin.starter.qualityLabel': 'Quality (%)',
+  'admin.starter.rookieBoostLabel': 'Rookie Boost (+%)',
+  'admin.starter.rookieBoostHint':
+    'Multiplier for starter level & quality (e.g. +50% → 1.5x, keeping required level equippable).',
+  'admin.starter.boostScopeLabel': 'Apply Scope',
+  'admin.starter.scopeNewOnly': 'Only newly granted Gears',
+  'admin.starter.scopeFillEmpty': 'Also fill currently empty slots',
+  'admin.starter.applyEmptyBtn': 'Fill Empty Slots Now',
+  'admin.starter.appliedEmptyFeedback': 'Granted {count} Starter item(s) into empty slots.',
+  'admin.starter.noneEmptyFeedback': 'No empty slots found or Starter Set is disabled.',
+  'admin.starter.resetBtn': 'Reset Defaults',
+  'log.expandAll': 'Expand All',
+  'log.collapseAll': 'Collapse All',
 } as const;
 
 export type TranslationKey = keyof typeof EN_TRANSLATIONS;
+
 

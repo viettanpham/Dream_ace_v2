@@ -162,11 +162,13 @@ export const ENCHANT_CONFIG = {
 
 export const DROP_CONFIG = BALANCE_CONFIG.dropConfig;
 
+export const BUILTIN_ITEM_REGISTRY_TAG = 'sys' as const;
+
 /**
  * Distinct, identity-driven Item Templates (>= 5 templates per slot).
  * Each template defines distinct stat profile, combat traits, and roll ranges.
  */
-export const ITEM_TEMPLATES: ItemTemplate[] = [
+const RAW_ITEM_TEMPLATES: ItemTemplate[] = [
   // ================= MAIN WEAPONS (5 templates, universal) =================
   {
     id: 'tpl_mw_pulse_cannon',
@@ -817,6 +819,11 @@ export const ITEM_TEMPLATES: ItemTemplate[] = [
     specialTraits: { critBonusPct: 6, splashPct: 14 },
   },
 ];
+
+export const ITEM_TEMPLATES: ItemTemplate[] = RAW_ITEM_TEMPLATES.map((tpl) => ({
+  ...tpl,
+  registryTag: tpl.registryTag ?? BUILTIN_ITEM_REGISTRY_TAG,
+}));
 
 export const ITEM_TEMPLATES_BY_ID: Record<string, ItemTemplate> =
   ITEM_TEMPLATES.reduce((acc, tpl) => {

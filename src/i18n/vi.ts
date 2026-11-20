@@ -1418,5 +1418,30 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'ae.traitSpRegen': 'Hồi SP',
   'ae.traitEvaMod': 'Né thêm',
   'ae.traitLongRange': 'Tầm xa',
+
+  // Bộ Starter (ST1) & Nhật ký Mở hết / Thu hết
+  'inv.starterBadge': 'Starter',
+  'admin.tab.starter': 'Bộ Starter',
+  'admin.starter.title': 'Bộ trang bị Starter',
+  'admin.starter.subtitle':
+    'Trang bị Common Lv1 tự cấp & tự lắp khi bắt đầu game mới, mở khóa Gear mới hoặc lấp ô trống khi migrate save.',
+  'admin.starter.enabledLabel': 'Bật cấp phát Bộ Starter',
+  'admin.starter.slotsTitle': 'Cấu hình 6 ô trang bị Starter',
+  'admin.starter.templateLabel': 'Mẫu trang bị',
+  'admin.starter.levelLabel': 'Cấp',
+  'admin.starter.qualityLabel': 'Chất lượng (%)',
+  'admin.starter.rookieBoostLabel': 'Hỗ trợ tân thủ (+%)',
+  'admin.starter.rookieBoostHint':
+    'Hệ số nhân cho cấp & chất lượng Starter (ví dụ +50% → 1.5x, vẫn giữ Lv yêu cầu khớp Gear mới).',
+  'admin.starter.boostScopeLabel': 'Phạm vi áp dụng',
+  'admin.starter.scopeNewOnly': 'Chỉ Gear mới được cấp / mở khóa',
+  'admin.starter.scopeFillEmpty': 'Cũng lấp ô đang trống trên Gear đang có',
+  'admin.starter.applyEmptyBtn': 'Lấp ô trống ngay',
+  'admin.starter.appliedEmptyFeedback': 'Đã cấp {count} món Starter vào các ô trống.',
+  'admin.starter.noneEmptyFeedback': 'Không có ô trống nào hoặc Bộ Starter đang tắt.',
+  'admin.starter.resetBtn': 'Khôi phục mặc định',
+  'log.expandAll': 'Mở hết',
+  'log.collapseAll': 'Thu hết',
 };
+
 

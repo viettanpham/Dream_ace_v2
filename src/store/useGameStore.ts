@@ -7,6 +7,7 @@ import { EQUIPMENT_SLOTS } from '../data/items';
 import { getNextSectorId, SECTORS_CATALOG } from '../data/maps';
 import { WINGMAN_CHAT_KEYS } from '../data/pilots';
 import { SHOP_STOCK_CONFIG } from '../data/shopConfig';
+import { sanitizeStarterSetConfig } from '../data/starterConfig';
 import { getSkillById, OPENING_CARDS_LIST } from '../data/skills';
 import {
   calculateBattleRewards,
@@ -75,6 +76,10 @@ import {
   learnOrUpgradeSkillOnGear,
   unequipSkillFromGearBar,
 } from '../engine/skills';
+import {
+  fillEmptyStarterSlotsForPilot,
+  grantStarterSetToGear,
+} from '../engine/starter';
 import {
   allocateGearStats,
   applyExpToGear,
@@ -379,6 +384,7 @@ interface GameStoreState {
   adminTriggerEnemyAttack: (sectorId: string) => void;
   adminUnlockAllGears: () => void;
   adminUnlockAllSectors: () => void;
+  adminApplyStarterToEmptySlots: () => number;
   adminUpdateConfig: (patch: Partial<AdminConfig>) => void;
   adminExportSaveJson: () => string;
   adminImportSaveJson: (rawJson: string) => { ok: boolean; error?: string };
@@ -738,7 +744,12 @@ export const useGameStore = create<GameStoreState>()(
             (pilotName ?? state.pilot.name).trim().slice(0, 18) || 'Vance';
           const chosenClass =
             starterClassId ?? state.pilot.activeGearId ?? 'striker';
-          const fresh = createFreshCampaignState(cleanName, chosenClass);
+          const fresh = createFreshCampaignState(
+            cleanName,
+            chosenClass,
+            Math.random,
+            state.adminConfig.starterSet
+          );
           set({
             ...fresh,
             language: state.language,
@@ -862,20 +873,27 @@ export const useGameStore = create<GameStoreState>()(
           ? enforceFormationCapacities(baseFormation, state.adminConfig.formation)
           : autoPlaceFormation(baseFormation, state.adminConfig.formation);
 
-        set({
-          pilot: {
-            ...state.pilot,
-            credits: state.pilot.credits - cost,
-            activeGearId: classId,
-            squadFormation: nextFormation,
-            gears: {
-              ...state.pilot.gears,
-              [classId]: {
-                ...targetGear,
-                owned: true,
-              },
+        const unlockedPilot: PilotAccount = {
+          ...state.pilot,
+          credits: state.pilot.credits - cost,
+          activeGearId: classId,
+          squadFormation: nextFormation,
+          gears: {
+            ...state.pilot.gears,
+            [classId]: {
+              ...targetGear,
+              owned: true,
             },
           },
+        };
+        const withStarter = grantStarterSetToGear(
+          unlockedPilot,
+          classId,
+          state.adminConfig.starterSet
+        ).pilot;
+
+        set({
+          pilot: withStarter,
           hasSaveData: true,
         });
         return { ok: true, cost };
@@ -3206,11 +3224,26 @@ export const useGameStore = create<GameStoreState>()(
       adminUnlockAllGears: () => {
         set((state) => {
           const nextGears = { ...state.pilot.gears };
+          const newlyUnlocked: MechClassId[] = [];
           for (const cls of MECH_CLASS_LIST) {
+            if (!nextGears[cls.id].owned) {
+              newlyUnlocked.push(cls.id);
+            }
             nextGears[cls.id] = { ...nextGears[cls.id], owned: true };
           }
+          let nextPilot: PilotAccount = {
+            ...state.pilot,
+            gears: nextGears,
+          };
+          for (const clsId of newlyUnlocked) {
+            nextPilot = grantStarterSetToGear(
+              nextPilot,
+              clsId,
+              state.adminConfig.starterSet
+            ).pilot;
+          }
           return {
-            pilot: { ...state.pilot, gears: nextGears },
+            pilot: nextPilot,
             hasSaveData: true,
           };
         });
@@ -3226,6 +3259,24 @@ export const useGameStore = create<GameStoreState>()(
         }));
       },
 
+      adminApplyStarterToEmptySlots: () => {
+        let filledCount = 0;
+        set((state) => {
+          const starterCfg = sanitizeStarterSetConfig(state.adminConfig.starterSet);
+          if (!starterCfg.enabled) {
+            return {};
+          }
+          const res = fillEmptyStarterSlotsForPilot(state.pilot, starterCfg);
+          filledCount = res.filledCount;
+          if (res.filledCount === 0) return {};
+          return {
+            pilot: res.pilot,
+            hasSaveData: true,
+          };
+        });
+        return filledCount;
+      },
+
       adminUpdateConfig: (patch) => {
         set((state) => {
           const nextFormation = patch.formation
@@ -3234,13 +3285,17 @@ export const useGameStore = create<GameStoreState>()(
           const nextAutoEquip = patch.autoEquip
             ? sanitizeAutoEquipConfig(patch.autoEquip)
             : sanitizeAutoEquipConfig(state.adminConfig.autoEquip);
+          const nextStarterSet = patch.starterSet
+            ? sanitizeStarterSetConfig(patch.starterSet)
+            : sanitizeStarterSetConfig(state.adminConfig.starterSet);
           const nextAdminConfig: AdminConfig = {
             ...state.adminConfig,
             ...patch,
             formation: nextFormation,
             autoEquip: nextAutoEquip,
+            starterSet: nextStarterSet,
           };
-          const updatedPilot =
+          let updatedPilot =
             patch.formation &&
             state.pilot.squadFormation &&
             state.pilot.squadFormation.length > 0
@@ -3252,6 +3307,16 @@ export const useGameStore = create<GameStoreState>()(
                   ),
                 }
               : state.pilot;
+          if (
+            patch.starterSet &&
+            nextStarterSet.enabled &&
+            nextStarterSet.boostScope === 'fill_empty_slots'
+          ) {
+            updatedPilot = fillEmptyStarterSlotsForPilot(
+              updatedPilot,
+              nextStarterSet
+            ).pilot;
+          }
           return {
             adminConfig: nextAdminConfig,
             pilot: updatedPilot,
@@ -3374,6 +3439,7 @@ export const useGameStore = create<GameStoreState>()(
               ...state.adminConfig,
               formation: sanitizedFormation,
               autoEquip: sanitizeAutoEquipConfig(rawAdmin.autoEquip),
+              starterSet: sanitizeStarterSetConfig(rawAdmin.starterSet),
               rewardMultiplier:
                 typeof state.adminConfig.rewardMultiplier === 'number' &&
                 Number.isFinite(state.adminConfig.rewardMultiplier) &&

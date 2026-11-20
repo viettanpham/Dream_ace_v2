@@ -351,6 +351,8 @@ export interface ItemSpecialTraits {
   longRange?: boolean;
 }
 
+export type ItemRegistryTag = 'sys' | (string & {});
+
 export interface ItemTemplate {
   id: string;
   nameEn: string;
@@ -368,6 +370,7 @@ export interface ItemTemplate {
   secondaryRange?: [number, number];
   affixPool: StatKey[];
   specialTraits?: ItemSpecialTraits;
+  registryTag?: ItemRegistryTag;
 }
 
 export interface ItemAffix {
@@ -391,6 +394,8 @@ export interface ItemInstance {
   price: number;
   enchantLevel: number; // 0 to 10
   specialTraits?: ItemSpecialTraits;
+  registryTag?: ItemRegistryTag;
+  isStarter?: boolean;
   locked?: boolean;
   favorited?: boolean;
   isNew?: boolean;
@@ -1136,6 +1141,21 @@ export interface AutoEquipUndoSnapshot {
   appliedAt: number;
 }
 
+export type StarterBoostScope = 'new_gears_only' | 'fill_empty_slots';
+
+export interface StarterSlotConfig {
+  templateId: string;
+  level: number;
+  quality: number;
+}
+
+export interface StarterSetConfig {
+  enabled: boolean;
+  slots: Record<EquipmentSlot, StarterSlotConfig>;
+  rookieBoostPct: number;
+  boostScope: StarterBoostScope;
+}
+
 export interface AdminConfig {
   godMode: boolean;
   oneHitKills: boolean;
@@ -1153,6 +1173,7 @@ export interface AdminConfig {
   shopPriceMultiplier: number;
   formation: FormationConfig;
   autoEquip?: AutoEquipConfig;
+  starterSet?: StarterSetConfig;
   showRawI18nKeys: boolean;
 }
 

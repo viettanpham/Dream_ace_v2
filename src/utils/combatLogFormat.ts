@@ -48,6 +48,8 @@ export type CombatLogValueTone =
 export const DOCKED_LOG_MAX_ENTRIES = 200;
 export const POPUP_LOG_PAGE_SIZE = 200;
 export const COMBAT_LOG_MODE_STORAGE_KEY = 'starfront_combat_log_mode_v1';
+export const COMBAT_LOG_EXPAND_ALL_STORAGE_KEY =
+  'starfront_combat_log_expand_all_v1';
 export const SHOW_STATUS_LABELS_STORAGE_KEY = FX_SETTINGS_STORAGE_KEY;
 
 const DEBUFF_STATUS_TYPES = new Set<StatusEffectType>([
@@ -145,6 +147,30 @@ export function writeCombatLogMode(mode: CombatLogDisplayMode): void {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return;
     window.localStorage.setItem(COMBAT_LOG_MODE_STORAGE_KEY, mode);
+  } catch {
+    // Ignore storage quota or private mode failures
+  }
+}
+
+export function readCombatLogExpandAll(): boolean {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return false;
+    return (
+      window.localStorage.getItem(COMBAT_LOG_EXPAND_ALL_STORAGE_KEY) === '1'
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function writeCombatLogExpandAll(expandAll: boolean): void {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    if (expandAll) {
+      window.localStorage.setItem(COMBAT_LOG_EXPAND_ALL_STORAGE_KEY, '1');
+    } else {
+      window.localStorage.removeItem(COMBAT_LOG_EXPAND_ALL_STORAGE_KEY);
+    }
   } catch {
     // Ignore storage quota or private mode failures
   }
