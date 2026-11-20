@@ -146,7 +146,7 @@ function bytesToHex(bytes: Uint8Array): string {
   return out;
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
+export function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
   const chunkSize = 0x8000;
   for (let i = 0; i < bytes.length; i += chunkSize) {
@@ -156,7 +156,7 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-function base64ToBytes(b64: string): Uint8Array | null {
+export function base64ToBytes(b64: string): Uint8Array | null {
   try {
     const binary = atob(b64);
     const bytes = new Uint8Array(binary.length);
@@ -176,12 +176,11 @@ export async function sha256Hex(text: string): Promise<string> {
   return bytesToHex(new Uint8Array(digest));
 }
 
-async function deriveAesGcmKey(
+export async function derivePbkdf2KeyBits(
   pin: string,
   salt: Uint8Array,
-  iterations: number,
-  usage: KeyUsage[]
-): Promise<CryptoKey> {
+  iterations: number = SAVE_PBKDF2_ITERATIONS
+): Promise<Uint8Array> {
   const cryptoApi = getWebCrypto();
   const pinBytes = new TextEncoder().encode(pin);
   const keyMaterial = await cryptoApi.subtle.importKey(
@@ -189,11 +188,11 @@ async function deriveAesGcmKey(
     pinBytes,
     'PBKDF2',
     false,
-    ['deriveKey']
+    ['deriveBits']
   );
   // Copy salt into a fresh ArrayBuffer-backed Uint8Array for strict TS / cross-realm safety
   const cleanSalt = new Uint8Array(salt);
-  return cryptoApi.subtle.deriveKey(
+  const bits = await cryptoApi.subtle.deriveBits(
     {
       name: 'PBKDF2',
       salt: cleanSalt,
@@ -201,6 +200,22 @@ async function deriveAesGcmKey(
       hash: 'SHA-256',
     },
     keyMaterial,
+    256
+  );
+  return new Uint8Array(bits);
+}
+
+export async function deriveAesGcmKey(
+  pin: string,
+  salt: Uint8Array,
+  iterations: number,
+  usage: KeyUsage[]
+): Promise<CryptoKey> {
+  const cryptoApi = getWebCrypto();
+  const keyBits = await derivePbkdf2KeyBits(pin, salt, iterations);
+  return cryptoApi.subtle.importKey(
+    'raw',
+    new Uint8Array(keyBits),
     {
       name: 'AES-GCM',
       length: 256,
