@@ -61,7 +61,13 @@ import {
   createFreshCampaignState,
   CURRENT_SAVE_VERSION,
   migrateSaveData,
+  type PersistedCampaignState,
 } from '../engine/migration';
+import {
+  isValidSavePayloadShape,
+  SAVE_IMPORT_BACKUP_STORAGE_KEY,
+  validateImportSaveVersion,
+} from '../engine/saveExport';
 import { DEFAULT_QUICK_SELL_CONFIG } from '../engine/quickSell';
 import {
   buildShopOptionsFromState,
@@ -170,6 +176,87 @@ function writePersistedAdminUnlock(enabled: boolean): void {
   }
 }
 
+let inMemoryImportBackupJson: string | null = null;
+
+function getSafeLocalStorage(): Storage | null {
+  try {
+    if (typeof globalThis !== 'undefined' && 'localStorage' in globalThis && globalThis.localStorage) {
+      return globalThis.localStorage;
+    }
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return window.localStorage;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function readImportBackupRaw(): string | null {
+  const storage = getSafeLocalStorage();
+  if (storage) {
+    try {
+      return storage.getItem(SAVE_IMPORT_BACKUP_STORAGE_KEY);
+    } catch {
+      return inMemoryImportBackupJson;
+    }
+  }
+  return inMemoryImportBackupJson;
+}
+
+function writeImportBackupRaw(raw: string): void {
+  inMemoryImportBackupJson = raw;
+  const storage = getSafeLocalStorage();
+  if (storage) {
+    try {
+      storage.setItem(SAVE_IMPORT_BACKUP_STORAGE_KEY, raw);
+    } catch {
+      // Fall back to in-memory backup if storage quota/availability fails
+    }
+  }
+}
+
+function clearImportBackupRaw(): void {
+  inMemoryImportBackupJson = null;
+  const storage = getSafeLocalStorage();
+  if (storage) {
+    try {
+      storage.removeItem(SAVE_IMPORT_BACKUP_STORAGE_KEY);
+    } catch {
+      // Ignore storage failures
+    }
+  }
+}
+
+function hasPersistedImportBackup(): boolean {
+  const raw = readImportBackupRaw();
+  return typeof raw === 'string' && raw.length > 0;
+}
+
+export type SaveSnapshotPayload = PersistedCampaignState & {
+  autoRepeatStopOnDefeat: boolean;
+};
+
+function buildSaveSnapshotFromState(state: GameStoreState): SaveSnapshotPayload {
+  return {
+    pilot: state.pilot,
+    shopStock: state.shopStock,
+    wpMarketOffers: state.wpMarketOffers,
+    battlesUntilRestock: state.battlesUntilRestock,
+    inventoryFilterState: state.inventoryFilterState,
+    quickSellConfig: state.quickSellConfig,
+    selectedSectorId: state.selectedSectorId,
+    hasSaveData: state.hasSaveData,
+    muted: state.muted,
+    battleSpeed: state.battleSpeed,
+    skipAnimations: state.skipAnimations,
+    battleViewMode: state.battleViewMode,
+    language: state.language,
+    autoRepeatStopOnDefeat: state.autoRepeatStopOnDefeat,
+    adminConfig: state.adminConfig,
+  };
+}
+
 export type ShopSubTab = 'buy' | 'sell' | 'warpoints';
 
 interface GameStoreState {
@@ -204,6 +291,7 @@ interface GameStoreState {
   autoRepeatToast: AutoRepeatRunToast | null;
   quickSellUndo: QuickSellUndoState | null;
   autoEquipUndo: AutoEquipUndoSnapshot | null;
+  hasImportBackup: boolean;
 
   // Language
   setLanguage: (lang: Language) => void;
@@ -388,6 +476,20 @@ interface GameStoreState {
   adminUpdateConfig: (patch: Partial<AdminConfig>) => void;
   adminExportSaveJson: () => string;
   adminImportSaveJson: (rawJson: string) => { ok: boolean; error?: string };
+
+  // Portable Save Export / Import with One-Time Backup Undo (SV1a)
+  exportSaveStateSnapshot: () => SaveSnapshotPayload;
+  importSaveFromEnvelope: (
+    rawState: unknown,
+    saveVersion: number
+  ) =>
+    | { ok: true; migratedVersion: number }
+    | {
+        ok: false;
+        code: 'BATTLE_ACTIVE' | 'VERSION_TOO_NEW' | 'CORRUPT';
+        error: string;
+      };
+  undoSaveImport: () => { ok: boolean; error?: string };
 }
 
 function findNextAliveTurnIndex(
@@ -706,6 +808,7 @@ export const useGameStore = create<GameStoreState>()(
       autoRepeatToast: null,
       quickSellUndo: null,
       autoEquipUndo: null,
+      hasImportBackup: hasPersistedImportBackup(),
 
       setLanguage: (language) => {
         soundFx.playClick();
@@ -776,6 +879,7 @@ export const useGameStore = create<GameStoreState>()(
       resetCampaign: () => {
         const state = get();
         soundFx.playClick();
+        clearImportBackupRaw();
         const fresh = createFreshCampaignState('Vance', 'striker');
         set({
           ...fresh,
@@ -795,6 +899,7 @@ export const useGameStore = create<GameStoreState>()(
           autoRepeatStopOnDefeat: true,
           quickSellUndo: null,
           autoEquipUndo: null,
+          hasImportBackup: false,
         });
       },
 
@@ -3375,6 +3480,149 @@ export const useGameStore = create<GameStoreState>()(
           };
         }
       },
+
+      exportSaveStateSnapshot: () => {
+        return buildSaveSnapshotFromState(get());
+      },
+
+      importSaveFromEnvelope: (rawState, saveVersion) => {
+        const state = get();
+        const isBattleActive =
+          state.screen === 'BATTLE' &&
+          Boolean(state.battle && !state.battle.summary);
+        if (isBattleActive) {
+          return {
+            ok: false,
+            code: 'BATTLE_ACTIVE',
+            error: 'Cannot import save while a battle is active.',
+          };
+        }
+
+        const verCheck = validateImportSaveVersion(
+          saveVersion,
+          CURRENT_SAVE_VERSION
+        );
+        if (!verCheck.ok) {
+          return {
+            ok: false,
+            code: 'VERSION_TOO_NEW',
+            error: verCheck.error.message,
+          };
+        }
+
+        if (!isValidSavePayloadShape(rawState, saveVersion)) {
+          return {
+            ok: false,
+            code: 'CORRUPT',
+            error: 'Imported save payload is missing pilot data.',
+          };
+        }
+
+        const migrated = migrateSaveData(rawState, saveVersion);
+        const rawObj = rawState as Record<string, unknown>;
+        const importedAutoRepeatStopOnDefeat =
+          typeof rawObj.autoRepeatStopOnDefeat === 'boolean'
+            ? rawObj.autoRepeatStopOnDefeat
+            : state.autoRepeatStopOnDefeat;
+
+        // Store a one-time backup of the current save under a separate localStorage key before overwriting
+        const currentBackup = {
+          version: CURRENT_SAVE_VERSION,
+          backedUpAt: new Date().toISOString(),
+          state: buildSaveSnapshotFromState(state),
+        };
+        writeImportBackupRaw(JSON.stringify(currentBackup));
+
+        soundFx.setMuted(migrated.muted);
+        set({
+          ...migrated,
+          autoRepeatStopOnDefeat: importedAutoRepeatStopOnDefeat,
+          battle: null,
+          screen: migrated.hasSaveData ? 'HANGAR' : 'TITLE',
+          activeTab: 'gear',
+          shopSubTab: 'buy',
+          autoBattleEnabled: false,
+          autoRepeatSession: null,
+          autoRepeatToast: null,
+          quickSellUndo: null,
+          autoEquipUndo: null,
+          tacticsModalOpen: false,
+          adminPanelOpen: false,
+          hasImportBackup: true,
+        });
+
+        return { ok: true, migratedVersion: saveVersion };
+      },
+
+      undoSaveImport: () => {
+        const state = get();
+        const isBattleActive =
+          state.screen === 'BATTLE' &&
+          Boolean(state.battle && !state.battle.summary);
+        if (isBattleActive) {
+          return {
+            ok: false,
+            error: 'Cannot undo import while a battle is active.',
+          };
+        }
+
+        const rawBackup = readImportBackupRaw();
+        if (!rawBackup) {
+          set({ hasImportBackup: false });
+          return { ok: false, error: 'No import backup available.' };
+        }
+
+        try {
+          const parsed = JSON.parse(rawBackup) as {
+            version?: number;
+            state?: unknown;
+          };
+          const backupVersion =
+            typeof parsed.version === 'number'
+              ? parsed.version
+              : CURRENT_SAVE_VERSION;
+          const backupPayload = parsed.state ?? parsed;
+          if (!isValidSavePayloadShape(backupPayload, backupVersion)) {
+            clearImportBackupRaw();
+            set({ hasImportBackup: false });
+            return { ok: false, error: 'Backup data is invalid.' };
+          }
+
+          const restored = migrateSaveData(backupPayload, backupVersion);
+          const rawObj = backupPayload as Record<string, unknown>;
+          const restoredAutoRepeatStopOnDefeat =
+            typeof rawObj.autoRepeatStopOnDefeat === 'boolean'
+              ? rawObj.autoRepeatStopOnDefeat
+              : state.autoRepeatStopOnDefeat;
+
+          clearImportBackupRaw();
+          soundFx.setMuted(restored.muted);
+          set({
+            ...restored,
+            autoRepeatStopOnDefeat: restoredAutoRepeatStopOnDefeat,
+            battle: null,
+            screen: restored.hasSaveData ? 'HANGAR' : 'TITLE',
+            activeTab: 'gear',
+            shopSubTab: 'buy',
+            autoBattleEnabled: false,
+            autoRepeatSession: null,
+            autoRepeatToast: null,
+            quickSellUndo: null,
+            autoEquipUndo: null,
+            tacticsModalOpen: false,
+            adminPanelOpen: false,
+            hasImportBackup: false,
+          });
+          return { ok: true };
+        } catch (err) {
+          clearImportBackupRaw();
+          set({ hasImportBackup: false });
+          return {
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
+      },
     }),
     {
       name: 'starfront_mech_rpg_save_v1',
@@ -3516,6 +3764,7 @@ export const useGameStore = create<GameStoreState>()(
           state.tacticsModalOpen = false;
           state.quickSellUndo = null;
           state.autoEquipUndo = null;
+          state.hasImportBackup = hasPersistedImportBackup();
           state.adminUnlocked = readPersistedAdminUnlock();
           state.muted = Boolean(state.muted);
           state.skipAnimations = Boolean(state.skipAnimations);

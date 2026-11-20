@@ -24,6 +24,7 @@ import {
 import { BottomSheet } from './BottomSheet';
 import { EffectsSettingsPanel } from './EffectsSettingsPanel';
 import { LanguageToggle } from './LanguageToggle';
+import { SaveTransferSection } from './SaveTransferSection';
 import { StatBar } from './StatBar';
 
 type LeaveDestination = 'TITLE' | 'HANGAR';
@@ -438,6 +439,9 @@ export function TopHud() {
 
           {/* Effects Settings (Full/Compact/Off, Reduced Motion, Status Labels, Debug & Test Preview) */}
           <EffectsSettingsPanel />
+
+          {/* Portable Save Export / Import with Optional PIN */}
+          <SaveTransferSection />
 
           {/* Utility Buttons */}
           <div className="grid grid-cols-1 gap-2">

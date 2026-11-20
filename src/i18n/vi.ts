@@ -1442,6 +1442,59 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'admin.starter.resetBtn': 'Khôi phục mặc định',
   'log.expandAll': 'Mở hết',
   'log.collapseAll': 'Thu hết',
+
+  // Xuất / Nhập Save có PIN tuỳ chọn (SV1a)
+  'save.sectionTitle': 'Sao lưu & Chuyển file Save',
+  'save.sectionDesc':
+    'Xuất tiến trình chiến dịch ra file JSON hoặc nhập file sao lưu từ máy khác.',
+  'save.exportBtn': 'Xuất save',
+  'save.importBtn': 'Nhập save',
+  'save.pinLabel': 'Mã PIN tuỳ chọn (4–8 chữ số)',
+  'save.pinPlaceholder': '4–8 chữ số (tuỳ chọn)',
+  'save.pinConfirmLabel': 'Xác nhận PIN',
+  'save.pinConfirmPlaceholder': 'Nhập lại mã PIN',
+  'save.pinClientNote':
+    'Lưu ý: PIN chỉ bảo vệ file ở phía máy khách (client-side); nếu quên sẽ không khôi phục được.',
+  'save.importDisabledInBattle':
+    'Không thể nhập save khi đang trong trận đấu. Hãy kết thúc hoặc rời trận trước.',
+  'save.exportSuccess': 'Đã xuất file save: {filename}',
+  'save.importSuccess': 'Đã nhập file save thành công.',
+  'save.undoBtn': 'Hoàn tác import',
+  'save.undoAvailableNote':
+    'Đã lưu một bản sao dự phòng tạm thời của save trước đó.',
+  'save.undoSuccess': 'Đã khôi phục save trước đó từ bản dự phòng.',
+  'save.pinPromptTitle': 'File Save có mật khẩu — Nhập PIN',
+  'save.pinPromptDesc':
+    'File save này đã được mã hóa bằng PIN. Nhập mã PIN gồm 4–8 chữ số để giải mã.',
+  'save.pinPromptLabel': 'Mã PIN của file',
+  'save.pinPromptPlaceholder': 'Nhập PIN 4–8 chữ số',
+  'save.pinPromptSubmit': 'Giải mã & Xem trước',
+  'save.confirmTitle': 'Xác nhận Nhập Save',
+  'save.confirmDesc':
+    'Thay thế save hiện tại sẽ giữ lại 1 bản dự phòng tạm thời để hoàn tác nếu cần.',
+  'save.metaExportedAt': 'Thời điểm xuất',
+  'save.metaVersion': 'Phiên bản save',
+  'save.metaWillMigrate': 'Phiên bản cũ (v{from} → v{to}) — sẽ tự động nâng cấp',
+  'save.metaProgress': 'Tiến trình chiến dịch',
+  'save.progressPilotLine': '{name} · {gear} Lv.{level} · {owned}/4 Gear',
+  'save.progressStatsLine':
+    '{credits} CR · {wp} WP · {wins} Thắng · {captured}/{total} Khu vực · Tháng {month}',
+  'save.confirmReplaceBtn': 'Ghi đè Save',
+  'save.errInvalidPinFormat': 'Mã PIN phải gồm đúng 4 đến 8 chữ số.',
+  'save.errPinMismatch': 'Mã PIN và xác nhận PIN không khớp.',
+  'save.errInvalidJson': 'File không hợp lệ: không đúng định dạng JSON.',
+  'save.errInvalidEnvelope': 'Cấu trúc file save không hợp lệ.',
+  'save.errWrongApp': 'Sai ứng dụng: đây không phải file save của Dream Ace.',
+  'save.errChecksumMismatch':
+    'Sai checksum: file save đã bị chỉnh sửa hoặc hư hỏng.',
+  'save.errWrongPin': 'Sai mã PIN. Vui lòng kiểm tra và thử lại.',
+  'save.errCorrupt': 'File save bị hỏng hoặc thiếu dữ liệu bắt buộc.',
+  'save.errVersionTooNew':
+    'Không hỗ trợ phiên bản save v{found} (bản hiện tại hỗ trợ tối đa v{current}).',
+  'save.errBattleActive': 'Không thể nhập save khi đang trong trận chiến.',
+  'save.errCryptoUnsupported':
+    'Trình duyệt không hỗ trợ Web Crypto API để mã hóa/giải mã.',
+  'save.titleManageBtn': 'Xuất / Nhập Save',
 };
 
 

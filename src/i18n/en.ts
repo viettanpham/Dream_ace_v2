@@ -1440,6 +1440,58 @@ export const EN_TRANSLATIONS = {
   'admin.starter.resetBtn': 'Reset Defaults',
   'log.expandAll': 'Expand All',
   'log.collapseAll': 'Collapse All',
+
+  // Portable Save Export / Import with Optional PIN (SV1a)
+  'save.sectionTitle': 'Save File Backup & Transfer',
+  'save.sectionDesc':
+    'Export your campaign to a JSON file or import a backup from another device.',
+  'save.exportBtn': 'Export Save',
+  'save.importBtn': 'Import Save',
+  'save.pinLabel': 'Optional PIN (4–8 digits)',
+  'save.pinPlaceholder': '4–8 digits (optional)',
+  'save.pinConfirmLabel': 'Confirm PIN',
+  'save.pinConfirmPlaceholder': 'Re-enter PIN',
+  'save.pinClientNote':
+    'Note: PIN only protects the file on the client side; forgotten PINs cannot be recovered.',
+  'save.importDisabledInBattle':
+    'Import is disabled while a battle is active. Finish or leave the battle first.',
+  'save.exportSuccess': 'Exported save file: {filename}',
+  'save.importSuccess': 'Save imported successfully.',
+  'save.undoBtn': 'Undo import',
+  'save.undoAvailableNote':
+    'A one-time backup of your previous save is stored locally.',
+  'save.undoSuccess': 'Previous save restored from backup.',
+  'save.pinPromptTitle': 'Encrypted Save — Enter PIN',
+  'save.pinPromptDesc':
+    'This save file was encrypted with a PIN. Enter the 4–8 digit PIN to decrypt.',
+  'save.pinPromptLabel': 'File PIN',
+  'save.pinPromptPlaceholder': 'Enter 4–8 digit PIN',
+  'save.pinPromptSubmit': 'Decrypt & Preview',
+  'save.confirmTitle': 'Confirm Save Import',
+  'save.confirmDesc':
+    'Replacing your current save keeps a one-time local backup so you can undo once if needed.',
+  'save.metaExportedAt': 'Exported at',
+  'save.metaVersion': 'Save version',
+  'save.metaWillMigrate': 'Older version (v{from} → v{to}) — will migrate safely',
+  'save.metaProgress': 'Campaign progress',
+  'save.progressPilotLine': '{name} · {gear} Lv.{level} · {owned}/4 Gears',
+  'save.progressStatsLine':
+    '{credits} CR · {wp} WP · {wins} Wins · {captured}/{total} Sectors · Month {month}',
+  'save.confirmReplaceBtn': 'Replace Save',
+  'save.errInvalidPinFormat': 'PIN must be 4 to 8 numeric digits.',
+  'save.errPinMismatch': 'PIN and confirmation PIN do not match.',
+  'save.errInvalidJson': 'Invalid file: not valid JSON.',
+  'save.errInvalidEnvelope': 'Invalid save file header or format.',
+  'save.errWrongApp': 'Wrong application file: not a Dream Ace save.',
+  'save.errChecksumMismatch':
+    'Checksum mismatch: save file appears altered or corrupted.',
+  'save.errWrongPin': 'Incorrect PIN. Please check and try again.',
+  'save.errCorrupt': 'Save file is corrupted or missing required data.',
+  'save.errVersionTooNew':
+    'Cannot import save version v{found} (newest supported is v{current}).',
+  'save.errBattleActive': 'Cannot import save while a battle is active.',
+  'save.errCryptoUnsupported': 'Web Crypto API is unavailable in this browser.',
+  'save.titleManageBtn': 'Export / Import Save',
 } as const;
 
 export type TranslationKey = keyof typeof EN_TRANSLATIONS;

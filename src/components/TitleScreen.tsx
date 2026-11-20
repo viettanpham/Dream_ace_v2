@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Sliders, Volume2, VolumeX } from 'lucide-react';
+import { HardDrive, Sliders, Volume2, VolumeX } from 'lucide-react';
 import { MECH_CLASS_LIST } from '../data/classes';
 import {
   getClassCode,
@@ -10,8 +10,10 @@ import {
 } from '../i18n';
 import { ENABLE_ADMIN_CP, useGameStore } from '../store/useGameStore';
 import type { MechClassId } from '../types/game';
+import { BottomSheet } from './BottomSheet';
 import { FighterSvg } from './FighterSvg';
 import { LanguageToggle } from './LanguageToggle';
+import { SaveTransferSection } from './SaveTransferSection';
 
 export function TitleScreen() {
   const { lang, t } = useI18n();
@@ -27,6 +29,7 @@ export function TitleScreen() {
   const toggleAdminPanel = useGameStore((s) => s.toggleAdminPanel);
 
   const [confirmReset, setConfirmReset] = useState(false);
+  const [saveSheetOpen, setSaveSheetOpen] = useState(false);
   const [newPilotName, setNewPilotName] = useState(pilot.name || 'Kira');
   const [starterClass, setStarterClass] = useState<MechClassId>(
     pilot.activeGearId || 'striker'
@@ -119,6 +122,15 @@ export function TitleScreen() {
             <span>{t('admin.btnLabel')}</span>
           </button>
         )}
+        <button
+          type="button"
+          data-testid="title-save-transfer-btn"
+          onClick={() => setSaveSheetOpen(true)}
+          className="min-h-[44px] sm:min-h-0 sm:h-9 px-3 inline-flex items-center gap-2 rounded-lg sm:rounded border border-slate-800 bg-[#0E1520]/90 hover:bg-slate-800 text-xs font-medium text-slate-300 transition-colors cursor-pointer"
+        >
+          <HardDrive className="w-4 h-4 text-sky-400" />
+          <span>{t('save.titleManageBtn')}</span>
+        </button>
         <LanguageToggle />
         <button
           type="button"
@@ -136,6 +148,15 @@ export function TitleScreen() {
           </span>
         </button>
       </div>
+
+      <BottomSheet
+        open={saveSheetOpen}
+        onClose={() => setSaveSheetOpen(false)}
+        title={t('save.sectionTitle')}
+        subtitle={t('app.saveHint')}
+      >
+        <SaveTransferSection />
+      </BottomSheet>
 
       {/* Center Composition */}
       <main className="relative z-10 mx-auto w-full max-w-6xl px-4 sm:px-10 py-5 grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-center">
