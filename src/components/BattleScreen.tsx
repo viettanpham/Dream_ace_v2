@@ -6,6 +6,8 @@ import {
   BarChart3,
   Bot,
   ChevronUp,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Crosshair,
   Flag,
   HeartHandshake,
@@ -82,7 +84,9 @@ import {
   useFxSettings,
 } from '../utils/battleVfx';
 import {
+  readCombatLogExpandAll,
   readCombatLogMode,
+  writeCombatLogExpandAll,
   writeCombatLogMode,
   type CombatLogChannel,
   type CombatLogDisplayMode,
@@ -179,6 +183,10 @@ export function BattleScreen() {
     readCombatLogMode()
   );
   const [logChannel, setLogChannel] = useState<CombatLogChannel>('all');
+  const [logExpandAll, setLogExpandAll] = useState<boolean>(() =>
+    readCombatLogExpandAll()
+  );
+  const [logExpandNonce, setLogExpandNonce] = useState<number>(0);
   const [cardToast, setCardToast] = useState<string | null>(null);
   const popupCleanupTimersRef = useRef<Map<string, number>>(new Map());
   const fxCleanupTimersRef = useRef<Map<string, number>>(new Map());
@@ -259,6 +267,57 @@ export function BattleScreen() {
     writeCombatLogMode('popup');
     setLogSheetOpen(true);
   };
+
+  const handleExpandAllLogs = () => {
+    setLogExpandAll(true);
+    writeCombatLogExpandAll(true);
+    setLogExpandNonce((n) => n + 1);
+  };
+
+  const handleCollapseAllLogs = () => {
+    setLogExpandAll(false);
+    writeCombatLogExpandAll(false);
+    setLogExpandNonce((n) => n + 1);
+  };
+
+  const renderCombatLogExpandButtons = (compact = false) => (
+    <div className="inline-flex items-center gap-1 shrink-0">
+      <button
+        type="button"
+        data-testid="combat-log-expand-all"
+        aria-pressed={logExpandAll}
+        onClick={handleExpandAllLogs}
+        title={t('log.expandAll')}
+        className={`${
+          compact ? 'min-h-[26px] px-1.5 text-[10px]' : 'min-h-[28px] px-2 text-[11px]'
+        } rounded border font-semibold inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap ${
+          logExpandAll
+            ? 'border-sky-400/70 bg-sky-500/20 text-sky-200'
+            : 'border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300'
+        }`}
+      >
+        <ChevronsUpDown className="w-3 h-3 text-sky-400 shrink-0" />
+        <span>{t('log.expandAll')}</span>
+      </button>
+      <button
+        type="button"
+        data-testid="combat-log-collapse-all"
+        aria-pressed={!logExpandAll}
+        onClick={handleCollapseAllLogs}
+        title={t('log.collapseAll')}
+        className={`${
+          compact ? 'min-h-[26px] px-1.5 text-[10px]' : 'min-h-[28px] px-2 text-[11px]'
+        } rounded border font-semibold inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap ${
+          !logExpandAll
+            ? 'border-slate-600 bg-slate-800 text-slate-100'
+            : 'border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300'
+        }`}
+      >
+        <ChevronsDownUp className="w-3 h-3 text-slate-400 shrink-0" />
+        <span>{t('log.collapseAll')}</span>
+      </button>
+    </div>
+  );
 
   const playerWeaponId = useMemo(() => {
     if (!battle) return null;
@@ -1344,8 +1403,10 @@ export function BattleScreen() {
         >
           <div className="flex items-center gap-1.5 min-w-0 shrink">
             <span
-              className={`font-semibold truncate max-w-[92px] ${
-                isDestroyed ? 'text-slate-400 line-through' : 'text-emerald-300'
+              className={`font-semibold truncate ${
+                isDestroyed
+                  ? 'text-slate-400 line-through max-w-[160px]'
+                  : 'text-emerald-300 max-w-[92px]'
               }`}
             >
               {ownUnit.name}
@@ -1353,62 +1414,64 @@ export function BattleScreen() {
             {isDestroyed && (
               <span
                 data-testid="battle-player-destroyed-badge"
-                className="px-1 py-0.2 rounded bg-slate-800 border border-slate-600 text-slate-300 text-[10px] font-bold shrink-0"
+                className="px-1.5 py-0.2 rounded bg-slate-800 border border-slate-600 text-slate-300 text-[10px] font-bold shrink-0"
               >
                 {t('battle.playerDestroyed')}
               </span>
             )}
           </div>
 
-          <div className="flex-1 min-w-[90px] flex flex-col gap-0.5">
-            <div
-              data-testid="battle-player-hp-shield-bar"
-              className="relative h-2 w-full rounded-full bg-slate-900 border border-slate-800 overflow-hidden"
-            >
-              <div
-                data-testid="battle-player-hp-fill"
-                style={{ width: `${hpPct}%` }}
-                className={`h-full transition-all duration-200 ${hpFillClass}`}
-              />
-              {shieldOverlayPct > 0 && (
+          {!isDestroyed && (
+            <>
+              <div className="flex-1 min-w-[90px] flex flex-col gap-0.5">
                 <div
-                  data-testid="battle-player-shield-overlay"
-                  style={{ width: `${shieldOverlayPct}%` }}
-                  className="absolute inset-y-0 left-0 bg-sky-400/70 border-r border-cyan-200 transition-all duration-200"
-                />
-              )}
-            </div>
-            <div
-              data-testid="battle-player-sp-bar"
-              className="h-1 w-full rounded-full bg-slate-900 overflow-hidden"
-            >
-              <div
-                style={{ width: `${spPct}%` }}
-                className={`h-full transition-all duration-200 ${
-                  isDestroyed ? 'bg-slate-600' : 'bg-purple-400'
-                }`}
-              />
-            </div>
-          </div>
+                  data-testid="battle-player-hp-shield-bar"
+                  className="relative h-2 w-full rounded-full bg-slate-900 border border-slate-800 overflow-hidden"
+                >
+                  <div
+                    data-testid="battle-player-hp-fill"
+                    style={{ width: `${hpPct}%` }}
+                    className={`h-full transition-all duration-200 ${hpFillClass}`}
+                  />
+                  {shieldOverlayPct > 0 && (
+                    <div
+                      data-testid="battle-player-shield-overlay"
+                      style={{ width: `${shieldOverlayPct}%` }}
+                      className="absolute inset-y-0 left-0 bg-sky-400/70 border-r border-cyan-200 transition-all duration-200"
+                    />
+                  )}
+                </div>
+                <div
+                  data-testid="battle-player-sp-bar"
+                  className="h-1 w-full rounded-full bg-slate-900 overflow-hidden"
+                >
+                  <div
+                    style={{ width: `${spPct}%` }}
+                    className="h-full transition-all duration-200 bg-purple-400"
+                  />
+                </div>
+              </div>
 
-          <div className="flex items-center gap-1.5 shrink-0 text-[10px]">
-            <span data-testid="battle-player-hp-numbers" className="text-slate-200">
-              {ownUnit.hp}/{ownUnit.derived.maxHp}
-            </span>
-            {ownUnit.shield > 0 && !isDestroyed && (
-              <span data-testid="battle-player-shield-numbers" className="text-sky-300">
-                +{ownUnit.shield}
-              </span>
-            )}
-            <span data-testid="battle-player-sp-numbers" className="text-purple-300">
-              SP {ownUnit.sp}
-            </span>
-            {ownUnit.statuses.length > 0 && !isDestroyed && (
-              <span className="px-1 rounded bg-slate-800 text-amber-200 text-[10px]">
-                {formatStatusEffectDetail(lang, ownUnit.statuses[0], ownUnit).shortText}
-              </span>
-            )}
-          </div>
+              <div className="flex items-center gap-1.5 shrink-0 text-[10px]">
+                <span data-testid="battle-player-hp-numbers" className="text-slate-200">
+                  {ownUnit.hp}/{ownUnit.derived.maxHp}
+                </span>
+                {ownUnit.shield > 0 && (
+                  <span data-testid="battle-player-shield-numbers" className="text-sky-300">
+                    +{ownUnit.shield}
+                  </span>
+                )}
+                <span data-testid="battle-player-sp-numbers" className="text-purple-300">
+                  SP {ownUnit.sp}
+                </span>
+                {ownUnit.statuses.length > 0 && (
+                  <span className="px-1 rounded bg-slate-800 text-amber-200 text-[10px]">
+                    {formatStatusEffectDetail(lang, ownUnit.statuses[0], ownUnit).shortText}
+                  </span>
+                )}
+              </div>
+            </>
+          )}
         </div>
       );
     }
@@ -1447,50 +1510,52 @@ export function BattleScreen() {
             )}
           </div>
 
-          <div className="flex items-center gap-2.5 font-mono-nums text-[11px] shrink-0">
-            <span data-testid="battle-player-hp-numbers" className="text-emerald-300">
-              HP {ownUnit.hp}/{ownUnit.derived.maxHp}
-            </span>
-            <span data-testid="battle-player-shield-numbers" className="text-sky-300">
-              SHD {ownUnit.shield}/{maxShield}
-            </span>
-            <span data-testid="battle-player-sp-numbers" className="text-purple-300">
-              SP {ownUnit.sp}/{ownUnit.derived.maxSp}
-            </span>
-          </div>
+          {!isDestroyed && (
+            <div className="flex items-center gap-2.5 font-mono-nums text-[11px] shrink-0">
+              <span data-testid="battle-player-hp-numbers" className="text-emerald-300">
+                HP {ownUnit.hp}/{ownUnit.derived.maxHp}
+              </span>
+              <span data-testid="battle-player-shield-numbers" className="text-sky-300">
+                SHD {ownUnit.shield}/{maxShield}
+              </span>
+              <span data-testid="battle-player-sp-numbers" className="text-purple-300">
+                SP {ownUnit.sp}/{ownUnit.derived.maxSp}
+              </span>
+            </div>
+          )}
         </div>
 
-        {/* Combined HP bar with overlaid Shield layer + thin SP bar below */}
-        <div className="space-y-1">
-          <div
-            data-testid="battle-player-hp-shield-bar"
-            className="relative h-2.5 w-full rounded-full bg-slate-900 border border-slate-800 overflow-hidden"
-          >
+        {/* Combined HP bar with overlaid Shield layer + thin SP bar below (hidden when destroyed) */}
+        {!isDestroyed && (
+          <div className="space-y-1">
             <div
-              data-testid="battle-player-hp-fill"
-              style={{ width: `${hpPct}%` }}
-              className={`h-full transition-all duration-200 ${hpFillClass}`}
-            />
-            {shieldOverlayPct > 0 && (
+              data-testid="battle-player-hp-shield-bar"
+              className="relative h-2.5 w-full rounded-full bg-slate-900 border border-slate-800 overflow-hidden"
+            >
               <div
-                data-testid="battle-player-shield-overlay"
-                style={{ width: `${shieldOverlayPct}%` }}
-                className="absolute inset-y-0 left-0 bg-sky-400/70 border-r border-cyan-200 transition-all duration-200"
+                data-testid="battle-player-hp-fill"
+                style={{ width: `${hpPct}%` }}
+                className={`h-full transition-all duration-200 ${hpFillClass}`}
               />
-            )}
-          </div>
-          <div
-            data-testid="battle-player-sp-bar"
-            className="h-1.5 w-full rounded-full bg-slate-900 border border-slate-800/80 overflow-hidden"
-          >
+              {shieldOverlayPct > 0 && (
+                <div
+                  data-testid="battle-player-shield-overlay"
+                  style={{ width: `${shieldOverlayPct}%` }}
+                  className="absolute inset-y-0 left-0 bg-sky-400/70 border-r border-cyan-200 transition-all duration-200"
+                />
+              )}
+            </div>
             <div
-              style={{ width: `${spPct}%` }}
-              className={`h-full transition-all duration-200 ${
-                isDestroyed ? 'bg-slate-600' : 'bg-purple-400'
-              }`}
-            />
+              data-testid="battle-player-sp-bar"
+              className="h-1.5 w-full rounded-full bg-slate-900 border border-slate-800/80 overflow-hidden"
+            >
+              <div
+                style={{ width: `${spPct}%` }}
+                className="h-full transition-all duration-200 bg-purple-400"
+              />
+            </div>
           </div>
-        </div>
+        )}
 
         {ownUnit.statuses.length > 0 && !isDestroyed && (
           <div
@@ -1668,24 +1733,27 @@ export function BattleScreen() {
                 data-fixed-height="true"
                 className="rounded-lg border border-slate-800 bg-[#070A10] flex flex-col overflow-hidden h-[144px]"
               >
-                <div className="shrink-0 px-2.5 py-1 border-b border-slate-800/90 flex items-center justify-between gap-2 text-[11px] text-slate-400">
-                  <span className="font-semibold text-slate-200 inline-flex items-center gap-1.5 truncate">
+                <div className="shrink-0 px-2 py-1 border-b border-slate-800/90 flex items-center justify-between gap-1.5 text-[11px] text-slate-400">
+                  <span className="font-semibold text-slate-200 inline-flex items-center gap-1 min-w-0 truncate">
                     <ScrollText className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                     <span className="truncate">{t('battle.combatLog')}</span>
-                    <span className="font-mono-nums text-slate-400">
+                    <span className="font-mono-nums text-slate-400 shrink-0">
                       ({battle.log.length})
                     </span>
                   </span>
-                  <button
-                    type="button"
-                    data-testid="combat-log-mode-toggle"
-                    data-log-mode={combatLogMode}
-                    onClick={handleToggleCombatLogMode}
-                    className="min-h-[28px] px-2 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer shrink-0"
-                  >
-                    <Maximize2 className="w-3 h-3 text-sky-400" />
-                    <span>{t('log.modePopup')}</span>
-                  </button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {renderCombatLogExpandButtons(true)}
+                    <button
+                      type="button"
+                      data-testid="combat-log-mode-toggle"
+                      data-log-mode={combatLogMode}
+                      onClick={handleToggleCombatLogMode}
+                      className="min-h-[26px] px-1.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-[10px] font-semibold inline-flex items-center gap-1 cursor-pointer shrink-0"
+                    >
+                      <Maximize2 className="w-3 h-3 text-sky-400" />
+                      <span>{t('log.modePopup')}</span>
+                    </button>
+                  </div>
                 </div>
                 <CombatLogList
                   entries={battle.log}
@@ -1695,6 +1763,8 @@ export function BattleScreen() {
                   mode="docked"
                   channel={logChannel}
                   onChannelChange={setLogChannel}
+                  expandAll={logExpandAll}
+                  expandNonce={logExpandNonce}
                 />
               </div>
             ) : (
@@ -2230,6 +2300,7 @@ export function BattleScreen() {
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
+                  {combatLogMode === 'docked' && renderCombatLogExpandButtons(false)}
                   {combatLogMode === 'popup' && !logSheetOpen && (
                     <button
                       type="button"
@@ -2271,6 +2342,8 @@ export function BattleScreen() {
                   mode="docked"
                   channel={logChannel}
                   onChannelChange={setLogChannel}
+                  expandAll={logExpandAll}
+                  expandNonce={logExpandNonce}
                 />
               ) : (
                 <div className="flex-1 min-h-0 flex flex-col items-center justify-center p-4 text-center gap-2 text-[12px] text-slate-400">
@@ -3056,7 +3129,8 @@ export function BattleScreen() {
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5 shrink-0">
+                <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+                  {renderCombatLogExpandButtons(false)}
                   <button
                     type="button"
                     data-testid="combat-log-popup-dock-btn"
@@ -3087,6 +3161,8 @@ export function BattleScreen() {
                   mode="popup"
                   channel={logChannel}
                   onChannelChange={setLogChannel}
+                  expandAll={logExpandAll}
+                  expandNonce={logExpandNonce}
                 />
               </div>
             </div>

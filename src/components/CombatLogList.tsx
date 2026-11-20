@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -27,6 +28,7 @@ import {
   groupCombatLogEntriesByRound,
   parseStructuredCombatLogRow,
   POPUP_LOG_PAGE_SIZE,
+  readCombatLogExpandAll,
   type CombatLogActionKind,
   type CombatLogChannel,
   type CombatLogDisplayMode,
@@ -51,6 +53,10 @@ interface CombatLogListProps {
   /** Optional controlled channel filter */
   channel?: CombatLogChannel;
   onChannelChange?: (channel: CombatLogChannel) => void;
+  /** When true, expands all existing and newly created rounds; defaults to persisted localStorage preference */
+  expandAll?: boolean;
+  /** Monotonic counter incremented when Expand All / Collapse All is clicked to clear manual per-round overrides */
+  expandNonce?: number;
   className?: string;
 }
 
@@ -289,6 +295,8 @@ export function CombatLogList({
   mode = 'docked',
   channel: controlledChannel,
   onChannelChange,
+  expandAll: controlledExpandAll,
+  expandNonce = 0,
   className = '',
 }: CombatLogListProps) {
   const { lang, t } = useI18n();
@@ -301,6 +309,12 @@ export function CombatLogList({
   const [roundOverrides, setRoundOverrides] = useState<Record<number, boolean>>(
     {}
   );
+  const [storedExpandAll] = useState<boolean>(() => readCombatLogExpandAll());
+  const effectiveExpandAll = controlledExpandAll ?? storedExpandAll;
+
+  useEffect(() => {
+    setRoundOverrides({});
+  }, [effectiveExpandAll, expandNonce]);
 
   const activeChannel = controlledChannel ?? internalChannel;
   const setChannel = (ch: CombatLogChannel) => {
@@ -480,7 +494,8 @@ export function CombatLogList({
         ) : (
           roundGroups.map((grp) => {
             const isOpen =
-              roundOverrides[grp.round] ?? grp.round === latestRound;
+              roundOverrides[grp.round] ??
+              (effectiveExpandAll ? true : grp.round === latestRound);
             return (
               <div
                 key={`round-${grp.round}`}

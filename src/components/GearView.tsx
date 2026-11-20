@@ -797,21 +797,31 @@ export function GearView() {
                 })}
               </span>
             </div>
-            <div className="text-xs text-slate-400 mt-0.5">
-              {getSlotLabel(lang, activeDetailInstance.slot)} ·{' '}
-              {getRarityLabel(lang, activeDetailInstance.rarity)} ·{' '}
-              {t('common.tier', { tier: activeDetailInstance.tier })} ·{' '}
-              {t('common.levelShort')}
-              {activeDetailInstance.requiredLevel}
-              {' · '}
-              {activeDetailInstance.classRestriction
-                ? t('common.classOnly', {
-                    className: getClassName(
-                      lang,
-                      activeDetailInstance.classRestriction
-                    ),
-                  })
-                : t('common.allClasses')}
+            <div className="text-xs text-slate-400 mt-0.5 flex flex-wrap items-center gap-1.5">
+              {activeDetailInstance.isStarter && (
+                <span
+                  data-testid="detail-starter-badge"
+                  className="px-1.5 py-0.5 rounded border border-cyan-500/45 bg-cyan-500/12 text-[10px] font-semibold uppercase tracking-wide text-cyan-300"
+                >
+                  {t('inv.starterBadge')}
+                </span>
+              )}
+              <span>
+                {getSlotLabel(lang, activeDetailInstance.slot)} ·{' '}
+                {getRarityLabel(lang, activeDetailInstance.rarity)} ·{' '}
+                {t('common.tier', { tier: activeDetailInstance.tier })} ·{' '}
+                {t('common.levelShort')}
+                {activeDetailInstance.requiredLevel}
+                {' · '}
+                {activeDetailInstance.classRestriction
+                  ? t('common.classOnly', {
+                      className: getClassName(
+                        lang,
+                        activeDetailInstance.classRestriction
+                      ),
+                    })
+                  : t('common.allClasses')}
+              </span>
             </div>
 
             {/* Protection / Favorite / Sell controls */}
@@ -1523,6 +1533,14 @@ export function GearView() {
 
                   {inst && (
                     <div className="hidden lg:flex items-center gap-1.5 shrink-0 font-mono-nums text-[11px]">
+                      {inst.isStarter && (
+                        <span
+                          data-testid={`slot-starter-badge-${slot}`}
+                          className="px-1 py-0.2 rounded border border-cyan-500/45 bg-cyan-500/12 text-[10px] font-sans font-semibold text-cyan-300"
+                        >
+                          {t('inv.starterBadge')}
+                        </span>
+                      )}
                       {inst.locked && (
                         <Lock className="w-3 h-3 text-amber-300 shrink-0" />
                       )}
@@ -2612,6 +2630,14 @@ export function GearView() {
                               className="w-3.5 h-3.5 shrink-0"
                             />
                             <span>T{inst.tier}</span>
+                            {inst.isStarter && (
+                              <span
+                                data-testid="inv-starter-badge"
+                                className="px-1 py-0.2 rounded border border-cyan-500/45 bg-cyan-500/12 text-[9px] font-sans font-semibold text-cyan-300 leading-tight"
+                              >
+                                {t('inv.starterBadge')}
+                              </span>
+                            )}
                             {inst.isNew && (
                               <span
                                 title={t('inv.badgeNew')}
