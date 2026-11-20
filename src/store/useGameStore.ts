@@ -3777,7 +3777,7 @@ export const useGameStore = create<GameStoreState>()(
           state.autoEquipUndo = null;
           state.hasImportBackup = hasPersistedImportBackup();
           state.adminUnlocked = readPersistedAdminUnlock();
-          state.muted = Boolean(state.muted);
+          state.muted = typeof state.muted === 'boolean' ? state.muted : true;
           state.skipAnimations = Boolean(state.skipAnimations);
           if (typeof state.autoRepeatStopOnDefeat !== 'boolean') {
             state.autoRepeatStopOnDefeat = true;

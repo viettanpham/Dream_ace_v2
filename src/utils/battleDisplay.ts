@@ -74,9 +74,9 @@ export const TURN_QUEUE_UPCOMING_MAX = 5;
 
 /**
  * Pure responsive layout classifier for the Battle Screen.
- * - Portrait phone (width < 600 and NOT landscape phone) -> 'phone-portrait'
+ * - Portrait phone (width <= 640 and NOT landscape phone) -> 'phone-portrait'
  * - Landscape phone (width > height && height <= 500) -> 'pc' (per spec: landscape phone uses PC layout)
- * - Tablet (600..1023) -> 'tablet'
+ * - Tablet (641..1023) -> 'tablet'
  * - PC (>= 1024) -> 'pc'
  */
 export function getBattleLayoutMode(
@@ -89,7 +89,7 @@ export function getBattleLayoutMode(
   if (safeW > safeH && safeH <= 500) {
     return 'pc';
   }
-  if (safeW < 600) {
+  if (safeW <= 640) {
     return 'phone-portrait';
   }
   if (safeW < 1024) {

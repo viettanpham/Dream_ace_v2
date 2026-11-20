@@ -7,6 +7,7 @@ import { HangarScreen } from './components/HangarScreen';
 import { TitleScreen } from './components/TitleScreen';
 import { TopHud } from './components/TopHud';
 import { ENABLE_ADMIN_CP, useGameStore } from './store/useGameStore';
+import { useBattleLayoutMode } from './utils/battleDisplay';
 import { installGlobalErrorCapture } from './utils/errorLog';
 
 function AppShell() {
@@ -19,6 +20,8 @@ function AppShell() {
   const setTacticsModalOpen = useGameStore((s) => s.setTacticsModalOpen);
   const startBattle = useGameStore((s) => s.startBattle);
   const battleSectorId = useGameStore((s) => s.battle?.sectorId);
+  const layoutMode = useBattleLayoutMode();
+  const isPhoneBattle = screen === 'BATTLE' && layoutMode === 'phone-portrait';
 
   // Global error ring buffer + Admin CP activation: Ctrl+Shift+A or ?admin=1 (persisted)
   useEffect(() => {
@@ -63,7 +66,13 @@ function AppShell() {
   }
 
   return (
-    <div className="h-[100dvh] w-full overflow-hidden flex flex-col bg-[#080C12] text-slate-100">
+    <div
+      className={
+        isPhoneBattle
+          ? 'min-h-[100dvh] w-full flex flex-col bg-[#080C12] text-slate-100'
+          : 'h-[100dvh] w-full overflow-hidden flex flex-col bg-[#080C12] text-slate-100'
+      }
+    >
       <TopHud />
       {(screen === 'HANGAR' || screen === 'SHOP') && <HangarScreen />}
       {screen === 'BATTLE' && (

@@ -83,6 +83,7 @@ import {
   POPUP_CLEANUP_DELAY_MS,
   useFxSettings,
 } from '../utils/battleVfx';
+import { useBattleLayoutPrefs } from '../utils/battleLayoutPrefs';
 import {
   readCombatLogExpandAll,
   readCombatLogMode,
@@ -182,11 +183,11 @@ export function BattleScreen() {
     useState<AutoRepeatLimit>(autoRepeatLimit);
   const loopAnchorRef = useRef<HTMLDivElement | null>(null);
   const [statsModalOpen, setStatsModalOpen] = useState(false);
-  const [cardSideTab, setCardSideTab] = useState<'ally' | 'enemy'>('enemy');
   const [speechBubblesEnabled, setSpeechBubblesEnabled] = useState<boolean>(
     () => readSpeechBubblesEnabled()
   );
   const [fxSettings] = useFxSettings();
+  const [layoutPrefs] = useBattleLayoutPrefs();
   const [combatLogMode, setCombatLogMode] = useState<CombatLogDisplayMode>(() =>
     readCombatLogMode()
   );
@@ -716,13 +717,20 @@ export function BattleScreen() {
         <button
           type="button"
           data-testid="battle-loop-active-chip"
+          data-loop-running="true"
+          aria-pressed={true}
           onClick={() => stopAutoRepeat('manual_stop')}
           title={t('battle.loopStopTooltip')}
-          aria-label={`${t('battle.loopStopTooltip')} (${progressText})`}
+          aria-label={`${t('battle.loopRunningTag')} · ${t('battle.loopStopTooltip')} (${progressText})`}
           className={`min-h-[44px] rounded-lg border border-emerald-400/70 bg-emerald-500/20 hover:bg-red-500/20 hover:border-red-400/70 text-emerald-100 font-mono-nums font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 transition-colors ${
             phoneCompact ? 'px-2 text-[12px]' : 'px-2.5 text-[13px]'
           }`}
         >
+          <span
+            data-testid="battle-loop-running-dot"
+            className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0"
+            aria-hidden="true"
+          />
           <Repeat className="w-3.5 h-3.5 text-emerald-300 shrink-0" aria-hidden="true" />
           <span data-testid="battle-loop-progress">{progressText}</span>
           <span
@@ -740,6 +748,7 @@ export function BattleScreen() {
         <button
           type="button"
           data-testid="battle-loop-btn"
+          data-loop-running="false"
           aria-expanded={loopPopoverOpen}
           aria-haspopup="dialog"
           aria-label={t('battle.loopTitle')}
@@ -1086,67 +1095,21 @@ export function BattleScreen() {
       return (
         <div
           data-testid="battle-card-view"
-          className="flex-1 min-h-0 flex flex-col overflow-hidden"
+          className="flex flex-col gap-2"
         >
-          {/* Phone Segmented Switch: Allies | Enemies */}
-          <div
-            data-testid="card-side-tabs"
-            role="tablist"
-            className="shrink-0 grid grid-cols-2 gap-1.5 pb-1.5"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={cardSideTab === 'ally'}
-              data-testid="card-tab-ally"
-              onClick={() => setCardSideTab('ally')}
-              className={`min-h-[44px] px-3 rounded-lg border text-[13px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors ${
-                cardSideTab === 'ally'
-                  ? 'border-sky-400 bg-sky-500/20 text-sky-100'
-                  : 'border-slate-800 bg-slate-950 text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <span>{t('battle.tabAllies')}</span>
-              <span className="font-mono-nums text-[12px] opacity-85">
-                {aliveAlliesCount}/{allies.length}
-              </span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={cardSideTab === 'enemy'}
-              data-testid="card-tab-enemy"
-              onClick={() => setCardSideTab('enemy')}
-              className={`min-h-[44px] px-3 rounded-lg border text-[13px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors ${
-                cardSideTab === 'enemy'
-                  ? 'border-red-400 bg-red-500/20 text-red-100'
-                  : 'border-slate-800 bg-slate-950 text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <span>{t('battle.tabEnemies')}</span>
-              <span className="font-mono-nums text-[12px] opacity-85">
-                {aliveEnemiesCount}/{enemies.length}
-              </span>
-            </button>
-          </div>
-
           {cardToast && (
             <div
               role="status"
               data-testid="card-invalid-target-toast"
-              className="shrink-0 mb-1.5 rounded-md border border-amber-400/70 bg-amber-950/85 px-2.5 py-1 text-[12px] font-semibold text-amber-100 text-center truncate"
+              className="shrink-0 rounded-md border border-amber-400/70 bg-amber-950/85 px-2.5 py-1 text-[12px] font-semibold text-amber-100 text-center truncate"
             >
               {cardToast}
             </div>
           )}
 
-          <div
-            style={{ touchAction: 'pan-y' }}
-            className="flex-1 min-h-0 overflow-y-auto tactical-scroll touch-pan-y pb-1"
-          >
-            {cardSideTab === 'ally'
-              ? renderThreeRowCardSide('ally', allies, true)
-              : renderThreeRowCardSide('enemy', enemies, true)}
+          <div className="flex flex-col gap-2.5">
+            {renderThreeRowCardSide('ally', allies, true)}
+            {renderThreeRowCardSide('enemy', enemies, true)}
           </div>
         </div>
       );
@@ -1588,13 +1551,38 @@ export function BattleScreen() {
     );
   };
 
+  const renderCameraSlot = (compactPhone: boolean) => {
+    if (!layoutPrefs.showActionCamera) return null;
+    return (
+      <div
+        data-testid="battle-camera-slot"
+        data-camera-size={compactPhone ? 'phone' : 'desktop'}
+        className={
+          compactPhone
+            ? 'h-[120px] shrink-0 mx-1.5 mt-1 rounded-lg border border-dashed border-slate-700/80 bg-[#070C14]/80 flex items-center justify-center px-3'
+            : 'h-[160px] shrink-0 rounded-lg border border-dashed border-slate-700/80 bg-[#070C14]/80 flex items-center justify-center px-4'
+        }
+      >
+        <span className="text-[12px] font-medium tracking-wide text-slate-500 select-none">
+          {t('battle.actionCamera')}
+        </span>
+      </div>
+    );
+  };
+
   return (
-    <div className="relative flex-1 min-h-0 flex flex-col bg-tactical-grid overflow-hidden">
+    <div
+      className={
+        isPhonePortrait
+          ? 'relative flex-1 flex flex-col bg-tactical-grid'
+          : 'relative flex-1 min-h-0 flex flex-col bg-tactical-grid overflow-hidden'
+      }
+    >
       {isPhonePortrait ? (
-        /* ==================== PHONE PORTRAIT LAYOUT (< 600px portrait) ==================== */
+        /* ==================== PHONE PORTRAIT LAYOUT (<= 640px portrait) ==================== */
         <div
           data-testid="battle-phone-layout"
-          className="flex-1 min-h-0 flex flex-col overflow-hidden"
+          className="flex-1 flex flex-col"
         >
           {/* 2) One-line turn queue strip (max 44px) */}
           <TurnQueueBar
@@ -1610,10 +1598,10 @@ export function BattleScreen() {
             }}
           />
 
-          {/* 3) One compact control row (max 48px): Auto, Speed Cycle, View Switch, Loop (icon+num), "..." More */}
+          {/* 3) Sticky compact control row (max 48px): Auto, Speed Cycle, View Switch, Loop (icon+num), "..." More */}
           <div
             data-testid="battle-phone-controls"
-            className="h-12 max-h-[48px] shrink-0 border-b border-slate-800/80 bg-[#080D16] px-1.5 flex items-center justify-between gap-1.5"
+            className="sticky top-0 z-30 h-12 max-h-[48px] shrink-0 border-b border-slate-800/80 bg-[#080D16]/95 backdrop-blur-sm px-1.5 flex items-center justify-between gap-1.5"
           >
             <button
               type="button"
@@ -1706,6 +1694,7 @@ export function BattleScreen() {
             </span>
           </div>
           {renderPlayerStatusBar(true)}
+          {renderCameraSlot(true)}
 
           {/* Safety Pause Notice (when Auto paused on Low HP / Boss / Elite) */}
           {battle.autoStopNotice && !battle.summary && (
@@ -1725,8 +1714,8 @@ export function BattleScreen() {
             </div>
           )}
 
-          {/* 4) Battlefield — takes ALL remaining height with no inner scroll & no clipping */}
-          <div className="flex-1 min-h-0 flex flex-col p-2 overflow-hidden">
+          {/* 4) Battlefield — natural page flow, zero inner scroll & zero clipping */}
+          <div className="flex flex-col p-2">
             {renderFieldContent()}
           </div>
 
@@ -1808,27 +1797,9 @@ export function BattleScreen() {
             )}
           </div>
 
-          {/* 6) Single-row bottom action dock — collapses to slim <=40px bar in Auto mode */}
-          <div className="shrink-0 border-t border-slate-800/90 bg-[#0A0F18]/98 px-2 py-1.5 pb-safe">
-            {autoBattleEnabled ? (
-              <div
-                data-testid="battle-auto-collapsed-dock"
-                className="h-10 max-h-[40px] px-2.5 rounded-lg border border-emerald-500/40 bg-emerald-500/12 flex items-center justify-between gap-2"
-              >
-                <div className="flex items-center gap-1.5 min-w-0 text-[13px] font-semibold text-emerald-200">
-                  <Bot className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span className="truncate">{t('battle.autoCollapsedBar')}</span>
-                </div>
-                <button
-                  type="button"
-                  data-testid="battle-auto-resume-manual"
-                  onClick={() => setAutoBattleEnabled(false)}
-                  className="h-8 px-2.5 rounded-md border border-slate-600 bg-slate-900 hover:bg-slate-800 text-slate-100 text-[12px] font-semibold shrink-0 cursor-pointer"
-                >
-                  {t('battle.switchManual')}
-                </button>
-              </div>
-            ) : (
+          {/* 6) Single-row bottom action dock (hidden in Auto mode — no separate AUTO bar) */}
+          {!autoBattleEnabled && (
+            <div className="shrink-0 border-t border-slate-800/90 bg-[#0A0F18]/98 px-2 py-1.5 pb-safe">
               <div
                 data-testid="battle-manual-dock"
                 className="grid grid-cols-4 gap-2"
@@ -1875,8 +1846,8 @@ export function BattleScreen() {
                   <span className="truncate">{t('battle.actionItem')}</span>
                 </button>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       ) : (
         /* ==================== TABLET (600-1023) & PC (>= 1024) & LANDSCAPE PHONE LAYOUT ==================== */
@@ -2040,6 +2011,9 @@ export function BattleScreen() {
 
             {/* Player Own Ship Status Bar (directly under Balance of Power) */}
             {renderPlayerStatusBar(false)}
+
+            {/* Reserved Action Camera Slot (placeholder for G4b) */}
+            {renderCameraSlot(false)}
 
             {battle.autoStopNotice && !battle.summary && (
               <div className="shrink-0 rounded-lg border border-orange-500/40 bg-orange-500/12 px-3 py-1.5 flex items-center justify-between gap-2 text-[13px] text-orange-200">

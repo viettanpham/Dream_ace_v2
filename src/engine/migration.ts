@@ -162,7 +162,7 @@ export function createFreshCampaignState(
     quickSellConfig: { ...DEFAULT_QUICK_SELL_CONFIG },
     selectedSectorId: SECTORS_CATALOG[0].id,
     hasSaveData: false,
-    muted: false,
+    muted: true,
     battleSpeed: 1,
     skipAnimations: false,
     battleViewMode: null,
@@ -337,7 +337,7 @@ export function migrateSaveData(
     raw.battleViewMode === 'card' || raw.battleViewMode === 'radar'
       ? raw.battleViewMode
       : null;
-  const muted = Boolean(raw.muted);
+  const muted = typeof raw.muted === 'boolean' ? raw.muted : true;
   const hasSaveData = Boolean(raw.hasSaveData);
   const selectedSectorId =
     typeof raw.selectedSectorId === 'string' &&

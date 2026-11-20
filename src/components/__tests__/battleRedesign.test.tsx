@@ -314,8 +314,8 @@ describe('3) Exit-confirm dialog when tapping logo during active battle', () => 
   });
 });
 
-describe('4) Auto mode collapsing the dock & responsive phone/landscape layouts', () => {
-  it('collapses the 4-button action dock into a thin bar when Auto is enabled on phone portrait', () => {
+describe('4) Auto mode hides manual dock (without separate AUTO bar) & responsive phone/landscape layouts', () => {
+  it('hides the 4-button action dock when Auto is enabled on phone portrait without rendering a separate AUTO bar', () => {
     setViewport(390, 844);
     const battle = makeThreeRowBattle();
     useGameStore.setState({
@@ -348,14 +348,11 @@ describe('4) Auto mode collapsing the dock & responsive phone/landscape layouts'
     expect(container!.querySelector('[data-testid="battle-manual-dock"]')).toBeNull();
     expect(
       container!.querySelector('[data-testid="battle-auto-collapsed-dock"]')
-    ).not.toBeNull();
+    ).toBeNull();
 
-    // Resume Manual from collapsed bar restores the 4-button dock
-    const resumeBtn = container!.querySelector(
-      '[data-testid="battle-auto-resume-manual"]'
-    ) as HTMLButtonElement;
+    // Tapping battle-auto-toggle again returns to Manual and restores the 4-button dock
     act(() => {
-      resumeBtn.click();
+      autoBtn.click();
     });
 
     expect(useGameStore.getState().autoBattleEnabled).toBe(false);

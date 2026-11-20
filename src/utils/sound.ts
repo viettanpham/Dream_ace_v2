@@ -1,6 +1,6 @@
 class TacticalAudioEngine {
   private ctx: AudioContext | null = null;
-  private muted = false;
+  private muted = true;
 
   public setMuted(muted: boolean): void {
     this.muted = muted;
