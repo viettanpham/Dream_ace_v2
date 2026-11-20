@@ -17,8 +17,10 @@ import {
   Tag,
   Trash2,
   Unlock,
+  Wand2,
   X,
 } from 'lucide-react';
+import { sanitizeAutoEquipConfig } from '../data/autoEquipConfig';
 import {
   EMPTY_STAT_BLOCK,
   MECH_CLASSES,
@@ -69,6 +71,7 @@ import {
 } from '../i18n';
 import { useGameStore } from '../store/useGameStore';
 import type {
+  AutoEquipPlan,
   ConsumableItem,
   EnchantAttemptResult,
   EquipmentSlot,
@@ -79,6 +82,7 @@ import type {
   StatBlock,
 } from '../types/game';
 import { soundFx } from '../utils/sound';
+import { AutoEquipModal } from './AutoEquipModal';
 import { BottomSheet } from './BottomSheet';
 import { FighterSvg } from './FighterSvg';
 import { ClassIcon, ConsumableIcon, SlotIcon } from './GameIcons';
@@ -111,14 +115,18 @@ function getUnusableReasonShort(
   item: ItemInstance,
   gearLevel: number,
   gearClassId: string,
-  levelShort: string
+  t: ReturnType<typeof useI18n>['t']
 ): string {
   const parts: string[] = [];
   if (item.classRestriction && item.classRestriction !== gearClassId) {
-    parts.push(getClassName(lang, item.classRestriction));
+    parts.push(
+      t('inv.unusableClassShort', {
+        className: getClassName(lang, item.classRestriction),
+      })
+    );
   }
   if (gearLevel < item.requiredLevel) {
-    parts.push(`${levelShort}${item.requiredLevel}`);
+    parts.push(t('inv.unusableLevelShort', { level: item.requiredLevel }));
   }
   return parts.join(' · ');
 }
@@ -126,8 +134,10 @@ function getUnusableReasonShort(
 export function GearView() {
   const { lang, t } = useI18n();
   const pilot = useGameStore((s) => s.pilot);
+  const adminConfig = useGameStore((s) => s.adminConfig);
   const filterState = useGameStore((s) => s.inventoryFilterState);
   const quickSellUndo = useGameStore((s) => s.quickSellUndo);
+  const autoEquipUndo = useGameStore((s) => s.autoEquipUndo);
 
   const selectActiveGear = useGameStore((s) => s.selectActiveGear);
   const equipItem = useGameStore((s) => s.equipItem);
@@ -152,6 +162,10 @@ export function GearView() {
   const sellItem = useGameStore((s) => s.sellItem);
   const undoQuickSell = useGameStore((s) => s.undoQuickSell);
   const clearQuickSellUndo = useGameStore((s) => s.clearQuickSellUndo);
+  const previewAutoEquip = useGameStore((s) => s.previewAutoEquip);
+  const applyAutoEquip = useGameStore((s) => s.applyAutoEquip);
+  const undoAutoEquip = useGameStore((s) => s.undoAutoEquip);
+  const clearAutoEquipUndo = useGameStore((s) => s.clearAutoEquipUndo);
   const useConsumable = useGameStore((s) => s.useConsumable);
 
   const [selection, setSelection] = useState<GearSelection>(null);
@@ -169,6 +183,9 @@ export function GearView() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [confirmBulkRare, setConfirmBulkRare] = useState(false);
   const [quickSellOpen, setQuickSellOpen] = useState(false);
+  const [autoEquipPlan, setAutoEquipPlan] = useState<AutoEquipPlan | null>(
+    null
+  );
   const [inventoryNotice, setInventoryNotice] = useState<string | null>(null);
   const [undoSecondsLeft, setUndoSecondsLeft] = useState(0);
 
@@ -1634,6 +1651,31 @@ export function GearView() {
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
+                data-testid="auto-equip-btn"
+                onClick={() => {
+                  soundFx.playClick();
+                  setAutoEquipPlan(previewAutoEquip('single', activeGear.classId));
+                }}
+                className="min-h-[36px] px-2.5 rounded border border-sky-500/50 bg-sky-500/15 hover:bg-sky-500/25 text-sky-200 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+              >
+                <Wand2 className="w-3.5 h-3.5 shrink-0" />
+                <span>{t('ae.btn')}</span>
+              </button>
+
+              <button
+                type="button"
+                data-testid="auto-equip-all-btn"
+                onClick={() => {
+                  soundFx.playClick();
+                  setAutoEquipPlan(previewAutoEquip('all', activeGear.classId));
+                }}
+                className="min-h-[36px] px-2.5 rounded border border-slate-700 bg-slate-900 hover:border-sky-400/60 hover:text-sky-200 text-slate-200 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
+              >
+                <span>{t('ae.btnAll')}</span>
+              </button>
+
+              <button
+                type="button"
                 data-testid="open-quicksell-btn"
                 onClick={() => setQuickSellOpen(true)}
                 className="min-h-[36px] px-2.5 rounded border border-amber-500/50 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
@@ -1688,6 +1730,41 @@ export function GearView() {
                   onClick={clearQuickSellUndo}
                   aria-label={t('error.closeBtn')}
                   className="p-1 text-amber-300 hover:text-white cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Auto-Equip Undo Toast (kept until next auto-equip or undo) */}
+          {autoEquipUndo && (
+            <div
+              data-testid="autoequip-undo-toast"
+              className="rounded-lg border border-sky-400/60 bg-sky-500/15 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-sky-100"
+            >
+              <span className="font-medium">
+                {t('ae.undoToast', { count: autoEquipUndo.changedSlotsCount })}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  data-testid="autoequip-undo-btn"
+                  onClick={() => {
+                    const res = undoAutoEquip();
+                    if (res.ok) {
+                      setInventoryNotice(t('ae.undoneFeedback'));
+                    }
+                  }}
+                  className="min-h-[34px] px-3 rounded bg-sky-400 hover:bg-sky-300 text-slate-950 font-bold text-xs cursor-pointer"
+                >
+                  {t('ae.undoBtn')}
+                </button>
+                <button
+                  type="button"
+                  onClick={clearAutoEquipUndo}
+                  aria-label={t('error.closeBtn')}
+                  className="p-1 text-sky-300 hover:text-white cursor-pointer"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -2452,7 +2529,7 @@ export function GearView() {
                           inst,
                           activeGear.level,
                           activeGear.classId,
-                          t('common.levelShort')
+                          t
                         )
                       : '';
 
@@ -2462,10 +2539,10 @@ export function GearView() {
                       ? 'border-amber-400 bg-amber-500/10'
                       : isEquippedSelected
                       ? 'border-emerald-400 bg-emerald-500/12 ring-1 ring-emerald-400/50'
+                      : isUnusable
+                      ? 'border-slate-700/80 bg-slate-900/90 grayscale-[80%] opacity-60'
                       : isEquippedOther
                       ? 'border-sky-400/75 bg-sky-500/10'
-                      : isUnusable
-                      ? 'border-slate-700/80 bg-slate-900/90 grayscale-[75%] opacity-75'
                       : `${RARITY_META[inst.rarity].borderClass} ${
                           RARITY_META[inst.rarity].bgTintClass
                         } hover:bg-slate-900/90`;
@@ -2475,6 +2552,7 @@ export function GearView() {
                         key={inst.instanceId}
                         type="button"
                         data-testid={`inv-card-${inst.instanceId}`}
+                        data-unusable={isUnusable ? 'true' : 'false'}
                         title={entry.displayName}
                         onClick={() => handleSelectInventory(inst.instanceId)}
                         className={`relative h-[128px] overflow-hidden p-2.5 rounded-lg lg:rounded border text-left transition-colors cursor-pointer flex flex-col justify-between ${frameClasses}`}
@@ -2589,7 +2667,10 @@ export function GearView() {
                         {/* Bottom Reason / Quality + Level Line */}
                         <div className="relative z-10 text-[11px] font-mono-nums flex items-center justify-between gap-1">
                           {isUnusable ? (
-                            <span className="inline-flex items-center gap-1 text-rose-300/90 truncate">
+                            <span
+                              data-testid="inv-unusable-reason"
+                              className="inline-flex items-center gap-1 text-rose-300/90 truncate"
+                            >
                               <Ban className="w-3 h-3 shrink-0" />
                               <span className="truncate">{unusableReason}</span>
                             </span>
@@ -2677,6 +2758,26 @@ export function GearView() {
           {renderDetailContent()}
         </BottomSheet>
       </div>
+
+      {/* Auto-Equip Preview Modal */}
+      <AutoEquipModal
+        open={autoEquipPlan !== null}
+        plan={autoEquipPlan}
+        replaceMarginPct={
+          sanitizeAutoEquipConfig(adminConfig.autoEquip).replaceMarginPct
+        }
+        onClose={() => setAutoEquipPlan(null)}
+        onApply={() => {
+          if (!autoEquipPlan) return;
+          const res = applyAutoEquip(autoEquipPlan);
+          setAutoEquipPlan(null);
+          if (res.ok) {
+            setInventoryNotice(
+              t('ae.appliedFeedback', { count: res.changedSlotsCount })
+            );
+          }
+        }}
+      />
 
       {/* Quick Sell Modal */}
       <QuickSellModal

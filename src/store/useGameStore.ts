@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { BALANCE_CONFIG, getGarageUnlockCost } from '../data/balance';
+import { sanitizeAutoEquipConfig } from '../data/autoEquipConfig';
 import { EMPTY_STAT_BLOCK, MECH_CLASS_LIST } from '../data/classes';
 import { EQUIPMENT_SLOTS } from '../data/items';
 import { getNextSectorId, SECTORS_CATALOG } from '../data/maps';
@@ -17,6 +18,11 @@ import {
   resolveUnitAction,
   sortTurnOrder,
 } from '../engine/combat';
+import {
+  applyAutoEquipPlan,
+  buildAutoEquipPlan,
+  undoAutoEquipSnapshot,
+} from '../engine/autoEquip';
 import {
   equipItemOnGear,
   generateItemInstance,
@@ -90,6 +96,8 @@ import {
 import type {
   ActionType,
   AdminConfig,
+  AutoEquipPlan,
+  AutoEquipUndoSnapshot,
   AutoRepeatLimit,
   AutoRepeatRunToast,
   AutoRepeatSession,
@@ -190,6 +198,7 @@ interface GameStoreState {
   autoRepeatSession: AutoRepeatSession | null;
   autoRepeatToast: AutoRepeatRunToast | null;
   quickSellUndo: QuickSellUndoState | null;
+  autoEquipUndo: AutoEquipUndoSnapshot | null;
 
   // Language
   setLanguage: (lang: Language) => void;
@@ -281,6 +290,15 @@ interface GameStoreState {
   };
   undoQuickSell: () => { ok: boolean; restoredCount: number };
   clearQuickSellUndo: () => void;
+  previewAutoEquip: (
+    mode: 'single' | 'all',
+    targetGearId?: MechClassId
+  ) => AutoEquipPlan;
+  applyAutoEquip: (
+    plan: AutoEquipPlan
+  ) => { ok: boolean; changedSlotsCount: number };
+  undoAutoEquip: () => { ok: boolean; restoredGearsCount: number };
+  clearAutoEquipUndo: () => void;
   equipItem: (instanceId: string) => EquipValidationResult;
   unequipSlot: (slot: EquipmentSlot) => void;
   unequipInstanceEverywhere: (instanceId: string) => void;
@@ -681,6 +699,7 @@ export const useGameStore = create<GameStoreState>()(
       autoRepeatSession: null,
       autoRepeatToast: null,
       quickSellUndo: null,
+      autoEquipUndo: null,
 
       setLanguage: (language) => {
         soundFx.playClick();
@@ -763,6 +782,8 @@ export const useGameStore = create<GameStoreState>()(
           autoRepeatSession: null,
           autoRepeatToast: null,
           autoRepeatStopOnDefeat: true,
+          quickSellUndo: null,
+          autoEquipUndo: null,
         });
       },
 
@@ -1552,6 +1573,55 @@ export const useGameStore = create<GameStoreState>()(
       },
 
       clearQuickSellUndo: () => set({ quickSellUndo: null }),
+
+      previewAutoEquip: (mode, targetGearId) => {
+        const state = get();
+        const config = sanitizeAutoEquipConfig(state.adminConfig.autoEquip);
+        return buildAutoEquipPlan(state.pilot, {
+          mode,
+          targetGearId: targetGearId ?? state.pilot.activeGearId,
+          config,
+        });
+      },
+
+      applyAutoEquip: (plan) => {
+        const state = get();
+        if (!plan || plan.totalChangedSlots <= 0) {
+          return { ok: false, changedSlotsCount: 0 };
+        }
+        const { pilot: nextPilot, undoSnapshot } = applyAutoEquipPlan(
+          state.pilot,
+          plan
+        );
+        soundFx.playConfirm();
+        set({
+          pilot: nextPilot,
+          autoEquipUndo: undoSnapshot,
+          hasSaveData: true,
+        });
+        return { ok: true, changedSlotsCount: undoSnapshot.changedSlotsCount };
+      },
+
+      undoAutoEquip: () => {
+        const state = get();
+        const snapshot = state.autoEquipUndo;
+        if (!snapshot) {
+          return { ok: false, restoredGearsCount: 0 };
+        }
+        const nextPilot = undoAutoEquipSnapshot(state.pilot, snapshot);
+        soundFx.playClick();
+        set({
+          pilot: nextPilot,
+          autoEquipUndo: null,
+          hasSaveData: true,
+        });
+        return {
+          ok: true,
+          restoredGearsCount: Object.keys(snapshot.previousEquippedByGear).length,
+        };
+      },
+
+      clearAutoEquipUndo: () => set({ autoEquipUndo: null }),
 
       equipItem: (instanceId) => {
         const state = get();
@@ -3161,10 +3231,14 @@ export const useGameStore = create<GameStoreState>()(
           const nextFormation = patch.formation
             ? sanitizeFormationConfig(patch.formation)
             : state.adminConfig.formation;
+          const nextAutoEquip = patch.autoEquip
+            ? sanitizeAutoEquipConfig(patch.autoEquip)
+            : sanitizeAutoEquipConfig(state.adminConfig.autoEquip);
           const nextAdminConfig: AdminConfig = {
             ...state.adminConfig,
             ...patch,
             formation: nextFormation,
+            autoEquip: nextAutoEquip,
           };
           const updatedPilot =
             patch.formation &&
@@ -3299,6 +3373,7 @@ export const useGameStore = create<GameStoreState>()(
               ...createDefaultAdminConfig(),
               ...state.adminConfig,
               formation: sanitizedFormation,
+              autoEquip: sanitizeAutoEquipConfig(rawAdmin.autoEquip),
               rewardMultiplier:
                 typeof state.adminConfig.rewardMultiplier === 'number' &&
                 Number.isFinite(state.adminConfig.rewardMultiplier) &&
@@ -3374,6 +3449,7 @@ export const useGameStore = create<GameStoreState>()(
           state.adminPanelOpen = false;
           state.tacticsModalOpen = false;
           state.quickSellUndo = null;
+          state.autoEquipUndo = null;
           state.adminUnlocked = readPersistedAdminUnlock();
           state.muted = Boolean(state.muted);
           state.skipAnimations = Boolean(state.skipAnimations);

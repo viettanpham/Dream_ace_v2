@@ -1387,6 +1387,35 @@ export const EN_TRANSLATIONS = {
   'battle.loopToastRun': 'Run #{run}: {outcome} · +{exp} EXP · +{credits} CR · +{wp} WP · {loot} loot',
   'battle.loopToastVictory': 'Victory',
   'battle.loopToastDefeat': 'Defeat',
+
+  // Auto-Equip & unusable item reason labels
+  'inv.unusableClassShort': '{className} only',
+  'inv.unusableLevelShort': 'Need Lv.{level}',
+  'ae.btn': 'Auto-Equip',
+  'ae.btnAll': 'All Gears',
+  'ae.modalTitleSingle': 'Auto-Equip — {gear}',
+  'ae.modalTitleAll': 'Auto-Equip — All Gears',
+  'ae.modalSubtitle':
+    'Scores items by Gear class weights, quality & tier. Replaces equipped gear only if score is ≥ {pct}% higher.',
+  'ae.colComparison': 'Current → New',
+  'ae.emptySlot': 'Empty',
+  'ae.keep': 'Keep',
+  'ae.scoreLabel': 'Score',
+  'ae.reassignedFrom': 'Moved from {gear}',
+  'ae.noChanges': 'Current equipment is already optimal — no slots changed.',
+  'ae.changesSummary': '{count} slot(s) to change',
+  'ae.applyBtn': 'Apply',
+  'ae.cancelBtn': 'Cancel',
+  'ae.undoToast': 'Auto-equipped ({count} slot(s) changed).',
+  'ae.undoBtn': 'Undo',
+  'ae.undoneFeedback': 'Auto-equip undone; previous equipment restored.',
+  'ae.appliedFeedback': 'Applied auto-equip ({count} slot(s) changed).',
+  'ae.traitCrit': 'Crit',
+  'ae.traitPierce': 'Pierce',
+  'ae.traitSplash': 'Splash',
+  'ae.traitSpRegen': 'SP/turn',
+  'ae.traitEvaMod': 'EVA mod',
+  'ae.traitLongRange': 'Long Range',
 } as const;
 
 export type TranslationKey = keyof typeof EN_TRANSLATIONS;

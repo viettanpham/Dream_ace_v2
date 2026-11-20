@@ -1068,6 +1068,74 @@ export interface BattleState {
 
 export type BattleSpeed = 1 | 2 | 3 | 5 | 10;
 
+export interface AutoEquipClassWeights {
+  attack: number;
+  defense: number;
+  fuel: number;
+  spirit: number;
+  shield: number;
+  evasion: number;
+  critBonusPct: number;
+  armorPiercePct: number;
+  splashPct: number;
+  spRegenPerTurn: number;
+  evasionMod: number;
+  longRangeBonus: number;
+  tierBonus: number;
+  qualityWeight: number;
+}
+
+export interface AutoEquipConfig {
+  replaceMarginPct: number;
+  classWeights: Record<MechClassId, AutoEquipClassWeights>;
+}
+
+export interface AutoEquipTraitDeltas {
+  critBonusPct: number;
+  armorPiercePct: number;
+  splashPct: number;
+  spRegenPerTurn: number;
+  evasionMod: number;
+  longRangeDelta: -1 | 0 | 1;
+}
+
+export interface AutoEquipSlotPlan {
+  slot: EquipmentSlot;
+  currentItem: ItemInstance | null;
+  nextItem: ItemInstance | null;
+  currentScore: number;
+  nextScore: number;
+  scoreDelta: number;
+  changed: boolean;
+  statDeltas: StatBlock;
+  traitDeltas: AutoEquipTraitDeltas;
+  reassignedFromGear: MechClassId | null;
+}
+
+export interface AutoEquipGearPlan {
+  gearId: MechClassId;
+  slots: AutoEquipSlotPlan[];
+  changedCount: number;
+  totalCurrentScore: number;
+  totalNextScore: number;
+  totalStatDeltas: StatBlock;
+}
+
+export interface AutoEquipPlan {
+  mode: 'single' | 'all';
+  targetGearId: MechClassId;
+  gearPlans: AutoEquipGearPlan[];
+  totalChangedSlots: number;
+}
+
+export interface AutoEquipUndoSnapshot {
+  mode: 'single' | 'all';
+  targetGearId: MechClassId;
+  previousEquippedByGear: Partial<Record<MechClassId, EquippedSlotIds>>;
+  changedSlotsCount: number;
+  appliedAt: number;
+}
+
 export interface AdminConfig {
   godMode: boolean;
   oneHitKills: boolean;
@@ -1084,6 +1152,7 @@ export interface AdminConfig {
   shopRarityWeights: Record<ItemRarity, number>;
   shopPriceMultiplier: number;
   formation: FormationConfig;
+  autoEquip?: AutoEquipConfig;
   showRawI18nKeys: boolean;
 }
 

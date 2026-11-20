@@ -35,6 +35,11 @@ import type {
   ShopItemListing,
   WpMarketOffer,
 } from '../types/game';
+import {
+  cloneAutoEquipConfig,
+  DEFAULT_AUTO_EQUIP_CONFIG,
+  sanitizeAutoEquipConfig,
+} from '../data/autoEquipConfig';
 import { cloneFormationConfig, DEFAULT_FORMATION_CONFIG } from '../data/formationConfig';
 import { generateItemInstance } from './equipment';
 import {
@@ -100,6 +105,7 @@ export function createDefaultAdminConfig(): AdminConfig {
     shopRarityWeights: { ...DEFAULT_ADMIN_SHOP_RARITY_WEIGHTS },
     shopPriceMultiplier: 1.0,
     formation: cloneFormationConfig(DEFAULT_FORMATION_CONFIG),
+    autoEquip: cloneAutoEquipConfig(DEFAULT_AUTO_EQUIP_CONFIG),
     showRawI18nKeys: false,
   };
 }
@@ -375,6 +381,7 @@ export function migrateSaveData(
         ? rawAdmin.shopPriceMultiplier
         : 1.0,
     formation: sanitizeFormationConfig(rawAdmin as Record<string, unknown>),
+    autoEquip: sanitizeAutoEquipConfig(rawAdmin.autoEquip),
     showRawI18nKeys: Boolean(rawAdmin.showRawI18nKeys),
   };
 
