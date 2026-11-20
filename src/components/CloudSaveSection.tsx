@@ -8,14 +8,16 @@ import {
   CloudOff,
   CloudUpload,
   Copy,
+  KeyRound,
   Loader2,
   ShieldAlert,
   Unlink,
 } from 'lucide-react';
 import { useI18n } from '../i18n';
 import { useCloudSaveStore } from '../store/useCloudSaveStore';
-import { useGameStore } from '../store/useGameStore';
+import { isBattleActive, useGameStore } from '../store/useGameStore';
 import {
+  CloudOverwriteConfirmDialog,
   copyTextToClipboard,
   CreateCloudSaveDialog,
   formatCloudTimeShort,
@@ -27,10 +29,10 @@ export function CloudSaveSection() {
   const { t } = useI18n();
   const screen = useGameStore((s) => s.screen);
   const battle = useGameStore((s) => s.battle);
-  const isBattleActive =
-    screen === 'BATTLE' && Boolean(battle && !battle.summary);
+  const battleActive = isBattleActive({ screen, battle });
 
   const saveId = useCloudSaveStore((s) => s.saveId);
+  const credentials = useCloudSaveStore((s) => s.credentials);
   const status = useCloudSaveStore((s) => s.status);
   const lastSyncedAt = useCloudSaveStore((s) => s.lastSyncedAt);
   const rememberOnDevice = useCloudSaveStore((s) => s.rememberOnDevice);
@@ -40,9 +42,11 @@ export function CloudSaveSection() {
   const disconnectCloud = useCloudSaveStore((s) => s.disconnectCloud);
   const setRememberOnDevice = useCloudSaveStore((s) => s.setRememberOnDevice);
   const openConflictModal = useCloudSaveStore((s) => s.openConflictModal);
+  const openPinUnlockModal = useCloudSaveStore((s) => s.openPinUnlockModal);
 
   const configured = isConfigured();
   const linked = Boolean(saveId);
+  const needsPin = linked && (!credentials || status === 'needs_pin');
 
   const [createOpen, setCreateOpen] = useState(false);
   const [openRemoteOpen, setOpenRemoteOpen] = useState(false);
@@ -66,7 +70,7 @@ export function CloudSaveSection() {
     const res = await syncNow();
     if (res.ok) {
       setFeedback(t('cloud.syncSuccess'));
-    } else if (!res.conflict) {
+    } else if (!res.conflict && res.errorCode !== 'NEEDS_PIN') {
       setError(translateCloudActionError(res, t));
     }
   };
@@ -78,8 +82,10 @@ export function CloudSaveSection() {
     try {
       const res = await downloadLinkedSave();
       if (res.ok) {
-        setFeedback(t('cloud.downloadSuccess'));
-      } else {
+        if (!res.needsOverwriteConfirm) {
+          setFeedback(t('cloud.downloadSuccess'));
+        }
+      } else if (res.errorCode !== 'NEEDS_PIN') {
         setError(translateCloudActionError(res, t));
       }
     } finally {
@@ -87,10 +93,10 @@ export function CloudSaveSection() {
     }
   };
 
-  const handleDisconnect = () => {
+  const handleDisconnect = async () => {
     setFeedback(null);
     setError(null);
-    const res = disconnectCloud();
+    const res = await disconnectCloud();
     if (res.ok) {
       setFeedback(t('cloud.disconnectedNotice'));
     } else {
@@ -99,6 +105,27 @@ export function CloudSaveSection() {
   };
 
   const renderStatusLine = () => {
+    if (needsPin) {
+      return (
+        <span className="inline-flex flex-wrap items-center gap-2">
+          <span
+            data-testid="cloud-status-text"
+            className="inline-flex items-center gap-1.5 text-amber-300 font-semibold"
+          >
+            <KeyRound className="w-3.5 h-3.5 shrink-0" />
+            <span>{t('cloud.statusNeedsPin')}</span>
+          </span>
+          <button
+            type="button"
+            data-testid="cloud-enter-pin-btn"
+            onClick={() => openPinUnlockModal(null)}
+            className="text-[12px] font-semibold text-sky-300 hover:text-sky-200 underline underline-offset-2 cursor-pointer"
+          >
+            {t('cloud.enterPinBtn')}
+          </button>
+        </span>
+      );
+    }
     if (status === 'saving') {
       return (
         <span
@@ -180,7 +207,7 @@ export function CloudSaveSection() {
             <button
               type="button"
               data-testid="cloud-create-btn"
-              disabled={!configured}
+              disabled={!configured || battleActive}
               onClick={() => {
                 setFeedback(null);
                 setError(null);
@@ -195,7 +222,7 @@ export function CloudSaveSection() {
             <button
               type="button"
               data-testid="cloud-open-remote-btn"
-              disabled={!configured || isBattleActive}
+              disabled={!configured || battleActive}
               onClick={() => {
                 setFeedback(null);
                 setError(null);
@@ -218,7 +245,7 @@ export function CloudSaveSection() {
             </div>
           )}
 
-          {configured && isBattleActive && (
+          {configured && battleActive && (
             <div
               data-testid="cloud-battle-locked-notice"
               className="text-[12px] text-amber-300 flex items-center gap-1.5"
@@ -276,18 +303,22 @@ export function CloudSaveSection() {
             <button
               type="button"
               data-testid="cloud-sync-now-btn"
-              disabled={!configured || status === 'saving'}
+              disabled={!configured || battleActive || status === 'saving'}
               onClick={handleSyncNow}
-              className="min-h-[44px] px-3.5 rounded-lg border border-sky-500/50 bg-sky-500/15 hover:bg-sky-500/25 disabled:opacity-45 disabled:cursor-not-allowed text-sky-200 text-[13px] font-semibold inline-flex items-center justify-center gap-2 cursor-pointer transition-colors whitespace-nowrap"
+              className="min-h-[44px] px-3.5 rounded-lg border border-sky-500/50 bg-sky-500/15 hover:bg-sky-500/25 disabled:border-slate-700 disabled:bg-slate-800/70 disabled:text-slate-500 disabled:cursor-not-allowed text-sky-200 text-[13px] font-semibold inline-flex items-center justify-center gap-2 cursor-pointer transition-colors whitespace-nowrap"
             >
               <CloudUpload className="w-4 h-4 shrink-0" />
-              <span>{t('cloud.syncNowBtn')}</span>
+              <span>
+                {battleActive ? t('cloud.inBattleLocked') : t('cloud.syncNowBtn')}
+              </span>
             </button>
 
             <button
               type="button"
               data-testid="cloud-download-btn"
-              disabled={!configured || isBattleActive || downloading || status === 'saving'}
+              disabled={
+                !configured || battleActive || downloading || status === 'saving'
+              }
               onClick={handleDownload}
               className="min-h-[44px] px-3.5 rounded-lg border border-amber-500/50 bg-amber-500/15 hover:bg-amber-500/25 disabled:border-slate-700 disabled:bg-slate-800/70 disabled:text-slate-500 disabled:cursor-not-allowed text-amber-200 text-[13px] font-semibold inline-flex items-center justify-center gap-2 cursor-pointer transition-colors whitespace-nowrap"
             >
@@ -301,7 +332,7 @@ export function CloudSaveSection() {
             <button
               type="button"
               data-testid="cloud-disconnect-btn"
-              disabled={isBattleActive}
+              disabled={battleActive}
               onClick={handleDisconnect}
               className="min-h-[40px] px-3 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-45 disabled:cursor-not-allowed text-slate-300 hover:text-rose-200 text-[12px] font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
             >
@@ -314,14 +345,15 @@ export function CloudSaveSection() {
                 type="checkbox"
                 data-testid="cloud-remember-checkbox"
                 checked={rememberOnDevice}
-                onChange={(e) => setRememberOnDevice(e.target.checked)}
-                className="w-4 h-4 rounded border-slate-600 bg-slate-900 accent-sky-400 cursor-pointer"
+                disabled={needsPin}
+                onChange={(e) => void setRememberOnDevice(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-600 bg-slate-900 accent-sky-400 cursor-pointer disabled:opacity-50"
               />
               <span>{t('cloud.rememberDevice')}</span>
             </label>
           </div>
 
-          {isBattleActive && (
+          {battleActive && (
             <div
               data-testid="cloud-battle-locked-notice"
               className="p-2.5 rounded-lg border border-amber-500/35 bg-amber-500/10 text-[12px] text-amber-200 flex items-center gap-2"
@@ -367,6 +399,10 @@ export function CloudSaveSection() {
         open={openRemoteOpen}
         onClose={() => setOpenRemoteOpen(false)}
         onSuccess={() => setFeedback(t('cloud.downloadSuccess'))}
+      />
+      <CloudOverwriteConfirmDialog
+        source="download_linked"
+        onConfirmed={() => setFeedback(t('cloud.downloadSuccess'))}
       />
     </section>
   );

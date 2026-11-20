@@ -2,7 +2,10 @@ import { useEffect } from 'react';
 import { AdminPanel } from './components/AdminPanel';
 import { AutoTacticsModal } from './components/AutoTacticsModal';
 import { BattleScreen } from './components/BattleScreen';
-import { CloudConflictDialog } from './components/CloudSaveDialogs';
+import {
+  CloudConflictDialog,
+  UnlockCloudPinDialog,
+} from './components/CloudSaveDialogs';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { HangarScreen } from './components/HangarScreen';
 import { TitleScreen } from './components/TitleScreen';
@@ -69,6 +72,7 @@ function AppShell() {
           <AdminPanel />
         </ErrorBoundary>
         <CloudConflictDialog />
+        <UnlockCloudPinDialog />
       </div>
     );
   }
@@ -117,6 +121,7 @@ function AppShell() {
       </ErrorBoundary>
 
       <CloudConflictDialog />
+      <UnlockCloudPinDialog />
     </div>
   );
 }

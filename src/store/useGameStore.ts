@@ -791,6 +791,15 @@ function finalizeBattleOutcome(
 
 const initialFresh = createFreshCampaignState('Vance', 'striker');
 
+export function isBattleActive(
+  state?: Pick<GameStoreState, 'screen' | 'battle'>
+): boolean {
+  const target = state ?? useGameStore.getState();
+  return (
+    target.screen === 'BATTLE' && Boolean(target.battle && !target.battle.summary)
+  );
+}
+
 export const useGameStore = create<GameStoreState>()(
   persist(
     (set, get) => ({
@@ -3495,10 +3504,7 @@ export const useGameStore = create<GameStoreState>()(
 
       importSaveFromEnvelope: (rawState, saveVersion) => {
         const state = get();
-        const isBattleActive =
-          state.screen === 'BATTLE' &&
-          Boolean(state.battle && !state.battle.summary);
-        if (isBattleActive) {
+        if (isBattleActive(state)) {
           return {
             ok: false,
             code: 'BATTLE_ACTIVE',
@@ -3564,10 +3570,7 @@ export const useGameStore = create<GameStoreState>()(
 
       undoSaveImport: () => {
         const state = get();
-        const isBattleActive =
-          state.screen === 'BATTLE' &&
-          Boolean(state.battle && !state.battle.summary);
-        if (isBattleActive) {
+        if (isBattleActive(state)) {
           return {
             ok: false,
             error: 'Cannot undo import while a battle is active.',

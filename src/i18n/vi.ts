@@ -1610,6 +1610,19 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'cloud.errNotFound': 'Không tìm thấy Save ID này trên mây.',
   'cloud.errWrongPin': 'Sai PIN',
   'cloud.errOffline': 'Không kết nối được tới máy chủ cloud. Sẽ tự thử lại khi có mạng.',
+  'cloud.statusNeedsPin': 'Cần nhập PIN',
+  'cloud.enterPinBtn': 'Nhập PIN',
+  'cloud.unlockTitle': 'Mở khóa Save cloud',
+  'cloud.unlockDesc':
+    'Nhập mã PIN cho Save ID đang liên kết để tiếp tục đồng bộ tự động.',
+  'cloud.unlockSubmitBtn': 'Mở khóa',
+  'cloud.unlockingBtn': 'Đang xác thực...',
+  'cloud.overwriteTitle': 'Ghi đè save trên máy?',
+  'cloud.overwriteDesc':
+    'Thiết bị này đang có save chiến dịch. Tải save từ mây sẽ thay thế tiến trình hiện tại trên máy.',
+  'cloud.overwriteExportBtn': 'Xuất save (SV1a) trước',
+  'cloud.overwriteConfirmBtn': 'Ghi đè',
+  'cloud.overwriteExported': 'Đã xuất bản sao dự phòng: {filename}',
 };
 
 

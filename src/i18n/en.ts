@@ -1607,6 +1607,19 @@ export const EN_TRANSLATIONS = {
   'cloud.errNotFound': 'No cloud save found for that Save ID.',
   'cloud.errWrongPin': 'Wrong PIN',
   'cloud.errOffline': 'Cannot reach cloud server. Will retry automatically when online.',
+  'cloud.statusNeedsPin': 'PIN required',
+  'cloud.enterPinBtn': 'Enter PIN',
+  'cloud.unlockTitle': 'Unlock Cloud Save',
+  'cloud.unlockDesc':
+    'Enter the PIN for your linked Save ID to resume automatic cloud sync.',
+  'cloud.unlockSubmitBtn': 'Unlock',
+  'cloud.unlockingBtn': 'Verifying...',
+  'cloud.overwriteTitle': 'Overwrite local save?',
+  'cloud.overwriteDesc':
+    'This device already has a campaign save. Loading from cloud will replace your current local progress.',
+  'cloud.overwriteExportBtn': 'Export save (SV1a) first',
+  'cloud.overwriteConfirmBtn': 'Overwrite',
+  'cloud.overwriteExported': 'Exported backup file: {filename}',
 } as const;
 
 export type TranslationKey = keyof typeof EN_TRANSLATIONS;
