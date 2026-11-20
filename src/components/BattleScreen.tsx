@@ -44,6 +44,7 @@ import { getEffectiveItemStats } from '../engine/equipment';
 import { canUnitUseSkill } from '../engine/skills';
 import {
   formatCombatLogMessage,
+  formatStatusEffectDetail,
   getAutoStopReasonLabel,
   getBattleSkillReason,
   getClassName,
@@ -55,7 +56,6 @@ import {
   getSkillTargetLabel,
   getSlotLabel,
   getStatShort,
-  getStatusLabel,
   getTeamTagLabel,
   useI18n,
 } from '../i18n';
@@ -1087,7 +1087,8 @@ export function BattleScreen() {
       return (
         <div
           data-testid="battle-selected-unit-panel"
-          className="rounded-lg border border-slate-800 bg-[#0A101B] p-3 text-[13px] text-slate-400 shrink-0"
+          data-fixed-height="true"
+          className="h-[244px] rounded-lg border border-slate-800 bg-[#0A101B] p-3 text-[13px] text-slate-400 flex items-center justify-center text-center shrink-0"
         >
           {t('battle.noUnitSelected')}
         </div>
@@ -1121,141 +1122,367 @@ export function BattleScreen() {
     return (
       <div
         data-testid="battle-selected-unit-panel"
-        className="rounded-lg border border-slate-800 bg-[#0A101B] p-2.5 space-y-2 shrink-0"
+        data-fixed-height="true"
+        className="h-[244px] rounded-lg border border-slate-800 bg-[#0A101B] p-2.5 flex flex-col justify-between gap-1.5 overflow-y-auto tactical-scroll shrink-0"
       >
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span
-              className="text-[12px] font-mono-nums font-bold px-1.5 py-0.5 rounded border shrink-0"
-              style={{ color: teamAccent, borderColor: teamAccent }}
-            >
-              {getTeamTagLabel(lang, teamRole)}
-            </span>
-            <span
-              className="font-display text-[15px] font-bold truncate"
-              style={{ color: sidebarUnit.alive ? teamAccent : '#94a3b8' }}
-              title={sidebarUnit.name}
-            >
-              {sidebarUnit.name}
-            </span>
-          </div>
-          <span className="text-[12px] font-mono-nums text-slate-300 shrink-0">
-            {getRowTitle(sidebarUnit.row)} · {getExposureLabel(exposure)}
-          </span>
-        </div>
-
-        <div className="space-y-1.5">
-          <StatBar
-            label="HP"
-            value={sidebarUnit.hp}
-            max={sidebarUnit.derived.maxHp}
-            fillClassName={hpColor}
-            heightClassName="h-2"
-            instant={bypassFx}
-            compactHeader
-          />
-          <div className="grid grid-cols-2 gap-2">
-            <StatBar
-              label="SHD"
-              labelClassName="text-sky-400"
-              valueClassName="text-sky-200"
-              value={sidebarUnit.shield}
-              max={Math.max(1, sidebarUnit.derived.maxShield)}
-              valueText={`${sidebarUnit.shield}/${sidebarUnit.derived.maxShield}`}
-              fillClassName="bg-sky-400"
-              heightClassName="h-1.5"
-              instant={bypassFx}
-              compactHeader
-            />
-            <StatBar
-              label="SP"
-              labelClassName="text-purple-300"
-              valueClassName="text-purple-200"
-              value={sidebarUnit.sp}
-              max={Math.max(1, sidebarUnit.derived.maxSp)}
-              valueText={`${sidebarUnit.sp}/${sidebarUnit.derived.maxSp}`}
-              fillClassName="bg-purple-400"
-              heightClassName="h-1.5"
-              instant={bypassFx}
-              compactHeader
-            />
-          </div>
-        </div>
-
-        {/* Fixed-width tabular telemetry */}
-        <div className="grid grid-cols-5 gap-1 text-center font-mono-nums text-[12px]">
-          <div className="rounded bg-slate-900/90 border border-slate-800 py-1">
-            <div className="text-slate-400">ATK</div>
-            <div className="font-bold text-slate-100">
-              {sidebarUnit.derived.attackPower}
-            </div>
-          </div>
-          <div className="rounded bg-slate-900/90 border border-slate-800 py-1">
-            <div className="text-slate-400">DEF</div>
-            <div className="font-bold text-slate-100">
-              {sidebarUnit.derived.defenseRating}
-            </div>
-          </div>
-          <div className="rounded bg-slate-900/90 border border-slate-800 py-1">
-            <div className="text-slate-400">SPD</div>
-            <div className="font-bold text-sky-300">
-              {getEffectiveUnitSpeed(sidebarUnit)}
-            </div>
-          </div>
-          <div className="rounded bg-slate-900/90 border border-slate-800 py-1">
-            <div className="text-slate-400">EVA</div>
-            <div className="font-bold text-emerald-300">
-              {sidebarUnit.derived.dodgeChance}%
-            </div>
-          </div>
-          <div className="rounded bg-slate-900/90 border border-slate-800 py-1">
-            <div className="text-slate-400">CRT</div>
-            <div className="font-bold text-amber-300">
-              {sidebarUnit.derived.critChance}%
-            </div>
-          </div>
-        </div>
-
-        {isBlocked && (
-          <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[12px] text-amber-200 flex items-center gap-1.5">
-            <ShieldAlert className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            <span className="truncate">{t('battle.frontRowBlocked')}</span>
-          </div>
-        )}
-
-        {sidebarUnit.statuses.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {sidebarUnit.statuses.slice(0, 4).map((st) => (
+        <div className="space-y-1.5 min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
               <span
-                key={st.type}
-                className={`px-1.5 py-0.5 rounded border text-[12px] font-mono-nums ${
-                  st.isDebuff
-                    ? 'border-red-500/45 bg-red-500/12 text-red-200'
-                    : 'border-sky-500/45 bg-sky-500/12 text-sky-200'
-                }`}
+                className="text-[12px] font-mono-nums font-bold px-1.5 py-0.5 rounded border shrink-0"
+                style={{ color: teamAccent, borderColor: teamAccent }}
               >
-                {getStatusLabel(lang, st.type)}
+                {getTeamTagLabel(lang, teamRole)}
               </span>
-            ))}
-          </div>
-        )}
-
-        {sidebarUnit.alive && isEnemy && !isStealthed && canPlayerManualAct && (
-          <button
-            type="button"
-            disabled={isLocked}
-            onClick={() => selectTarget(sidebarUnit.id)}
-            className={`w-full min-h-[44px] px-3 rounded-lg text-[13px] font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${
-              isLocked
-                ? 'border border-red-500/45 bg-red-500/15 text-red-200 cursor-default'
-                : 'bg-red-500 hover:bg-red-400 text-slate-950 cursor-pointer'
-            }`}
-          >
-            <Crosshair className="w-4 h-4 shrink-0" />
-            <span>
-              {isLocked ? t('battle.targetLockedBtn') : t('battle.lockTargetBtn')}
+              <span
+                className="font-display text-[15px] font-bold truncate"
+                style={{ color: sidebarUnit.alive ? teamAccent : '#94a3b8' }}
+                title={sidebarUnit.name}
+              >
+                {sidebarUnit.name}
+              </span>
+            </div>
+            <span className="text-[12px] font-mono-nums text-slate-300 shrink-0">
+              {getRowTitle(sidebarUnit.row)} · {getExposureLabel(exposure)}
             </span>
-          </button>
+          </div>
+
+          <div className="space-y-1">
+            <StatBar
+              label="HP"
+              value={sidebarUnit.hp}
+              max={sidebarUnit.derived.maxHp}
+              fillClassName={hpColor}
+              heightClassName="h-2"
+              instant={bypassFx}
+              compactHeader
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <StatBar
+                label="SHD"
+                labelClassName="text-sky-400"
+                valueClassName="text-sky-200"
+                value={sidebarUnit.shield}
+                max={Math.max(1, sidebarUnit.derived.maxShield)}
+                valueText={`${sidebarUnit.shield}/${sidebarUnit.derived.maxShield}`}
+                fillClassName="bg-sky-400"
+                heightClassName="h-1.5"
+                instant={bypassFx}
+                compactHeader
+              />
+              <StatBar
+                label="SP"
+                labelClassName="text-purple-300"
+                valueClassName="text-purple-200"
+                value={sidebarUnit.sp}
+                max={Math.max(1, sidebarUnit.derived.maxSp)}
+                valueText={`${sidebarUnit.sp}/${sidebarUnit.derived.maxSp}`}
+                fillClassName="bg-purple-400"
+                heightClassName="h-1.5"
+                instant={bypassFx}
+                compactHeader
+              />
+            </div>
+          </div>
+
+          {/* Fixed-width tabular telemetry */}
+          <div className="grid grid-cols-5 gap-1 text-center font-mono-nums text-[11px]">
+            <div className="rounded bg-slate-900/90 border border-slate-800 py-0.5">
+              <div className="text-slate-400">ATK</div>
+              <div className="font-bold text-slate-100">
+                {sidebarUnit.derived.attackPower}
+              </div>
+            </div>
+            <div className="rounded bg-slate-900/90 border border-slate-800 py-0.5">
+              <div className="text-slate-400">DEF</div>
+              <div className="font-bold text-slate-100">
+                {sidebarUnit.derived.defenseRating}
+              </div>
+            </div>
+            <div className="rounded bg-slate-900/90 border border-slate-800 py-0.5">
+              <div className="text-slate-400">SPD</div>
+              <div className="font-bold text-sky-300">
+                {getEffectiveUnitSpeed(sidebarUnit)}
+              </div>
+            </div>
+            <div className="rounded bg-slate-900/90 border border-slate-800 py-0.5">
+              <div className="text-slate-400">EVA</div>
+              <div className="font-bold text-emerald-300">
+                {sidebarUnit.derived.dodgeChance}%
+              </div>
+            </div>
+            <div className="rounded bg-slate-900/90 border border-slate-800 py-0.5">
+              <div className="text-slate-400">CRT</div>
+              <div className="font-bold text-amber-300">
+                {sidebarUnit.derived.critChance}%
+              </div>
+            </div>
+          </div>
+
+          {isBlocked && (
+            <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-200 flex items-center gap-1.5">
+              <ShieldAlert className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="truncate">{t('battle.frontRowBlocked')}</span>
+            </div>
+          )}
+
+          {sidebarUnit.statuses.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {sidebarUnit.statuses.slice(0, 4).map((st) => {
+                const detail = formatStatusEffectDetail(lang, st, sidebarUnit);
+                return (
+                  <span
+                    key={st.type}
+                    data-testid={`sidebar-status-chip-${st.type}`}
+                    className={`px-1.5 py-0.5 rounded border text-[11px] font-mono-nums ${
+                      st.isDebuff
+                        ? 'border-red-500/45 bg-red-500/12 text-red-200'
+                        : 'border-sky-500/45 bg-sky-500/12 text-sky-200'
+                    }`}
+                  >
+                    {detail.fullText}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="shrink-0 min-h-[36px] flex items-end">
+          {sidebarUnit.alive && isEnemy && !isStealthed && canPlayerManualAct ? (
+            <button
+              type="button"
+              disabled={isLocked}
+              onClick={() => selectTarget(sidebarUnit.id)}
+              className={`w-full min-h-[36px] px-3 rounded-lg text-[12px] font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${
+                isLocked
+                  ? 'border border-red-500/45 bg-red-500/15 text-red-200 cursor-default'
+                  : 'bg-red-500 hover:bg-red-400 text-slate-950 cursor-pointer'
+              }`}
+            >
+              <Crosshair className="w-4 h-4 shrink-0" />
+              <span>
+                {isLocked ? t('battle.targetLockedBtn') : t('battle.lockTargetBtn')}
+              </span>
+            </button>
+          ) : (
+            <div className="w-full h-[36px] opacity-0 pointer-events-none" aria-hidden="true" />
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderPlayerStatusBar = (compactOneRow: boolean) => {
+    const ownUnit = playerUnit ?? allies[0] ?? null;
+    if (!ownUnit) return null;
+
+    const isDestroyed = !ownUnit.alive;
+    const maxHp = Math.max(1, ownUnit.derived.maxHp);
+    const maxShield = Math.max(1, ownUnit.derived.maxShield);
+    const maxSp = Math.max(1, ownUnit.derived.maxSp);
+
+    const hpPct = isDestroyed
+      ? 0
+      : Math.max(0, Math.min(100, Math.round((ownUnit.hp / maxHp) * 100)));
+    const shieldOverlayPct = isDestroyed
+      ? 0
+      : Math.max(0, Math.min(100, Math.round((ownUnit.shield / maxHp) * 100)));
+    const spPct = isDestroyed
+      ? 0
+      : Math.max(0, Math.min(100, Math.round((ownUnit.sp / maxSp) * 100)));
+
+    const hpFillClass = isDestroyed
+      ? 'bg-slate-600'
+      : hpPct <= 25
+      ? 'bg-red-500'
+      : hpPct <= 55
+      ? 'bg-amber-400'
+      : 'bg-emerald-500';
+
+    if (compactOneRow) {
+      return (
+        <div
+          data-testid="battle-player-status-bar"
+          data-collapsed="true"
+          data-destroyed={isDestroyed ? 'true' : 'false'}
+          className={`shrink-0 mx-1.5 mt-1 rounded border px-2 py-1 flex items-center justify-between gap-2 text-[11px] font-mono-nums ${
+            isDestroyed
+              ? 'border-slate-700 bg-slate-900/85 text-slate-400 grayscale'
+              : 'border-emerald-500/35 bg-[#09121D] text-slate-100'
+          }`}
+        >
+          <div className="flex items-center gap-1.5 min-w-0 shrink">
+            <span
+              className={`font-semibold truncate max-w-[92px] ${
+                isDestroyed ? 'text-slate-400 line-through' : 'text-emerald-300'
+              }`}
+            >
+              {ownUnit.name}
+            </span>
+            {isDestroyed && (
+              <span
+                data-testid="battle-player-destroyed-badge"
+                className="px-1 py-0.2 rounded bg-slate-800 border border-slate-600 text-slate-300 text-[10px] font-bold shrink-0"
+              >
+                {t('battle.playerDestroyed')}
+              </span>
+            )}
+          </div>
+
+          <div className="flex-1 min-w-[90px] flex flex-col gap-0.5">
+            <div
+              data-testid="battle-player-hp-shield-bar"
+              className="relative h-2 w-full rounded-full bg-slate-900 border border-slate-800 overflow-hidden"
+            >
+              <div
+                data-testid="battle-player-hp-fill"
+                style={{ width: `${hpPct}%` }}
+                className={`h-full transition-all duration-200 ${hpFillClass}`}
+              />
+              {shieldOverlayPct > 0 && (
+                <div
+                  data-testid="battle-player-shield-overlay"
+                  style={{ width: `${shieldOverlayPct}%` }}
+                  className="absolute inset-y-0 left-0 bg-sky-400/70 border-r border-cyan-200 transition-all duration-200"
+                />
+              )}
+            </div>
+            <div
+              data-testid="battle-player-sp-bar"
+              className="h-1 w-full rounded-full bg-slate-900 overflow-hidden"
+            >
+              <div
+                style={{ width: `${spPct}%` }}
+                className={`h-full transition-all duration-200 ${
+                  isDestroyed ? 'bg-slate-600' : 'bg-purple-400'
+                }`}
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0 text-[10px]">
+            <span data-testid="battle-player-hp-numbers" className="text-slate-200">
+              {ownUnit.hp}/{ownUnit.derived.maxHp}
+            </span>
+            {ownUnit.shield > 0 && !isDestroyed && (
+              <span data-testid="battle-player-shield-numbers" className="text-sky-300">
+                +{ownUnit.shield}
+              </span>
+            )}
+            <span data-testid="battle-player-sp-numbers" className="text-purple-300">
+              SP {ownUnit.sp}
+            </span>
+            {ownUnit.statuses.length > 0 && !isDestroyed && (
+              <span className="px-1 rounded bg-slate-800 text-amber-200 text-[10px]">
+                {formatStatusEffectDetail(lang, ownUnit.statuses[0], ownUnit).shortText}
+              </span>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        data-testid="battle-player-status-bar"
+        data-collapsed="false"
+        data-destroyed={isDestroyed ? 'true' : 'false'}
+        className={`shrink-0 rounded-lg border px-2.5 py-1.5 space-y-1 ${
+          isDestroyed
+            ? 'border-slate-700 bg-slate-900/85 text-slate-400 grayscale'
+            : 'border-emerald-500/35 bg-[#09121D] text-slate-100'
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2 text-[12px]">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-mono-nums text-[10px] font-bold shrink-0">
+              {getTeamTagLabel(lang, 'me')}
+            </span>
+            <span
+              className={`font-bold truncate ${
+                isDestroyed ? 'text-slate-400 line-through' : 'text-emerald-200'
+              }`}
+              title={t('battle.playerShipLabel')}
+            >
+              {ownUnit.name}
+            </span>
+            {isDestroyed && (
+              <span
+                data-testid="battle-player-destroyed-badge"
+                className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 text-slate-200 text-[11px] font-bold shrink-0"
+              >
+                {t('battle.playerDestroyed')}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2.5 font-mono-nums text-[11px] shrink-0">
+            <span data-testid="battle-player-hp-numbers" className="text-emerald-300">
+              HP {ownUnit.hp}/{ownUnit.derived.maxHp}
+            </span>
+            <span data-testid="battle-player-shield-numbers" className="text-sky-300">
+              SHD {ownUnit.shield}/{maxShield}
+            </span>
+            <span data-testid="battle-player-sp-numbers" className="text-purple-300">
+              SP {ownUnit.sp}/{ownUnit.derived.maxSp}
+            </span>
+          </div>
+        </div>
+
+        {/* Combined HP bar with overlaid Shield layer + thin SP bar below */}
+        <div className="space-y-1">
+          <div
+            data-testid="battle-player-hp-shield-bar"
+            className="relative h-2.5 w-full rounded-full bg-slate-900 border border-slate-800 overflow-hidden"
+          >
+            <div
+              data-testid="battle-player-hp-fill"
+              style={{ width: `${hpPct}%` }}
+              className={`h-full transition-all duration-200 ${hpFillClass}`}
+            />
+            {shieldOverlayPct > 0 && (
+              <div
+                data-testid="battle-player-shield-overlay"
+                style={{ width: `${shieldOverlayPct}%` }}
+                className="absolute inset-y-0 left-0 bg-sky-400/70 border-r border-cyan-200 transition-all duration-200"
+              />
+            )}
+          </div>
+          <div
+            data-testid="battle-player-sp-bar"
+            className="h-1.5 w-full rounded-full bg-slate-900 border border-slate-800/80 overflow-hidden"
+          >
+            <div
+              style={{ width: `${spPct}%` }}
+              className={`h-full transition-all duration-200 ${
+                isDestroyed ? 'bg-slate-600' : 'bg-purple-400'
+              }`}
+            />
+          </div>
+        </div>
+
+        {ownUnit.statuses.length > 0 && !isDestroyed && (
+          <div
+            data-testid="battle-player-status-effects"
+            className="flex flex-wrap gap-1 pt-0.5"
+          >
+            {ownUnit.statuses.map((st) => {
+              const detail = formatStatusEffectDetail(lang, st, ownUnit);
+              return (
+                <span
+                  key={st.type}
+                  className={`px-1.5 py-0.5 rounded border text-[11px] font-mono-nums ${
+                    st.isDebuff
+                      ? 'border-red-500/45 bg-red-500/12 text-red-200'
+                      : 'border-sky-500/45 bg-sky-500/12 text-sky-200'
+                  }`}
+                >
+                  {detail.fullText}
+                </span>
+              );
+            })}
+          </div>
         )}
       </div>
     );
@@ -1356,6 +1583,30 @@ export function BattleScreen() {
             </button>
           </div>
 
+          {/* Force-Ratio Strip + 1-Row Collapsed Player Status Bar */}
+          <div
+            data-testid="battle-force-ratio-bar"
+            className="shrink-0 px-2 pt-1 flex items-center gap-2 text-[11px] font-mono-nums"
+          >
+            <span className="font-bold text-sky-300">
+              {aliveAlliesCount}/{allies.length}
+            </span>
+            <div className="flex-1 h-1.5 rounded-full bg-slate-900 border border-slate-800 overflow-hidden flex">
+              <div
+                style={{ width: `${allySharePct}%` }}
+                className="h-full bg-gradient-to-r from-emerald-500 to-sky-400 transition-all duration-300"
+              />
+              <div
+                style={{ width: `${enemySharePct}%` }}
+                className="h-full bg-gradient-to-r from-orange-500 to-red-500 transition-all duration-300"
+              />
+            </div>
+            <span className="font-bold text-red-400">
+              {aliveEnemiesCount}/{enemies.length}
+            </span>
+          </div>
+          {renderPlayerStatusBar(true)}
+
           {/* Safety Pause Notice (when Auto paused on Low HP / Boss / Elite) */}
           {battle.autoStopNotice && !battle.summary && (
             <div className="shrink-0 border-b border-orange-500/40 bg-orange-500/12 px-2 py-1 flex items-center justify-between gap-2 text-[12px] text-orange-200">
@@ -1379,12 +1630,13 @@ export function BattleScreen() {
             {renderFieldContent()}
           </div>
 
-          {/* 5) Combat log: compact scrollable docked panel or 1-line popup trigger */}
+          {/* 5) Combat log: fixed-height scrollable docked panel or 1-line popup trigger */}
           <div className="shrink-0 px-2 pb-1">
             {combatLogMode === 'docked' ? (
               <div
                 data-testid="battle-phone-docked-log"
-                className="rounded-lg border border-slate-800 bg-[#070A10] flex flex-col overflow-hidden max-h-[144px]"
+                data-fixed-height="true"
+                className="rounded-lg border border-slate-800 bg-[#070A10] flex flex-col overflow-hidden h-[144px]"
               >
                 <div className="shrink-0 px-2.5 py-1 border-b border-slate-800/90 flex items-center justify-between gap-2 text-[11px] text-slate-400">
                   <span className="font-semibold text-slate-200 inline-flex items-center gap-1.5 truncate">
@@ -1407,6 +1659,7 @@ export function BattleScreen() {
                 </div>
                 <CombatLogList
                   entries={battle.log}
+                  units={battle.units}
                   active={isPhonePortrait && combatLogMode === 'docked'}
                   density="compact"
                   mode="docked"
@@ -1655,7 +1908,10 @@ export function BattleScreen() {
             </div>
 
             {/* Compact Balance of Power Meter */}
-            <div className="shrink-0 px-1 flex items-center gap-2 text-[12px] font-mono-nums">
+            <div
+              data-testid="battle-force-ratio-bar"
+              className="shrink-0 px-1 flex items-center gap-2 text-[12px] font-mono-nums"
+            >
               <span className="font-bold text-sky-300 w-10 text-left">
                 {aliveAlliesCount}/{allies.length}
               </span>
@@ -1676,6 +1932,9 @@ export function BattleScreen() {
                 {aliveEnemiesCount}/{enemies.length}
               </span>
             </div>
+
+            {/* Player Own Ship Status Bar (directly under Balance of Power) */}
+            {renderPlayerStatusBar(false)}
 
             {battle.autoStopNotice && !battle.summary && (
               <div className="shrink-0 rounded-lg border border-orange-500/40 bg-orange-500/12 px-3 py-1.5 flex items-center justify-between gap-2 text-[13px] text-orange-200">
@@ -1976,6 +2235,7 @@ export function BattleScreen() {
               {combatLogMode === 'docked' ? (
                 <CombatLogList
                   entries={battle.log}
+                  units={battle.units}
                   active={!isPhonePortrait}
                   density="compact"
                   mode="docked"
@@ -2743,6 +3003,7 @@ export function BattleScreen() {
               <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                 <CombatLogList
                   entries={battle.log}
+                  units={battle.units}
                   active={logSheetOpen}
                   density="comfortable"
                   mode="popup"

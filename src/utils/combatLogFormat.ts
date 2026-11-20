@@ -1,6 +1,10 @@
+import { ALLY_PILOT_POOL } from '../data/pilots';
+import { getSkillById } from '../data/skills';
 import {
   formatCombatLogMessage,
+  getClassName,
   getSkillName,
+  getStatShort,
   getStatusLabel,
   translate,
 } from '../i18n';
@@ -9,7 +13,9 @@ import type {
   BattleStatsSummary,
   CombatLogEntry,
   CombatSide,
+  CombatUnit,
   Language,
+  MechClassId,
   StatusEffectType,
   UnitBattleStats,
 } from '../types/game';
@@ -53,8 +59,16 @@ const DEBUFF_STATUS_TYPES = new Set<StatusEffectType>([
   'def_down',
 ]);
 
+export type CombatLogStrongTone =
+  | 'crit'
+  | 'kill'
+  | 'shield-break'
+  | 'heal'
+  | 'heavy';
+
 export interface StructuredCombatLogRow {
   id: string;
+  round: number;
   turnLabel: string;
   faction: 'ally' | 'enemy' | 'system';
   actorName: string;
@@ -65,6 +79,22 @@ export interface StructuredCombatLogRow {
   valueText: string | null;
   valueTone: CombatLogValueTone;
   fallbackText: string;
+  /** Natural readable sentence for G3d log readability */
+  sentence: string;
+  /** Separate dim skill SP cost (null when basic/passive/0 SP) */
+  spCost: number | null;
+  /** Highlights major combat moments (crit, big damage, shield break, kill, big heal) */
+  isStrong: boolean;
+  strongTone: CombatLogStrongTone | null;
+  /** Avatar rendering metadata */
+  isPilotActor: boolean;
+  actorClassId: MechClassId;
+  actorFactionRole: 'me' | 'ally' | 'enemy' | 'boss' | 'system';
+}
+
+export interface CombatLogRoundGroup {
+  round: number;
+  entries: CombatLogEntry[];
 }
 
 export interface KillTimelineItem {
@@ -169,16 +199,107 @@ function getRowLabel(lang: Language, rawRow: unknown): string {
   return translate(lang, key);
 }
 
+const PILOT_FIRST_SET = new Set(ALLY_PILOT_POOL.firstNames);
+const PILOT_CALLSIGN_SET = new Set(ALLY_PILOT_POOL.callsigns);
+
 /**
- * Parses a CombatLogEntry into structured display fields:
- * [turn] [faction] [actor] [action icon + skill] -> [target] [colored value]
+ * Groups combat log entries chronologically by round number for collapsible Vòng N headers.
+ */
+export function groupCombatLogEntriesByRound(
+  entries: CombatLogEntry[]
+): CombatLogRoundGroup[] {
+  const groups: CombatLogRoundGroup[] = [];
+  const byRound = new Map<number, CombatLogRoundGroup>();
+
+  for (const entry of entries) {
+    const r = Math.max(1, Number(entry.round ?? 1));
+    let grp = byRound.get(r);
+    if (!grp) {
+      grp = { round: r, entries: [] };
+      byRound.set(r, grp);
+      groups.push(grp);
+    }
+    grp.entries.push(entry);
+  }
+  return groups;
+}
+
+function resolveActorAvatarMeta(
+  entry: CombatLogEntry,
+  actorName: string,
+  faction: 'ally' | 'enemy' | 'system',
+  units?: CombatUnit[]
+): {
+  isPilotActor: boolean;
+  actorClassId: MechClassId;
+  actorFactionRole: 'me' | 'ally' | 'enemy' | 'boss' | 'system';
+} {
+  if (faction === 'system') {
+    return {
+      isPilotActor: false,
+      actorClassId: 'striker',
+      actorFactionRole: 'system',
+    };
+  }
+
+  const matched =
+    units?.find(
+      (u) =>
+        u.name === actorName &&
+        (entry.actorSide ? u.side === entry.actorSide : true)
+    ) ?? units?.find((u) => u.name === actorName);
+
+  if (matched) {
+    return {
+      isPilotActor:
+        matched.isPlayer || (matched.side === 'ally' && !matched.isStructure),
+      actorClassId: matched.classId,
+      actorFactionRole: matched.isPlayer
+        ? 'me'
+        : matched.isBoss
+        ? 'boss'
+        : matched.side,
+    };
+  }
+
+  const isPilot =
+    Boolean(entry.actorIsPlayer) ||
+    faction === 'ally' ||
+    PILOT_FIRST_SET.has(actorName) ||
+    PILOT_CALLSIGN_SET.has(actorName);
+
+  const pClass = entry.params?.classId;
+  const fallbackClass: MechClassId =
+    pClass === 'interceptor' ||
+    pClass === 'siege' ||
+    pClass === 'support' ||
+    pClass === 'striker'
+      ? pClass
+      : 'striker';
+
+  return {
+    isPilotActor: isPilot,
+    actorClassId: fallbackClass,
+    actorFactionRole: entry.actorIsPlayer
+      ? 'me'
+      : entry.actorIsBoss
+      ? 'boss'
+      : faction,
+  };
+}
+
+/**
+ * Parses a CombatLogEntry into structured display fields + natural sentence + SP tag + avatar metadata.
  */
 export function parseStructuredCombatLogRow(
   lang: Language,
-  entry: CombatLogEntry
+  entry: CombatLogEntry,
+  units?: CombatUnit[]
 ): StructuredCombatLogRow {
+  const isVi = lang === 'vi';
   const p = entry.params ?? {};
-  const turnLabel = `R${entry.round}`;
+  const round = Math.max(1, Number(entry.round ?? 1));
+  const turnLabel = `R${round}`;
   const faction: 'ally' | 'enemy' | 'system' =
     entry.actorSide === 'ally'
       ? 'ally'
@@ -205,14 +326,37 @@ export function parseStructuredCombatLogRow(
     typeof p.skillId === 'string' && p.skillId.trim().length > 0
       ? p.skillId
       : '';
+  const skillDef = skillId ? getSkillById(skillId) : undefined;
   const skillLabel = skillId ? getSkillName(lang, skillId) : '';
+  const explicitSpCost = Number(p.spCost ?? 0);
+  const resolvedSkillSpCost =
+    explicitSpCost > 0
+      ? explicitSpCost
+      : skillDef && skillDef.spCost > 0
+      ? skillDef.spCost
+      : null;
+
+  const targetUnit =
+    targetFromParams && units
+      ? units.find((u) => u.name === targetFromParams)
+      : undefined;
+  const targetMaxHp = targetUnit?.derived.maxHp ?? 0;
+
+  const avatarMeta = resolveActorAvatarMeta(
+    entry,
+    actorFromParams,
+    faction,
+    units
+  );
 
   switch (entry.templateKey) {
     case 'log.damage': {
-      const shd = Number(p.shieldAbsorbed ?? 0);
-      const hp = Number(p.hullDamage ?? 0);
-      const total = shd + hp;
+      const shd = Number(p.shieldAbsorbed ?? p.shieldDmg ?? 0);
+      const hp = Number(p.hullDamage ?? p.hpDmg ?? p.dmg ?? 0);
+      const total =
+        shd + hp > 0 ? shd + hp : Math.max(0, Number(p.damage ?? 0));
       const isCrit = Number(p.isCrit ?? 0) > 0;
+      const isDefending = Number(p.isDefending ?? 0) > 0;
       const hitIndex = Number(p.hitIndex ?? 0);
       const totalHits = Number(p.totalHits ?? 1);
       const baseAction = skillLabel || translate(lang, 'log.primaryWeapons');
@@ -223,8 +367,38 @@ export function parseStructuredCombatLogRow(
       else if (shd > 0) valParts.push('SHD');
       if (isCrit) valParts.push('CRIT!');
 
+      const breakdownText =
+        shd > 0 && hp > 0
+          ? isVi
+            ? `khiên -${shd}, HP -${hp}`
+            : `shield -${shd}, HP -${hp}`
+          : shd > 0
+          ? isVi
+            ? `khiên -${shd}`
+            : `shield -${shd}`
+          : `HP -${hp}`;
+      const critSuffix = isCrit ? translate(lang, 'log.critTag') : '';
+      const defSuffix = isDefending ? translate(lang, 'log.defendTag') : '';
+      const targetDisp = targetFromParams ?? '—';
+
+      const sentence = isVi
+        ? skillId
+          ? `${actorFromParams} bắn ${actionLabel} vào ${targetDisp}, gây ${total} sát thương (${breakdownText})${critSuffix}${defSuffix}`
+          : `${actorFromParams} bắn ${baseAction} trúng ${targetDisp}, gây ${total} sát thương (${breakdownText})${critSuffix}${defSuffix}`
+        : `${actorFromParams} hits ${targetDisp} with ${actionLabel} for ${total} damage (${breakdownText})${critSuffix}${defSuffix}`;
+
+      const isBigDmg =
+        total >= 250 || (targetMaxHp > 0 && total >= targetMaxHp * 0.28);
+      const isStrong = isCrit || isBigDmg;
+      const strongTone: CombatLogStrongTone | null = isCrit
+        ? 'crit'
+        : isBigDmg
+        ? 'heavy'
+        : null;
+
       return {
         id: entry.id,
+        round,
         turnLabel,
         faction,
         actorName: actorFromParams,
@@ -235,13 +409,25 @@ export function parseStructuredCombatLogRow(
         valueText: valParts.join(' '),
         valueTone: shd > 0 && hp === 0 ? 'shield' : 'damage',
         fallbackText,
+        sentence,
+        spCost:
+          skillId && (hitIndex <= 1 || !hitIndex) ? resolvedSkillSpCost : null,
+        isStrong,
+        strongTone,
+        ...avatarMeta,
       };
     }
 
     case 'log.splashDamage': {
       const dmg = Number(p.damage ?? 0);
+      const isBig =
+        dmg >= 220 || (targetMaxHp > 0 && dmg >= targetMaxHp * 0.25);
+      const sentence = isVi
+        ? `${actorFromParams} nổ lan vào ${targetFromParams ?? '—'}, gây ${dmg} sát thương`
+        : `${actorFromParams} splashes ${targetFromParams ?? '—'} for ${dmg} damage`;
       return {
         id: entry.id,
+        round,
         turnLabel,
         faction,
         actorName: actorFromParams,
@@ -252,45 +438,82 @@ export function parseStructuredCombatLogRow(
         valueText: `-${dmg}`,
         valueTone: 'damage',
         fallbackText,
+        sentence,
+        spCost: null,
+        isStrong: isBig,
+        strongTone: isBig ? 'heavy' : null,
+        ...avatarMeta,
       };
     }
 
     case 'log.counterAttack': {
       const dmg = Number(p.damage ?? 0);
+      const counterActor = targetFromParams ?? actorFromParams;
+      const counterTarget = targetFromParams ? actorFromParams : null;
+      const isBig = dmg >= 200;
+      const counterAvatar = resolveActorAvatarMeta(
+        entry,
+        counterActor,
+        faction,
+        units
+      );
+      const sentence = isVi
+        ? `${counterActor} phản kích ${counterTarget ?? ''}, gây ${dmg} sát thương`
+        : `${counterActor} counters ${counterTarget ?? ''}, dealing ${dmg} damage`;
       return {
         id: entry.id,
+        round,
         turnLabel,
         faction,
-        actorName: targetFromParams ?? actorFromParams,
+        actorName: counterActor,
         autoBadge,
         actionKind: 'attack',
         actionLabel: translate(lang, 'log.actionCounter'),
-        targetName: actorFromParams || null,
+        targetName: counterTarget,
         valueText: `-${dmg}`,
         valueTone: 'damage',
         fallbackText,
+        sentence,
+        spCost: null,
+        isStrong: isBig,
+        strongTone: isBig ? 'heavy' : null,
+        ...counterAvatar,
       };
     }
 
     case 'log.evade': {
+      const usedAction = skillLabel || translate(lang, 'log.primaryWeapons');
+      const sentence = isVi
+        ? `${actorFromParams} bắn ${usedAction} vào ${targetFromParams ?? '—'}, bị né`
+        : `${actorFromParams} fires ${usedAction} at ${targetFromParams ?? '—'}, evaded`;
       return {
         id: entry.id,
+        round,
         turnLabel,
         faction,
         actorName: actorFromParams,
         autoBadge,
         actionKind: skillId ? 'skill' : 'attack',
-        actionLabel: skillLabel || translate(lang, 'log.primaryWeapons'),
+        actionLabel: usedAction,
         targetName: targetFromParams,
         valueText: translate(lang, 'log.actionEvade'),
         valueTone: 'neutral',
         fallbackText,
+        sentence,
+        spCost: skillId ? resolvedSkillSpCost : null,
+        isStrong: false,
+        strongTone: null,
+        ...avatarMeta,
       };
     }
 
     case 'log.invincibleBlock': {
+      const sentence = isVi
+        ? `${targetFromParams ?? '—'} chặn toàn bộ sát thương từ ${actorFromParams}`
+        : `${targetFromParams ?? '—'} blocks all damage from ${actorFromParams}`;
       return {
         id: entry.id,
+        round,
         turnLabel,
         faction,
         actorName: actorFromParams,
@@ -301,50 +524,84 @@ export function parseStructuredCombatLogRow(
         valueText: '0 DMG',
         valueTone: 'shield',
         fallbackText,
+        sentence,
+        spCost: null,
+        isStrong: false,
+        strongTone: null,
+        ...avatarMeta,
       };
     }
 
     case 'log.healSingle': {
       const amount = Number(p.amount ?? 0);
+      const usedSkill = skillLabel || getSkillName(lang, 'sup_nanite_mend');
+      const isBigHeal =
+        amount >= 150 || (targetMaxHp > 0 && amount >= targetMaxHp * 0.25);
+      const sentence = isVi
+        ? `${actorFromParams} dùng ${usedSkill} lên ${targetFromParams ?? '—'}, hồi ${amount} HP`
+        : `${actorFromParams} uses ${usedSkill} on ${targetFromParams ?? '—'}, healing ${amount} HP`;
       return {
         id: entry.id,
+        round,
         turnLabel,
         faction,
         actorName: actorFromParams,
         autoBadge,
         actionKind: 'heal',
-        actionLabel: skillLabel || getSkillName(lang, 'sup_nanite_mend'),
+        actionLabel: usedSkill,
         targetName: targetFromParams,
         valueText: `+${amount} HP`,
         valueTone: 'heal',
         fallbackText,
+        sentence,
+        spCost: resolvedSkillSpCost,
+        isStrong: isBigHeal,
+        strongTone: isBigHeal ? 'heal' : null,
+        ...avatarMeta,
       };
     }
 
     case 'log.healSquad': {
       const total = Number(p.total ?? 0);
+      const usedSkill = skillLabel || getSkillName(lang, 'sup_aegis_field');
+      const isBigHeal = total >= 200;
+      const sentence = isVi
+        ? `${actorFromParams} dùng ${usedSkill} cho toàn đội, hồi ${total} HP`
+        : `${actorFromParams} uses ${usedSkill} on squad, healing ${total} HP`;
       return {
         id: entry.id,
+        round,
         turnLabel,
         faction,
         actorName: actorFromParams,
         autoBadge,
         actionKind: 'heal',
-        actionLabel: skillLabel || getSkillName(lang, 'sup_aegis_field'),
+        actionLabel: usedSkill,
         targetName: translate(lang, 'stats.teamAlly'),
         valueText: `+${total}`,
         valueTone: 'heal',
         fallbackText,
+        sentence,
+        spCost: resolvedSkillSpCost,
+        isStrong: isBigHeal,
+        strongTone: isBigHeal ? 'heal' : null,
+        ...avatarMeta,
       };
     }
 
     case 'log.regenTick': {
       const amount = Number(p.amount ?? 0);
+      const unitName = targetFromParams ?? actorFromParams;
+      const regenAvatar = resolveActorAvatarMeta(entry, unitName, faction, units);
+      const sentence = isVi
+        ? `${unitName} tự hồi ${amount} HP`
+        : `${unitName} self-repairs ${amount} HP`;
       return {
         id: entry.id,
+        round,
         turnLabel,
         faction,
-        actorName: targetFromParams ?? actorFromParams,
+        actorName: unitName,
         autoBadge,
         actionKind: 'heal',
         actionLabel: translate(lang, 'stats.regenTick'),
@@ -352,6 +609,11 @@ export function parseStructuredCombatLogRow(
         valueText: `+${amount} HP`,
         valueTone: 'heal',
         fallbackText,
+        sentence,
+        spCost: null,
+        isStrong: false,
+        strongTone: null,
+        ...regenAvatar,
       };
     }
 
@@ -361,8 +623,15 @@ export function parseStructuredCombatLogRow(
       const parts: string[] = [];
       if (shd > 0) parts.push(`+${shd} SHD`);
       if (sp > 0) parts.push(`+${sp} SP`);
+      const shdText =
+        shd > 0 ? `, +${shd} ${getStatShort(lang, 'shield')}` : '';
+      const spText = sp > 0 ? `, +${sp} SP` : '';
+      const sentence = isVi
+        ? `${actorFromParams} vào thế phòng thủ${shdText}${spText}`
+        : `${actorFromParams} braces defense${shdText}${spText}`;
       return {
         id: entry.id,
+        round,
         turnLabel,
         faction,
         actorName: actorFromParams,
@@ -373,78 +642,131 @@ export function parseStructuredCombatLogRow(
         valueText: parts.join(' ') || translate(lang, 'stats.defendAction'),
         valueTone: 'shield',
         fallbackText,
+        sentence,
+        spCost: null,
+        isStrong: false,
+        strongTone: null,
+        ...avatarMeta,
       };
     }
 
     case 'log.energize': {
       const amount = Number(p.amount ?? 0);
+      const usedSkill = skillLabel || getSkillName(lang, 'sup_flux_transfer');
+      const sentence = isVi
+        ? `${actorFromParams} dùng ${usedSkill} lên ${targetFromParams ?? '—'}, hồi +${amount} SP`
+        : `${actorFromParams} uses ${usedSkill} on ${targetFromParams ?? '—'}, restoring +${amount} SP`;
       return {
         id: entry.id,
+        round,
         turnLabel,
         faction,
         actorName: actorFromParams,
         autoBadge,
         actionKind: 'shield',
-        actionLabel: skillLabel || getSkillName(lang, 'sup_flux_transfer'),
+        actionLabel: usedSkill,
         targetName: targetFromParams,
         valueText: `+${amount} SP`,
         valueTone: 'shield',
         fallbackText,
+        sentence,
+        spCost: resolvedSkillSpCost,
+        isStrong: false,
+        strongTone: null,
+        ...avatarMeta,
       };
     }
 
     case 'log.buffApplied': {
-      const spCost = Number(p.spCost ?? 0);
+      const usedSkill = skillLabel || translate(lang, 'log.actionStatus');
+      const sentence = isVi
+        ? targetFromParams
+          ? `${actorFromParams} dùng ${usedSkill} lên ${targetFromParams}`
+          : `${actorFromParams} dùng ${usedSkill}`
+        : targetFromParams
+        ? `${actorFromParams} uses ${usedSkill} on ${targetFromParams}`
+        : `${actorFromParams} uses ${usedSkill}`;
       return {
         id: entry.id,
+        round,
         turnLabel,
         faction,
         actorName: actorFromParams,
         autoBadge,
         actionKind: 'buff',
-        actionLabel: skillLabel || translate(lang, 'log.actionStatus'),
-        targetName: null,
-        valueText: spCost > 0 ? `-${spCost} SP` : 'BUFF',
+        actionLabel: usedSkill,
+        targetName: targetFromParams,
+        valueText: null,
         valueTone: 'buff',
         fallbackText,
+        sentence,
+        spCost: resolvedSkillSpCost,
+        isStrong: false,
+        strongTone: null,
+        ...avatarMeta,
       };
     }
 
     case 'log.stanceToggle': {
+      const usedSkill = skillLabel || translate(lang, 'log.actionStatus');
+      const state = String(p.state ?? 'ON');
+      const sentence = isVi
+        ? `${actorFromParams} chuyển ${usedSkill}: ${state}`
+        : `${actorFromParams} toggles ${usedSkill}: ${state}`;
       return {
         id: entry.id,
+        round,
         turnLabel,
         faction,
         actorName: actorFromParams,
         autoBadge,
         actionKind: 'buff',
-        actionLabel: skillLabel || translate(lang, 'log.actionStatus'),
+        actionLabel: usedSkill,
         targetName: null,
-        valueText: String(p.state ?? 'ON'),
+        valueText: state,
         valueTone: 'buff',
         fallbackText,
+        sentence,
+        spCost: resolvedSkillSpCost,
+        isStrong: false,
+        strongTone: null,
+        ...avatarMeta,
       };
     }
 
     case 'log.charging': {
+      const usedSkill = skillLabel || getSkillName(lang, 'str_solar_capacitor');
+      const sentence = isVi
+        ? `${actorFromParams} tụ năng lượng ${usedSkill}, khai hỏa lượt sau`
+        : `${actorFromParams} charges ${usedSkill}, firing next turn`;
       return {
         id: entry.id,
+        round,
         turnLabel,
         faction,
         actorName: actorFromParams,
         autoBadge,
         actionKind: 'buff',
-        actionLabel: skillLabel || getSkillName(lang, 'str_solar_capacitor'),
+        actionLabel: usedSkill,
         targetName: null,
         valueText: getStatusLabel(lang, 'charging'),
         valueTone: 'buff',
         fallbackText,
+        sentence,
+        spCost: resolvedSkillSpCost,
+        isStrong: false,
+        strongTone: null,
+        ...avatarMeta,
       };
     }
 
     case 'log.statusCleansed': {
+      const sentence = isVi
+        ? `${actorFromParams} giải toàn bộ hiệu ứng xấu cho đồng minh`
+        : `${actorFromParams} purges all debuffs from allies`;
       return {
         id: entry.id,
+        round,
         turnLabel,
         faction,
         actorName: actorFromParams,
@@ -455,23 +777,38 @@ export function parseStructuredCombatLogRow(
         valueText: translate(lang, 'log.actionCleanse'),
         valueTone: 'buff',
         fallbackText,
+        sentence,
+        spCost: resolvedSkillSpCost,
+        isStrong: false,
+        strongTone: null,
+        ...avatarMeta,
       };
     }
 
     case 'log.scanReveal': {
       const revealed = Number(p.revealed ?? 0);
+      const usedSkill = skillLabel || getSkillName(lang, 'sup_lidar_sweep');
+      const sentence = isVi
+        ? `${actorFromParams} dùng ${usedSkill}, phát hiện ${revealed} mục tiêu tàng hình`
+        : `${actorFromParams} uses ${usedSkill}, revealing ${revealed} cloaked craft`;
       return {
         id: entry.id,
+        round,
         turnLabel,
         faction,
         actorName: actorFromParams,
         autoBadge,
         actionKind: 'buff',
-        actionLabel: skillLabel || getSkillName(lang, 'sup_lidar_sweep'),
+        actionLabel: usedSkill,
         targetName: null,
         valueText: revealed > 0 ? `${revealed}` : null,
         valueTone: 'buff',
         fallbackText,
+        sentence,
+        spCost: resolvedSkillSpCost,
+        isStrong: false,
+        strongTone: null,
+        ...avatarMeta,
       };
     }
 
@@ -479,31 +816,59 @@ export function parseStructuredCombatLogRow(
       const status = String(p.status ?? 'burn') as StatusEffectType;
       const isDebuff = DEBUFF_STATUS_TYPES.has(status);
       const turns = Number(p.turns ?? 2);
+      const statusLabel = getStatusLabel(lang, status);
+      const subject = targetFromParams ?? actorFromParams;
+      const subjectAvatar = resolveActorAvatarMeta(
+        entry,
+        subject,
+        faction,
+        units
+      );
+      const isShieldBreak = status === 'shield_break';
+      const sentence = isVi
+        ? isDebuff
+          ? `${subject} bị ${statusLabel} (${turns} lượt)`
+          : `${subject} nhận ${statusLabel} (${turns} lượt)`
+        : isDebuff
+        ? `${subject} afflicted with ${statusLabel} (${turns}t)`
+        : `${subject} gains ${statusLabel} (${turns}t)`;
       return {
         id: entry.id,
+        round,
         turnLabel,
         faction,
-        actorName: actorFromParams || targetFromParams || '',
+        actorName: subject,
         autoBadge,
         actionKind: isDebuff ? 'debuff' : 'buff',
-        actionLabel: getStatusLabel(lang, status),
+        actionLabel: statusLabel,
         targetName:
           targetFromParams && targetFromParams !== actorFromParams
             ? targetFromParams
             : null,
-        valueText: `${getStatusLabel(lang, status)} (${turns}t)`,
+        valueText: `${statusLabel} (${turns}t)`,
         valueTone: isDebuff ? 'debuff' : 'buff',
         fallbackText,
+        sentence,
+        spCost: null,
+        isStrong: isShieldBreak,
+        strongTone: isShieldBreak ? 'shield-break' : null,
+        ...subjectAvatar,
       };
     }
 
     case 'log.burnTick': {
       const dmg = Number(p.damage ?? 0);
+      const subject = targetFromParams ?? actorFromParams;
+      const burnAvatar = resolveActorAvatarMeta(entry, subject, faction, units);
+      const sentence = isVi
+        ? `${subject} chịu ${dmg} sát thương Thiêu đốt`
+        : `${subject} suffers ${dmg} Burn damage`;
       return {
         id: entry.id,
+        round,
         turnLabel,
         faction,
-        actorName: targetFromParams ?? actorFromParams,
+        actorName: subject,
         autoBadge,
         actionKind: 'debuff',
         actionLabel: translate(lang, 'log.actionBurn'),
@@ -511,12 +876,21 @@ export function parseStructuredCombatLogRow(
         valueText: `-${dmg} HP`,
         valueTone: 'damage',
         fallbackText,
+        sentence,
+        spCost: null,
+        isStrong: dmg >= 220,
+        strongTone: dmg >= 220 ? 'heavy' : null,
+        ...burnAvatar,
       };
     }
 
     case 'log.silencedBlocked': {
+      const sentence = isVi
+        ? `${actorFromParams} bị Câm lặng, chuyển sang Pháo Chính`
+        : `${actorFromParams} is Silenced, defaulting to Primary Lasers`;
       return {
         id: entry.id,
+        round,
         turnLabel,
         faction,
         actorName: actorFromParams,
@@ -527,12 +901,24 @@ export function parseStructuredCombatLogRow(
         valueText: getStatusLabel(lang, 'silence'),
         valueTone: 'debuff',
         fallbackText,
+        sentence,
+        spCost: null,
+        isStrong: false,
+        strongTone: null,
+        ...avatarMeta,
       };
     }
 
     case 'log.destroyed': {
+      const classId = String(p.classId ?? 'striker') as MechClassId;
+      const classLabel = getClassName(lang, classId);
+      const targetLabel = targetFromParams ?? actorFromParams;
+      const sentence = isVi
+        ? `${targetLabel} (${classLabel}) đã phát nổ!`
+        : `${targetLabel} (${classLabel}) was destroyed!`;
       return {
         id: entry.id,
+        round,
         turnLabel,
         faction,
         actorName: actorFromParams,
@@ -543,22 +929,37 @@ export function parseStructuredCombatLogRow(
         valueText: 'KO',
         valueTone: 'damage',
         fallbackText,
+        sentence,
+        spCost: null,
+        isStrong: true,
+        strongTone: 'kill',
+        ...avatarMeta,
       };
     }
 
     case 'log.unitMovesRow': {
+      const rowStr = getRowLabel(lang, p.row);
+      const sentence = isVi
+        ? `${actorFromParams} di chuyển sang ${rowStr}`
+        : `${actorFromParams} moves to ${rowStr}`;
       return {
         id: entry.id,
+        round,
         turnLabel,
         faction,
         actorName: actorFromParams,
         autoBadge,
         actionKind: 'move-row',
         actionLabel: translate(lang, 'log.actionMoveRow'),
-        targetName: getRowLabel(lang, p.row),
+        targetName: rowStr,
         valueText: null,
         valueTone: 'neutral',
         fallbackText,
+        sentence,
+        spCost: null,
+        isStrong: false,
+        strongTone: null,
+        ...avatarMeta,
       };
     }
 
@@ -568,6 +969,7 @@ export function parseStructuredCombatLogRow(
     default: {
       return {
         id: entry.id,
+        round,
         turnLabel,
         faction,
         actorName:
@@ -581,6 +983,11 @@ export function parseStructuredCombatLogRow(
         valueText: null,
         valueTone: 'neutral',
         fallbackText,
+        sentence: fallbackText,
+        spCost: null,
+        isStrong: false,
+        strongTone: null,
+        ...avatarMeta,
       };
     }
   }

@@ -7,6 +7,8 @@ import {
 } from 'react';
 import {
   ArrowDown,
+  ChevronDown,
+  ChevronRight,
   Flame,
   Heart,
   MoveHorizontal,
@@ -18,15 +20,17 @@ import {
   Zap,
 } from 'lucide-react';
 import { useI18n } from '../i18n';
-import type { CombatLogEntry } from '../types/game';
+import type { CombatLogEntry, CombatUnit, MechClassId } from '../types/game';
 import {
   DOCKED_LOG_MAX_ENTRIES,
   filterCombatLogEntries,
+  groupCombatLogEntriesByRound,
   parseStructuredCombatLogRow,
   POPUP_LOG_PAGE_SIZE,
   type CombatLogActionKind,
   type CombatLogChannel,
   type CombatLogDisplayMode,
+  type CombatLogStrongTone,
   type CombatLogValueTone,
 } from '../utils/combatLogFormat';
 import {
@@ -36,6 +40,8 @@ import {
 
 interface CombatLogListProps {
   entries: CombatLogEntry[];
+  /** Optional combat units for pilot vs NPC avatar resolution */
+  units?: CombatUnit[];
   /** Pass `true` when visible (e.g., modal/drawer open) so opening jumps cleanly to bottom if pinned */
   active?: boolean;
   /** Compact density for desktop/phone dock vs larger touch-friendly text for popup sheet */
@@ -83,29 +89,185 @@ function getFactionDotClass(faction: 'ally' | 'enemy' | 'system'): string {
   return 'bg-slate-400';
 }
 
-function getActorTextClass(
-  entry: CombatLogEntry,
-  faction: 'ally' | 'enemy' | 'system'
+function getAvatarBorderClass(
+  role: 'me' | 'ally' | 'enemy' | 'boss' | 'system'
 ): string {
-  if (entry.actorIsPlayer) return 'text-emerald-300';
-  if (faction === 'ally') return 'text-sky-300';
-  if (entry.actorIsBoss) return 'text-orange-300';
-  if (faction === 'enemy') return 'text-red-300';
-  return 'text-slate-400';
+  switch (role) {
+    case 'me':
+      return 'border-emerald-400 bg-emerald-950/70';
+    case 'ally':
+      return 'border-sky-400 bg-sky-950/70';
+    case 'boss':
+      return 'border-orange-400 bg-orange-950/70';
+    case 'enemy':
+      return 'border-red-400 bg-red-950/70';
+    case 'system':
+    default:
+      return 'border-slate-500 bg-slate-900';
+  }
 }
 
-function getValueToneClass(tone: CombatLogValueTone): string {
+function hashSeed(name: string): number {
+  let h = 0;
+  for (let i = 0; i < name.length; i += 1) {
+    h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  }
+  return h;
+}
+
+function PilotPortraitCropSvg({
+  actorName,
+  role,
+}: {
+  actorName: string;
+  role: 'me' | 'ally' | 'enemy' | 'boss' | 'system';
+}) {
+  const seed = hashSeed(actorName);
+  const visorColor =
+    role === 'me'
+      ? '#34d399'
+      : role === 'ally'
+      ? '#38bdf8'
+      : seed % 2 === 0
+      ? '#f87171'
+      : '#fb923c';
+  const suitColor = role === 'me' ? '#065f46' : '#0c4a6e';
+  const helmetTrim = seed % 3 === 0 ? '#cbd5e1' : '#94a3b8';
+
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="w-full h-full"
+      aria-hidden="true"
+    >
+      {/* Flight Suit Shoulders */}
+      <path d="M3 24c1-5 4-7 9-7s8 2 9 7H3z" fill={suitColor} />
+      {/* Pilot Helmet Dome */}
+      <circle cx="12" cy="10" r="6.5" fill="#1e293b" stroke={helmetTrim} strokeWidth="1.2" />
+      {/* Visor Crop */}
+      <path
+        d="M7.2 9.4c1.3-1.4 8.3-1.4 9.6 0 .4.5.3 2-.2 2.5-1.4 1.1-7.8 1.1-9.2 0-.5-.5-.6-2-.2-2.5z"
+        fill={visorColor}
+      />
+      {/* Visor Glint */}
+      <path d="M8.5 9.3h4.2" stroke="#ffffff" strokeOpacity="0.65" strokeWidth="0.9" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function NpcClassGlyphSvg({
+  classId,
+  role,
+}: {
+  classId: MechClassId;
+  role: 'me' | 'ally' | 'enemy' | 'boss' | 'system';
+}) {
+  const accent =
+    role === 'boss' ? '#fb923c' : role === 'ally' ? '#38bdf8' : '#f87171';
+  const hull = role === 'boss' ? '#7c2d12' : '#450a0a';
+
+  if (classId === 'interceptor') {
+    return (
+      <svg viewBox="0 0 24 24" className="w-full h-full" aria-hidden="true">
+        <polygon points="12,3 20,18 12,15 4,18" fill={hull} stroke={accent} strokeWidth="1.4" />
+        <circle cx="12" cy="11" r="2" fill={accent} />
+      </svg>
+    );
+  }
+  if (classId === 'siege') {
+    return (
+      <svg viewBox="0 0 24 24" className="w-full h-full" aria-hidden="true">
+        <polygon points="6,5 18,5 21,12 18,19 6,19 3,12" fill={hull} stroke={accent} strokeWidth="1.4" />
+        <rect x="8" y="9" width="8" height="6" rx="1" fill={accent} />
+      </svg>
+    );
+  }
+  if (classId === 'support') {
+    return (
+      <svg viewBox="0 0 24 24" className="w-full h-full" aria-hidden="true">
+        <circle cx="12" cy="12" r="7.5" fill={hull} stroke={accent} strokeWidth="1.4" />
+        <path d="M12 8v8M8 12h8" stroke={accent} strokeWidth="2" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  // striker default
+  return (
+    <svg viewBox="0 0 24 24" className="w-full h-full" aria-hidden="true">
+      <polygon points="12,3 19,10 16,20 8,20 5,10" fill={hull} stroke={accent} strokeWidth="1.4" />
+      <polygon points="12,7 15,12 12,16 9,12" fill={accent} />
+    </svg>
+  );
+}
+
+function ActorAvatarBadge({
+  actorName,
+  isPilotActor,
+  classId,
+  role,
+  faction,
+}: {
+  actorName: string;
+  isPilotActor: boolean;
+  classId: MechClassId;
+  role: 'me' | 'ally' | 'enemy' | 'boss' | 'system';
+  faction: 'ally' | 'enemy' | 'system';
+}) {
+  return (
+    <span
+      data-testid="combat-log-avatar"
+      data-avatar-type={
+        role === 'system' ? 'system' : isPilotActor ? 'pilot' : 'npc'
+      }
+      className={`relative w-5 h-5 rounded-full border shrink-0 overflow-hidden inline-flex items-center justify-center ${getAvatarBorderClass(
+        role
+      )}`}
+    >
+      {role === 'system' ? (
+        <Terminal className="w-3 h-3 text-slate-400" aria-hidden="true" />
+      ) : isPilotActor ? (
+        <PilotPortraitCropSvg actorName={actorName} role={role} />
+      ) : (
+        <NpcClassGlyphSvg classId={classId} role={role} />
+      )}
+      <span
+        data-testid="combat-log-faction-dot"
+        data-faction={faction}
+        className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-[#070A10] ${getFactionDotClass(
+          faction
+        )}`}
+      />
+    </span>
+  );
+}
+
+function getStrongRowClass(tone: CombatLogStrongTone | null): string {
+  switch (tone) {
+    case 'kill':
+      return 'bg-red-500/12 border-l-2 border-l-red-400/90 pl-1.5 rounded-r border-b border-b-red-500/20';
+    case 'shield-break':
+      return 'bg-fuchsia-500/10 border-l-2 border-l-fuchsia-400/90 pl-1.5 rounded-r border-b border-b-fuchsia-500/20';
+    case 'crit':
+    case 'heavy':
+      return 'bg-amber-500/10 border-l-2 border-l-amber-400/90 pl-1.5 rounded-r border-b border-b-amber-500/20';
+    case 'heal':
+      return 'bg-emerald-500/10 border-l-2 border-l-emerald-400/90 pl-1.5 rounded-r border-b border-b-emerald-500/20';
+    default:
+      return 'border-b border-slate-800/40 last:border-b-0';
+  }
+}
+
+function getSentenceToneClass(tone: CombatLogValueTone): string {
   switch (tone) {
     case 'damage':
-      return 'text-red-400';
+      return 'text-slate-100';
     case 'heal':
-      return 'text-emerald-400';
+      return 'text-emerald-100';
     case 'shield':
-      return 'text-sky-400';
+      return 'text-sky-100';
     case 'buff':
-      return 'text-amber-300';
+      return 'text-amber-100';
     case 'debuff':
-      return 'text-purple-300';
+      return 'text-purple-100';
     case 'neutral':
     default:
       return 'text-slate-300';
@@ -113,13 +275,15 @@ function getValueToneClass(tone: CombatLogValueTone): string {
 }
 
 /**
- * Structured, channel-filtered, stick-to-bottom Combat Log list.
- * - Row format: [turn] [faction dot] [actor] [action icon + skill] -> [target] [colored value]
+ * Structured, round-grouped, channel-filtered, stick-to-bottom Combat Log list.
+ * - Groups entries under collapsible "Vòng N" / "Round N" headers (newest round expanded by default)
+ * - Row format: [avatar + faction border] [action icon] [natural sentence] [optional dim SP tag]
+ * - Strong event highlighting for crit, heavy hit, shield break, kill, and big heal
  * - Channel tabs: All / Allies / Enemies / System (kills & neutral messages included in System)
- * - Docked mode renders only the last 200 entries; Popup mode supports loading all older entries.
  */
 export function CombatLogList({
   entries,
+  units,
   active = true,
   density = 'compact',
   mode = 'docked',
@@ -134,6 +298,9 @@ export function CombatLogList({
   const [internalChannel, setInternalChannel] =
     useState<CombatLogChannel>('all');
   const [popupLimit, setPopupLimit] = useState<number>(POPUP_LOG_PAGE_SIZE);
+  const [roundOverrides, setRoundOverrides] = useState<Record<number, boolean>>(
+    {}
+  );
 
   const activeChannel = controlledChannel ?? internalChannel;
   const setChannel = (ch: CombatLogChannel) => {
@@ -156,6 +323,13 @@ export function CombatLogList({
         : filteredEntries,
     [filteredEntries, hiddenOlderCount, visibleLimit]
   );
+
+  const roundGroups = useMemo(
+    () => groupCombatLogEntriesByRound(visibleEntries),
+    [visibleEntries]
+  );
+  const latestRound =
+    roundGroups.length > 0 ? roundGroups[roundGroups.length - 1].round : 1;
 
   const lastEntryId =
     visibleEntries.length > 0
@@ -208,6 +382,13 @@ export function CombatLogList({
       return () => window.cancelAnimationFrame(rafId);
     }
   }, [active, visibleEntries.length, lastEntryId, activeChannel, scrollToBottom]);
+
+  const toggleRound = (roundNum: number, currentlyOpen: boolean) => {
+    setRoundOverrides((prev) => ({
+      ...prev,
+      [roundNum]: !currentlyOpen,
+    }));
+  };
 
   const isCompact = density === 'compact';
 
@@ -263,15 +444,15 @@ export function CombatLogList({
         )}
       </div>
 
-      {/* Scrollable Log Body */}
+      {/* Scrollable Log Body grouped by Round */}
       <div
         ref={scrollRef}
         data-testid="combat-log-scroll"
         onScroll={handleScroll}
         className={`flex-1 min-h-0 overflow-y-auto overscroll-contain tactical-scroll ${
           isCompact
-            ? 'px-2.5 py-1.5 space-y-1 text-[12px]'
-            : 'px-3.5 py-2.5 space-y-1.5 text-[13px]'
+            ? 'px-2.5 py-1.5 space-y-1.5 text-[12px]'
+            : 'px-3.5 py-2.5 space-y-2 text-[13px]'
         }`}
       >
         {mode === 'popup' && hiddenOlderCount > 0 && (
@@ -297,97 +478,103 @@ export function CombatLogList({
             {t('log.emptyChannel')}
           </div>
         ) : (
-          visibleEntries.map((entry) => {
-            const row = parseStructuredCombatLogRow(lang, entry);
-            const isSystemRow = row.actionKind === 'system';
-
+          roundGroups.map((grp) => {
+            const isOpen =
+              roundOverrides[grp.round] ?? grp.round === latestRound;
             return (
               <div
-                key={entry.id}
-                data-testid="combat-log-entry"
-                data-action-kind={row.actionKind}
-                data-faction={row.faction}
-                data-value-tone={row.valueTone}
-                title={row.fallbackText}
-                className="leading-snug flex items-center flex-wrap gap-x-1.5 gap-y-0.5 py-0.5 border-b border-slate-800/40 last:border-b-0"
+                key={`round-${grp.round}`}
+                data-testid={`combat-log-round-group-${grp.round}`}
+                className="space-y-0.5"
               >
-                {/* [turn] */}
-                <span className="font-mono-nums text-slate-500 shrink-0 text-[11px]">
-                  {row.turnLabel}
-                </span>
-
-                {/* [colored faction dot: ally=blue, enemy=red, system=gray] */}
-                <span
-                  data-testid="combat-log-faction-dot"
-                  data-faction={row.faction}
-                  className={`w-2 h-2 rounded-full shrink-0 ${getFactionDotClass(
-                    row.faction
-                  )}`}
-                />
-
-                {row.autoBadge && (
-                  <span className="font-mono-nums text-[10px] px-1 rounded bg-emerald-500/15 text-emerald-300 shrink-0">
-                    {row.autoBadge}
-                  </span>
-                )}
-
-                {isSystemRow ? (
-                  <>
-                    <ActionKindIcon kind="system" />
-                    <span className="text-slate-300">{row.actionLabel}</span>
-                  </>
-                ) : (
-                  <>
-                    {/* [actor name] */}
-                    {row.actorName && (
-                      <span
-                        data-testid="combat-log-actor"
-                        className={`font-semibold ${getActorTextClass(
-                          entry,
-                          row.faction
-                        )}`}
-                      >
-                        {row.actorName}
-                      </span>
+                <button
+                  type="button"
+                  data-testid={`combat-log-round-header-${grp.round}`}
+                  aria-expanded={isOpen}
+                  data-round-open={isOpen ? 'true' : 'false'}
+                  onClick={() => toggleRound(grp.round, isOpen)}
+                  className="w-full px-2 py-1 rounded border border-slate-800/80 bg-[#0B121F] hover:bg-slate-900 text-[11px] font-semibold text-slate-300 flex items-center justify-between gap-2 cursor-pointer transition-colors"
+                >
+                  <span className="inline-flex items-center gap-1">
+                    {isOpen ? (
+                      <ChevronDown className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                    ) : (
+                      <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                     )}
-
-                    {/* [action icon + skill/action name] */}
-                    <span
-                      data-testid="combat-log-action"
-                      className="inline-flex items-center gap-1 text-slate-200"
-                    >
-                      <ActionKindIcon kind={row.actionKind} />
-                      <span>{row.actionLabel}</span>
+                    <span className="font-mono-nums text-slate-100">
+                      {t('log.roundHeader', { round: grp.round })}
                     </span>
+                  </span>
+                  <span className="font-mono-nums text-[10px] text-slate-400">
+                    {t('log.roundEntriesCount', { count: grp.entries.length })}
+                  </span>
+                </button>
 
-                    {/* -> [target] */}
-                    {row.targetName && (
-                      <>
-                        <span className="text-slate-500" aria-hidden="true">
-                          →
-                        </span>
-                        <span
-                          data-testid="combat-log-target"
-                          className="font-medium text-slate-100"
-                        >
-                          {row.targetName}
-                        </span>
-                      </>
-                    )}
+                <div
+                  data-testid={`combat-log-round-body-${grp.round}`}
+                  className={isOpen ? 'space-y-1 pt-0.5' : 'hidden'}
+                >
+                  {grp.entries.map((entry) => {
+                    const row = parseStructuredCombatLogRow(
+                      lang,
+                      entry,
+                      units
+                    );
 
-                    {/* [colored value] */}
-                    {row.valueText && (
-                      <span
-                        data-testid="combat-log-value"
-                        className={`font-mono-nums font-bold ${getValueToneClass(
-                          row.valueTone
+                    return (
+                      <div
+                        key={entry.id}
+                        data-testid="combat-log-entry"
+                        data-action-kind={row.actionKind}
+                        data-faction={row.faction}
+                        data-value-tone={row.valueTone}
+                        data-strong={row.isStrong ? 'true' : 'false'}
+                        title={row.sentence}
+                        className={`leading-snug flex items-center gap-1.5 py-1 pr-1 ${getStrongRowClass(
+                          row.strongTone
                         )}`}
                       >
-                        {row.valueText}
-                      </span>
-                    )}
-                  </>
-                )}
+                        {/* [avatar with faction-colored border + faction dot] */}
+                        <ActorAvatarBadge
+                          actorName={row.actorName || row.actionLabel}
+                          isPilotActor={row.isPilotActor}
+                          classId={row.actorClassId}
+                          role={row.actorFactionRole}
+                          faction={row.faction}
+                        />
+
+                        {/* [single action icon] */}
+                        <ActionKindIcon kind={row.actionKind} />
+
+                        {row.autoBadge && (
+                          <span className="font-mono-nums text-[10px] px-1 rounded bg-emerald-500/15 text-emerald-300 shrink-0">
+                            {row.autoBadge}
+                          </span>
+                        )}
+
+                        {/* [natural sentence] */}
+                        <span
+                          data-testid="combat-log-sentence"
+                          className={`min-w-0 flex-1 break-words ${getSentenceToneClass(
+                            row.valueTone
+                          )}`}
+                        >
+                          {row.sentence}
+                        </span>
+
+                        {/* [separate dim skill SP cost] */}
+                        {row.spCost !== null && row.spCost > 0 && (
+                          <span
+                            data-testid="combat-log-sp-cost"
+                            className="font-mono-nums text-[10px] px-1 py-0.5 rounded bg-purple-500/10 border border-purple-500/25 text-purple-300/75 shrink-0 whitespace-nowrap"
+                          >
+                            {t('log.spCostTag', { cost: row.spCost })}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             );
           })

@@ -805,6 +805,9 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'chat.flankOpen': 'Mở được hành lang bắn rồi — ép tới!',
   'chat.movingIn': 'Đang lao vào đường bay công kích!',
   'chat.goodHit': 'Trúng trực diện vào thân tàu địch!',
+  'chat.flankCover': 'Đang khóa sườn — giữ vững hỏa lực!',
+  'chat.shieldsHolding': 'Khiên vẫn vững — giữ đội hình!',
+  'chat.pushingLine': 'Đang ép tuyến địch — dứt điểm ngay!',
 
   // Hàng đợi băng chuyền & Cuồng nộ chống kéo dài
   'queue.inCombat': 'Đang chiến đấu',
@@ -1363,5 +1366,12 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'fx.previewAlly': 'PHE TA',
   'fx.previewEnemy': 'MỤC TIÊU',
   'fx.reducedMotionNotice': 'Đang bật Giảm chuyển động (chỉ mờ dần hiệu ứng chính)',
+
+  // G3d: Trạng thái chi tiết, Nhật ký theo vòng, Thanh trạng thái người chơi & Ổn định bố cục
+  'battle.playerDestroyed': 'Đã phát nổ',
+  'battle.playerShipLabel': 'Chiến hạm của bạn',
+  'log.roundHeader': 'Vòng {round}',
+  'log.roundEntriesCount': '{count} dòng',
+  'log.spCostTag': '-{cost} SP',
 };
 

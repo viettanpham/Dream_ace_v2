@@ -14,13 +14,13 @@ import {
   hasStatus,
 } from '../engine/combat';
 import {
+  formatStatusEffectDetail,
   getArchetypeLabel,
   getClassName,
   getSkillDesc,
   getSkillName,
   getSkillTargetLabel,
   getStatusDesc,
-  getStatusLabel,
   getTeamTagLabel,
   useI18n,
 } from '../i18n';
@@ -311,32 +311,36 @@ export function UnitDetailSheet({
             </div>
           ) : (
             <div className="space-y-1.5">
-              {unit.statuses.map((st) => (
-                <div
-                  key={st.type}
-                  className={`rounded border px-3 py-2 flex items-start justify-between gap-2 ${
-                    st.isDebuff
-                      ? 'border-red-500/40 bg-red-500/10'
-                      : 'border-sky-500/35 bg-sky-500/10'
-                  }`}
-                >
-                  <div className="min-w-0">
-                    <div
-                      className={`text-xs font-bold ${
-                        st.isDebuff ? 'text-red-300' : 'text-sky-200'
-                      }`}
-                    >
-                      {getStatusLabel(lang, st.type)}
+              {unit.statuses.map((st) => {
+                const detail = formatStatusEffectDetail(lang, st, unit);
+                return (
+                  <div
+                    key={st.type}
+                    data-testid={`detail-status-${st.type}`}
+                    className={`rounded border px-3 py-2 flex items-start justify-between gap-2 ${
+                      st.isDebuff
+                        ? 'border-red-500/40 bg-red-500/10'
+                        : 'border-sky-500/35 bg-sky-500/10'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <div
+                        className={`text-xs font-bold font-mono-nums ${
+                          st.isDebuff ? 'text-red-300' : 'text-sky-200'
+                        }`}
+                      >
+                        {detail.fullText}
+                      </div>
+                      <div className="text-xs text-slate-300 mt-0.5 leading-snug">
+                        {getStatusDesc(lang, st.type)}
+                      </div>
                     </div>
-                    <div className="text-xs text-slate-300 mt-0.5 leading-snug">
-                      {getStatusDesc(lang, st.type)}
-                    </div>
+                    <span className="font-mono-nums text-xs font-bold px-1.5 py-0.5 rounded bg-slate-950/70 text-slate-200 shrink-0">
+                      {formatStatusDuration(st)}
+                    </span>
                   </div>
-                  <span className="font-mono-nums text-xs font-bold px-1.5 py-0.5 rounded bg-slate-950/70 text-slate-200 shrink-0">
-                    {formatStatusDuration(st)}
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

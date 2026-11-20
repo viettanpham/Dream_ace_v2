@@ -8,7 +8,13 @@ import {
 } from 'react';
 import { HelpCircle, Radio, X } from 'lucide-react';
 import { getTeamColorRole, hasStatus } from '../engine/combat';
-import { getClassName, getStatusLabel, getStatusShortLabel, useI18n } from '../i18n';
+import {
+  formatStatusEffectDetail,
+  getClassName,
+  getStatusShortLabel,
+  translate,
+  useI18n,
+} from '../i18n';
 import type {
   ActiveStatusEffect,
   BattleSpeed,
@@ -486,10 +492,11 @@ interface RadarUnitMarkerProps {
   autoBadgeText: string;
   showStatusLabels: boolean;
   formatStatusShortText: (st: ActiveStatusEffect) => string;
-  formatStatusTooltip: (st: ActiveStatusEffect) => string;
+  formatStatusTooltip: (st: ActiveStatusEffect, unit?: CombatUnit) => string;
   onMarkerRef: (unitId: string, el: SVGGElement | null) => void;
   onHoverUnit: (unitId: string | null) => void;
   onInspectStatus: (unit: CombatUnit, st: ActiveStatusEffect) => void;
+  onHoverStatus?: (unit: CombatUnit, st: ActiveStatusEffect | null) => void;
   onTap: (unitId: string) => void;
   onLongPressStart: (unitId: string) => void;
   onLongPressCancel: () => void;
@@ -516,6 +523,7 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
   onMarkerRef,
   onHoverUnit,
   onInspectStatus,
+  onHoverStatus,
   onTap,
   onLongPressStart,
   onLongPressCancel,
@@ -888,7 +896,7 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
               >
                 {statusLayout.visible.map((st, sIdx) => {
                   const meta = getStatusIconMeta(st);
-                  const stTip = formatStatusTooltip(st);
+                  const stTip = formatStatusTooltip(st, unit);
                   const cxIcon = statusStartX + sIdx * statusStep;
                   return (
                     <g
@@ -904,6 +912,14 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
                       onClick={(e) => {
                         e.stopPropagation();
                         onInspectStatus(unit, st);
+                      }}
+                      onMouseEnter={(e) => {
+                        e.stopPropagation();
+                        onHoverStatus?.(unit, st);
+                      }}
+                      onMouseLeave={(e) => {
+                        e.stopPropagation();
+                        onHoverStatus?.(unit, null);
                       }}
                       className="cursor-pointer"
                     >
@@ -1122,10 +1138,9 @@ export function BattleRadarView({
   const [invalidToast, setInvalidToast] = useState<string | null>(null);
   const [inspectedStatusInfo, setInspectedStatusInfo] = useState<{
     unitName: string;
-    label: string;
-    strengthText: string | null;
-    roundsText: string | null;
+    detailText: string;
     isDebuff: boolean;
+    source: 'tap' | 'hover';
   } | null>(null);
   const [fadingDefeatIds, setFadingDefeatIds] = useState<string[]>([]);
   const [rowSlides, setRowSlides] = useState<RowSlideEffect[]>([]);
@@ -1180,19 +1195,19 @@ export function BattleRadarView({
   }, []);
 
   const formatStatusTooltip = useCallback(
-    (st: ActiveStatusEffect): string => {
-      const label = getStatusLabel(lang, st.type);
-      const meta = getStatusIconMeta(st);
-      const parts: string[] = [label];
-      if (meta.strengthPct !== null) {
-        parts.push(t('radar.statusStrength', { value: meta.strengthPct }));
+    (st: ActiveStatusEffect, unit?: CombatUnit): string => {
+      const detail = formatStatusEffectDetail(lang, st, unit);
+      const valuePart = detail.valueText
+        ? `${detail.label}: ${detail.valueText}`
+        : detail.label;
+      if (st.turnsRemaining > 0 && st.turnsRemaining < 50) {
+        return `${valuePart} (${translate(lang, 'radar.statusRounds', {
+          turns: st.turnsRemaining,
+        })})`;
       }
-      if (st.turnsRemaining > 0 && st.turnsRemaining < 90) {
-        parts.push(t('radar.statusRounds', { turns: st.turnsRemaining }));
-      }
-      return parts.join(' · ');
+      return valuePart;
     },
-    [lang, t]
+    [lang]
   );
 
   const handleInspectStatus = useCallback(
@@ -1200,16 +1215,9 @@ export function BattleRadarView({
       const meta = getStatusIconMeta(st);
       setInspectedStatusInfo({
         unitName: formatShortUnitName(unit.name, 10),
-        label: getStatusLabel(lang, st.type),
-        strengthText:
-          meta.strengthPct !== null
-            ? t('radar.statusStrength', { value: meta.strengthPct })
-            : null,
-        roundsText:
-          st.turnsRemaining > 0 && st.turnsRemaining < 90
-            ? t('radar.statusRounds', { turns: st.turnsRemaining })
-            : null,
+        detailText: formatStatusTooltip(st, unit),
         isDebuff: meta.isDebuff,
+        source: 'tap',
       });
       if (statusTooltipTimerRef.current !== null) {
         window.clearTimeout(statusTooltipTimerRef.current);
@@ -1219,7 +1227,30 @@ export function BattleRadarView({
         statusTooltipTimerRef.current = null;
       }, 3200);
     },
-    [lang, t]
+    [formatStatusTooltip]
+  );
+
+  const handleHoverStatus = useCallback(
+    (unit: CombatUnit, st: ActiveStatusEffect | null) => {
+      if (!st) {
+        setInspectedStatusInfo((cur) =>
+          cur && cur.source === 'hover' ? null : cur
+        );
+        return;
+      }
+      if (statusTooltipTimerRef.current !== null) {
+        window.clearTimeout(statusTooltipTimerRef.current);
+        statusTooltipTimerRef.current = null;
+      }
+      const meta = getStatusIconMeta(st);
+      setInspectedStatusInfo({
+        unitName: formatShortUnitName(unit.name, 10),
+        detailText: formatStatusTooltip(st, unit),
+        isDebuff: meta.isDebuff,
+        source: 'hover',
+      });
+    },
+    [formatStatusTooltip]
   );
 
   // Auto-hide speech bubble after 1.5s cleanly even when rendered standalone
@@ -1912,7 +1943,7 @@ export function BattleRadarView({
           }${
             unit.statuses.length > 0
               ? ` · ${unit.statuses
-                  .map((s) => formatStatusTooltip(s))
+                  .map((s) => formatStatusTooltip(s, unit))
                   .join(', ')}`
               : ''
           }`;
@@ -1940,6 +1971,7 @@ export function BattleRadarView({
               onMarkerRef={registerMarkerRef}
               onHoverUnit={setHoveredTargetId}
               onInspectStatus={handleInspectStatus}
+              onHoverStatus={handleHoverStatus}
               onTap={handleTokenTap}
               onLongPressStart={handleLongPressStart}
               onLongPressCancel={handleLongPressCancel}
@@ -2093,27 +2125,21 @@ export function BattleRadarView({
         )}
       </div>
 
-      {/* Status Icon Tap Tooltip (shows name, strength, remaining rounds) */}
+      {/* Status Icon Tap & Hover Tooltip (shows unit name + exact effect value & duration) */}
       {inspectedStatusInfo && (
         <div
           role="status"
           aria-live="polite"
           data-testid="radar-status-tooltip"
           onClick={() => setInspectedStatusInfo(null)}
-          className={`absolute bottom-2.5 left-1/2 -translate-x-1/2 z-30 max-w-[92%] rounded-lg border px-3 py-1.5 text-[12px] font-semibold shadow-lg whitespace-nowrap truncate cursor-pointer ${
+          className={`absolute bottom-2.5 left-1/2 -translate-x-1/2 z-30 max-w-[92%] rounded-lg border px-3 py-1.5 text-[12px] font-semibold font-mono-nums shadow-lg whitespace-nowrap truncate cursor-pointer ${
             inspectedStatusInfo.isDebuff
               ? 'border-red-500/70 bg-[#1a0a0d]/95 text-red-100'
               : 'border-emerald-500/70 bg-[#071a10]/95 text-emerald-100'
           }`}
         >
           <span>{inspectedStatusInfo.unitName}: </span>
-          <span>{inspectedStatusInfo.label}</span>
-          {inspectedStatusInfo.strengthText && (
-            <span> · {inspectedStatusInfo.strengthText}</span>
-          )}
-          {inspectedStatusInfo.roundsText && (
-            <span> · {inspectedStatusInfo.roundsText}</span>
-          )}
+          <span>{inspectedStatusInfo.detailText}</span>
         </div>
       )}
 

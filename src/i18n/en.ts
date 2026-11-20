@@ -803,6 +803,9 @@ export const EN_TRANSLATIONS = {
   'chat.flankOpen': 'Opening firing corridor — push now!',
   'chat.movingIn': 'Vectoring in for attack run!',
   'chat.goodHit': 'Direct hit confirmed on hostile hull!',
+  'chat.flankCover': 'Locking down the flank — keep firing!',
+  'chat.shieldsHolding': 'Shields are holding — hold formation!',
+  'chat.pushingLine': 'Pushing the hostile line — press the attack!',
 
   // Conveyor Turn Queue & Soft Enrage
   'queue.inCombat': 'In combat',
@@ -1361,6 +1364,13 @@ export const EN_TRANSLATIONS = {
   'fx.previewAlly': 'ALLY',
   'fx.previewEnemy': 'TARGET',
   'fx.reducedMotionNotice': 'Reduced motion active (fade-only core FX)',
+
+  // G3d: Detailed status values, round-grouped log, player status bar & layout stability
+  'battle.playerDestroyed': 'Destroyed',
+  'battle.playerShipLabel': 'Your Ship',
+  'log.roundHeader': 'Round {round}',
+  'log.roundEntriesCount': '{count} entries',
+  'log.spCostTag': '-{cost} SP',
 } as const;
 
 export type TranslationKey = keyof typeof EN_TRANSLATIONS;

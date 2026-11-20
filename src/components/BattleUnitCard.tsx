@@ -27,11 +27,9 @@ import {
 } from 'lucide-react';
 import { getTeamColorRole, hasStatus } from '../engine/combat';
 import {
+  formatStatusEffectDetail,
   getArchetypeLabel,
   getClassName,
-  getStatusDesc,
-  getStatusLabel,
-  getStatusShortLabel,
   useI18n,
 } from '../i18n';
 import type {
@@ -456,7 +454,7 @@ export const BattleUnitCard = memo(function BattleUnitCard({
       onPointerCancel={cancelLongPress}
       onPointerLeave={cancelLongPress}
       style={rowStyle}
-      className={`relative min-h-[50px] rounded-lg border px-2 py-1 flex items-center gap-2 transition-colors select-none ${rowClass} ${
+      className={`relative min-h-[50px] rounded-lg border px-2 py-1 flex flex-col gap-1 transition-colors select-none ${rowClass} ${
         isClickable ? 'cursor-pointer' : ''
       } ${isStealthed ? 'border-dashed opacity-75' : ''} ${
         frontBlocked ? 'opacity-65' : ''
@@ -487,178 +485,182 @@ export const BattleUnitCard = memo(function BattleUnitCard({
           );
         })}
 
-      {/* 1. Role / Team Shape Icon */}
-      <div className="relative shrink-0">
-        <RoleBadgeSvg
-          classId={unit.classId}
-          side={unit.side}
-          isPlayer={unit.isPlayer}
-          isBoss={unit.isBoss}
-          color={teamVars.accent}
-        />
-        {frontBlocked && (
-          <span
-            data-testid={`unit-row-lock-${unit.id}`}
-            title={t('radar.invalidFrontAlive')}
-            className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-[#070B12] border border-amber-400 flex items-center justify-center"
-          >
-            <Lock className="w-2.5 h-2.5 text-amber-300" />
-          </span>
-        )}
-      </div>
-
-      {/* 2. Short Name + Class & Level + Dedicated Status Chips Line */}
-      <div className="w-[108px] sm:w-[132px] shrink-0 min-w-0">
-        <div className="flex items-center gap-1 min-w-0">
-          {unit.isBoss && (
-            <Skull
-              className="w-3.5 h-3.5 shrink-0"
-              style={{ color: 'var(--team-boss)' }}
-            />
-          )}
-          <span
-            title={unit.name}
-            style={{
-              color: isActiveTurn ? 'var(--turn-active-text)' : teamVars.accent,
-            }}
-            className="text-[13px] font-bold leading-tight whitespace-nowrap truncate"
-          >
-            {shortName}
-          </span>
-          {isTargeted && (
-            <Crosshair
-              className={`w-3.5 h-3.5 shrink-0 ${
-                isEnemy ? 'text-red-400' : 'text-emerald-400'
-              }`}
-              aria-hidden="true"
-            />
-          )}
-          {unit.isPlayer && autoActive && (
-            <span className="text-[11px] font-mono-nums font-bold text-emerald-300 shrink-0">
-              {t('auto.badge')}
+      <div className="flex items-center gap-2 min-w-0">
+        {/* 1. Role / Team Shape Icon */}
+        <div className="relative shrink-0">
+          <RoleBadgeSvg
+            classId={unit.classId}
+            side={unit.side}
+            isPlayer={unit.isPlayer}
+            isBoss={unit.isBoss}
+            color={teamVars.accent}
+          />
+          {frontBlocked && (
+            <span
+              data-testid={`unit-row-lock-${unit.id}`}
+              title={t('radar.invalidFrontAlive')}
+              className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-[#070B12] border border-amber-400 flex items-center justify-center"
+            >
+              <Lock className="w-2.5 h-2.5 text-amber-300" />
             </span>
           )}
         </div>
-        <div className="text-[12px] text-slate-400 font-mono-nums leading-tight truncate">
-          {roleLabel} · {t('common.levelShort')}
-          {unit.level}
+
+        {/* 2. Short Name + Class & Level */}
+        <div className="w-[108px] sm:w-[132px] shrink-0 min-w-0">
+          <div className="flex items-center gap-1 min-w-0">
+            {unit.isBoss && (
+              <Skull
+                className="w-3.5 h-3.5 shrink-0"
+                style={{ color: 'var(--team-boss)' }}
+              />
+            )}
+            <span
+              title={unit.name}
+              style={{
+                color: isActiveTurn ? 'var(--turn-active-text)' : teamVars.accent,
+              }}
+              className="text-[13px] font-bold leading-tight whitespace-nowrap truncate"
+            >
+              {shortName}
+            </span>
+            {isTargeted && (
+              <Crosshair
+                className={`w-3.5 h-3.5 shrink-0 ${
+                  isEnemy ? 'text-red-400' : 'text-emerald-400'
+                }`}
+                aria-hidden="true"
+              />
+            )}
+            {unit.isPlayer && autoActive && (
+              <span className="text-[11px] font-mono-nums font-bold text-emerald-300 shrink-0">
+                {t('auto.badge')}
+              </span>
+            )}
+          </div>
+          <div className="text-[12px] text-slate-400 font-mono-nums leading-tight truncate">
+            {roleLabel} · {t('common.levelShort')}
+            {unit.level}
+          </div>
         </div>
-        {visibleStatuses.length > 0 && (
-          <div
-            data-testid={`card-status-row-${unit.id}`}
-            className="mt-1 flex flex-wrap items-center gap-1"
-          >
-            {visibleStatuses.map((st, idx) => (
+
+        {/* 3. Fixed-Width Tabular HP Bar + Shield & SP Bars (zero layout shift via scaleX) */}
+        <div className="flex-1 min-w-[92px] space-y-1">
+          {/* HP line */}
+          <div className="flex items-center gap-1.5">
+            <div className="flex-1 h-2 rounded-full bg-slate-900 border border-slate-800/90 overflow-hidden">
+              <div
+                className={`h-full w-full ${hpBarColor}`}
+                style={{
+                  transform: `scaleX(${hpRatio})`,
+                  transformOrigin: 'left center',
+                }}
+              />
+            </div>
+            <span className="w-[66px] text-right font-mono-nums text-[12px] font-semibold text-slate-200 shrink-0">
+              {unit.hp}/{unit.derived.maxHp}
+            </span>
+          </div>
+
+          {/* Shield + SP compact dual bars */}
+          <div className="grid grid-cols-2 gap-1.5 items-center">
+            <div className="flex items-center gap-1 min-w-0">
+              <div className="flex-1 h-1.5 rounded-full bg-slate-900 overflow-hidden">
+                <div
+                  className={`h-full w-full ${
+                    shieldBroken ? 'bg-red-500/60' : 'bg-sky-400'
+                  }`}
+                  style={{
+                    transform: `scaleX(${
+                      unit.derived.maxShield > 0 ? shdRatio : 0
+                    })`,
+                    transformOrigin: 'left center',
+                  }}
+                />
+              </div>
+              <span
+                className={`w-[30px] text-right font-mono-nums text-[12px] shrink-0 ${
+                  shieldBroken ? 'text-red-300 line-through' : 'text-sky-300'
+                }`}
+              >
+                {unit.shield}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1 min-w-0">
+              <div className="flex-1 h-1.5 rounded-full bg-slate-900 overflow-hidden">
+                <div
+                  className="h-full w-full bg-purple-400"
+                  style={{
+                    transform: `scaleX(${unit.derived.maxSp > 0 ? spRatio : 0})`,
+                    transformOrigin: 'left center',
+                  }}
+                />
+              </div>
+              <span className="w-[26px] text-right font-mono-nums text-[12px] text-purple-300 shrink-0">
+                {unit.sp}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* 4. >=44px Info Button */}
+        <div className="shrink-0 flex items-center gap-1">
+          {onInspect && (
+            <button
+              type="button"
+              data-testid={`unit-row-info-${unit.id}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onInspect();
+              }}
+              aria-label={t('battle.inspectUnit')}
+              title={t('battle.inspectUnit')}
+              className="min-w-[44px] min-h-[44px] rounded-md border border-slate-700/80 bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-sky-300 inline-flex items-center justify-center cursor-pointer shrink-0"
+            >
+              <Info className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Dedicated Status Chips Line with exact engine effect values */}
+      {visibleStatuses.length > 0 && (
+        <div
+          data-testid={`card-status-row-${unit.id}`}
+          className="flex flex-wrap items-center gap-1 pl-9"
+        >
+          {visibleStatuses.map((st, idx) => {
+            const detail = formatStatusEffectDetail(lang, st, unit);
+            return (
               <span
                 key={`${st.type}-${idx}`}
                 data-testid={`card-status-chip-${unit.id}-${idx}`}
                 data-status-type={st.type}
-                title={`${getStatusLabel(lang, st.type)}: ${getStatusDesc(
-                  lang,
-                  st.type
-                )}`}
-                className={`px-1 py-0.5 rounded border inline-flex items-center gap-0.5 text-[10px] font-semibold leading-none ${getStatusBadgeStyle(
+                title={detail.fullText}
+                className={`px-1.5 py-0.5 rounded border inline-flex items-center gap-1 text-[10px] font-semibold leading-tight font-mono-nums ${getStatusBadgeStyle(
                   st
                 )}`}
               >
                 <StatusMiniIcon type={st.type} />
                 {showStatusLabels && (
                   <span data-testid={`card-status-label-${unit.id}-${idx}`}>
-                    {getStatusShortLabel(lang, st.type)}
+                    {detail.fullText}
                   </span>
                 )}
               </span>
-            ))}
-            {overflowStatuses > 0 && (
-              <span
-                data-testid={`card-status-overflow-${unit.id}`}
-                className="text-[10px] font-mono-nums font-bold text-slate-300 px-0.5"
-              >
-                +{overflowStatuses}
-              </span>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* 3. Fixed-Width Tabular HP Bar + Shield & SP Bars (zero layout shift via scaleX) */}
-      <div className="flex-1 min-w-[92px] space-y-1">
-        {/* HP line */}
-        <div className="flex items-center gap-1.5">
-          <div className="flex-1 h-2 rounded-full bg-slate-900 border border-slate-800/90 overflow-hidden">
-            <div
-              className={`h-full w-full ${hpBarColor}`}
-              style={{
-                transform: `scaleX(${hpRatio})`,
-                transformOrigin: 'left center',
-              }}
-            />
-          </div>
-          <span className="w-[66px] text-right font-mono-nums text-[12px] font-semibold text-slate-200 shrink-0">
-            {unit.hp}/{unit.derived.maxHp}
-          </span>
-        </div>
-
-        {/* Shield + SP compact dual bars */}
-        <div className="grid grid-cols-2 gap-1.5 items-center">
-          <div className="flex items-center gap-1 min-w-0">
-            <div className="flex-1 h-1.5 rounded-full bg-slate-900 overflow-hidden">
-              <div
-                className={`h-full w-full ${
-                  shieldBroken ? 'bg-red-500/60' : 'bg-sky-400'
-                }`}
-                style={{
-                  transform: `scaleX(${
-                    unit.derived.maxShield > 0 ? shdRatio : 0
-                  })`,
-                  transformOrigin: 'left center',
-                }}
-              />
-            </div>
+            );
+          })}
+          {overflowStatuses > 0 && (
             <span
-              className={`w-[30px] text-right font-mono-nums text-[12px] shrink-0 ${
-                shieldBroken ? 'text-red-300 line-through' : 'text-sky-300'
-              }`}
+              data-testid={`card-status-overflow-${unit.id}`}
+              className="text-[10px] font-mono-nums font-bold text-slate-300 px-0.5"
             >
-              {unit.shield}
+              +{overflowStatuses}
             </span>
-          </div>
-
-          <div className="flex items-center gap-1 min-w-0">
-            <div className="flex-1 h-1.5 rounded-full bg-slate-900 overflow-hidden">
-              <div
-                className="h-full w-full bg-purple-400"
-                style={{
-                  transform: `scaleX(${unit.derived.maxSp > 0 ? spRatio : 0})`,
-                  transformOrigin: 'left center',
-                }}
-              />
-            </div>
-            <span className="w-[26px] text-right font-mono-nums text-[12px] text-purple-300 shrink-0">
-              {unit.sp}
-            </span>
-          </div>
+          )}
         </div>
-      </div>
-
-      {/* 4. >=44px Info Button */}
-      <div className="shrink-0 flex items-center gap-1">
-        {onInspect && (
-          <button
-            type="button"
-            data-testid={`unit-row-info-${unit.id}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              onInspect();
-            }}
-            aria-label={t('battle.inspectUnit')}
-            title={t('battle.inspectUnit')}
-            className="min-w-[44px] min-h-[44px] rounded-md border border-slate-700/80 bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-sky-300 inline-flex items-center justify-center cursor-pointer shrink-0"
-          >
-            <Info className="w-4 h-4" />
-          </button>
-        )}
-      </div>
+      )}
     </div>
   );
 });

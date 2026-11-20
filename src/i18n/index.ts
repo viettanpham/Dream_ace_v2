@@ -2,10 +2,12 @@ import { useCallback } from 'react';
 import { AFFIX_SUFFIX_MAP, getItemTemplate } from '../data/items';
 import { useGameStore } from '../store/useGameStore';
 import type {
+  ActiveStatusEffect,
   AutoStopReason,
   BattleSkillUsability,
   CombatLogEntry,
   CombatLogTag,
+  CombatUnit,
   EnemyArchetype,
   EquipmentSlot,
   EquipValidationResult,
@@ -34,6 +36,20 @@ const DICTIONARIES: Record<Language, Record<TranslationKey, string>> = {
   en: EN_TRANSLATIONS,
 };
 
+export function formatMissingTranslationFallback(rawKey: string): string {
+  const cleaned = String(rawKey ?? '').trim();
+  if (!cleaned) return '';
+  const tail = cleaned.includes('.')
+    ? cleaned.slice(cleaned.lastIndexOf('.') + 1)
+    : cleaned;
+  const spaced = tail
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .trim();
+  if (!spaced) return cleaned;
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 export function translate(
   lang: Language,
   key: TranslationKey,
@@ -47,7 +63,10 @@ export function translate(
     // Store may not be initialized during static module evaluation
   }
   const dict = DICTIONARIES[lang] ?? VI_TRANSLATIONS;
-  let text = dict[key] ?? EN_TRANSLATIONS[key] ?? key;
+  const rawEntry =
+    (dict as Record<string, string | undefined>)[key] ??
+    (EN_TRANSLATIONS as Record<string, string | undefined>)[key];
+  let text = rawEntry ?? formatMissingTranslationFallback(key);
 
   if (params) {
     for (const [k, v] of Object.entries(params)) {
@@ -197,6 +216,186 @@ export function getStatusShortLabel(
   const pair = STATUS_SHORT_LABELS[status];
   if (pair) return lang === 'vi' ? pair.vi : pair.en;
   return getStatusLabel(lang, status);
+}
+
+export interface StatusEffectDetail {
+  label: string;
+  valueText: string;
+  durationText: string | null;
+  shortText: string;
+  fullText: string;
+}
+
+/**
+ * Computes human-readable status chip text directly from real engine state & BALANCE_CONFIG.
+ * Examples:
+ *  - VI: "Làm chậm: -30% Tốc (2 lượt)", "Vỡ Khiên: Khóa Khiên (2 lượt)", "Hồi HP: +93/lượt"
+ *  - EN: "Slow: -30% SPD (2t)", "Shield Break: Shields off (2t)", "Regen HP: +93/t"
+ */
+export function formatStatusEffectDetail(
+  lang: Language,
+  st: ActiveStatusEffect,
+  unit?: CombatUnit | null
+): StatusEffectDetail {
+  const isVi = lang === 'vi';
+  const label = getStatusLabel(lang, st.type);
+  const maxHp = unit?.derived?.maxHp ?? 0;
+
+  let valueText = '';
+  let includeTurns = st.turnsRemaining > 0 && st.turnsRemaining < 50;
+
+  switch (st.type) {
+    case 'burn': {
+      if (maxHp > 0) {
+        const dmg = Math.max(
+          5,
+          Math.round(maxHp * BALANCE_CONFIG.burnDamageRatio)
+        );
+        valueText = isVi ? `-${dmg} HP/lượt` : `-${dmg} HP/t`;
+      } else {
+        const pct = Math.round(BALANCE_CONFIG.burnDamageRatio * 100);
+        valueText = isVi ? `-${pct}% HP/lượt` : `-${pct}% HP/t`;
+      }
+      break;
+    }
+    case 'regen_hp': {
+      const ratio = st.magnitude ?? 0.1;
+      if (maxHp > 0) {
+        const heal = Math.max(4, Math.round(maxHp * ratio));
+        valueText = isVi ? `+${heal}/lượt` : `+${heal}/t`;
+      } else {
+        const pct = Math.round(ratio * 100);
+        valueText = isVi ? `+${pct}% HP/lượt` : `+${pct}% HP/t`;
+      }
+      break;
+    }
+    case 'slow': {
+      const pct = Math.round(
+        (st.magnitude ?? BALANCE_CONFIG.slowSpeedPenalty) * 100
+      );
+      valueText = isVi ? `-${pct}% Tốc` : `-${pct}% SPD`;
+      break;
+    }
+    case 'spd_up': {
+      const pct = Math.round((st.magnitude ?? 0.5) * 100);
+      valueText = isVi ? `+${pct}% Tốc` : `+${pct}% SPD`;
+      break;
+    }
+    case 'def_up': {
+      const pct = Math.round((st.magnitude ?? 0.25) * 100);
+      valueText = isVi ? `+${pct}% Giáp` : `+${pct}% DEF`;
+      break;
+    }
+    case 'def_down': {
+      const pct = Math.round((st.magnitude ?? 0.3) * 100);
+      valueText = isVi ? `-${pct}% Giáp` : `-${pct}% DEF`;
+      break;
+    }
+    case 'atk_up': {
+      const pct = Math.round((st.magnitude ?? 0.2) * 100);
+      valueText = isVi ? `+${pct}% Công` : `+${pct}% ATK`;
+      break;
+    }
+    case 'primary_dmg_up': {
+      const pct = Math.round((st.magnitude ?? 0.3) * 100);
+      valueText = isVi ? `+${pct}% ST thường` : `+${pct}% Primary`;
+      break;
+    }
+    case 'skill_dmg_up': {
+      const pct = Math.round((st.magnitude ?? 0.3) * 100);
+      valueText = isVi ? `+${pct}% ST kỹ năng` : `+${pct}% Skill DMG`;
+      break;
+    }
+    case 'eva_up': {
+      // Exact engine formula in combat.ts: dodge += Math.round((mag ?? 0.25) * 40)
+      const bonusPct = Math.round((st.magnitude ?? 0.25) * 40);
+      valueText = isVi ? `+${bonusPct}% Né` : `+${bonusPct}% EVA`;
+      break;
+    }
+    case 'vulnerable': {
+      const pct = Math.round((st.magnitude ?? 0.15) * 100);
+      valueText = isVi ? `+${pct}% ST nhận` : `+${pct}% DMG taken`;
+      break;
+    }
+    case 'shield_break': {
+      // Exact engine behavior: bypasses shields & blocks shield restore (combat.ts)
+      valueText = isVi ? 'Khóa Khiên' : 'Shields off';
+      break;
+    }
+    case 'silence': {
+      valueText = isVi ? 'Khóa kỹ năng' : 'Skills locked';
+      break;
+    }
+    case 'stealth': {
+      valueText = isVi ? 'Không thể nhắm' : 'Untargetable';
+      break;
+    }
+    case 'evade_all': {
+      valueText = isVi ? 'Né 100%' : '100% Evade';
+      break;
+    }
+    case 'invincible': {
+      valueText = isVi ? 'Miễn sát thương' : '0 DMG taken';
+      break;
+    }
+    case 'sure_hit': {
+      const charges = st.charges ?? 1;
+      valueText = isVi ? `Chắc trúng (${charges} lần)` : `Sure hit (${charges}x)`;
+      if (st.turnsRemaining >= 50) includeTurns = false;
+      break;
+    }
+    case 'counter': {
+      const pct = Math.round((st.magnitude ?? 1.0) * 100);
+      const charges = st.charges ?? 1;
+      valueText = isVi
+        ? `Phản ${pct}% (${charges} lần)`
+        : `Counter ${pct}% (${charges}x)`;
+      if (st.turnsRemaining >= 50) includeTurns = false;
+      break;
+    }
+    case 'siege_mode': {
+      const pct = Math.round((st.magnitude ?? 0.6) * 100);
+      valueText = isVi ? `+${pct}% ST, 0% Né` : `+${pct}% DMG, 0 EVA`;
+      includeTurns = false;
+      break;
+    }
+    case 'siege_defense': {
+      const pct = Math.round((st.magnitude ?? 0.8) * 100);
+      valueText = isVi ? `+${pct}% Giáp, -30% ST` : `+${pct}% DEF, -30% DMG`;
+      includeTurns = false;
+      break;
+    }
+    case 'charging': {
+      valueText = isVi ? 'Khai hỏa lượt sau' : 'Fires next turn';
+      includeTurns = false;
+      break;
+    }
+  }
+
+  const durationText = includeTurns
+    ? isVi
+      ? `(${st.turnsRemaining} lượt)`
+      : `(${st.turnsRemaining}t)`
+    : null;
+
+  const fullText = valueText
+    ? durationText
+      ? `${label}: ${valueText} ${durationText}`
+      : `${label}: ${valueText}`
+    : durationText
+    ? `${label} ${durationText}`
+    : label;
+
+  const shortLabel = getStatusShortLabel(lang, st.type);
+  const shortText = valueText ? `${shortLabel}: ${valueText}` : shortLabel;
+
+  return {
+    label,
+    valueText,
+    durationText,
+    shortText,
+    fullText,
+  };
 }
 
 export function getArchetypeLabel(
