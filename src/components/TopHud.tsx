@@ -22,6 +22,7 @@ import {
   useBattleLayoutMode,
 } from '../utils/battleDisplay';
 import { BottomSheet } from './BottomSheet';
+import { CloudSaveSection } from './CloudSaveSection';
 import { EffectsSettingsPanel } from './EffectsSettingsPanel';
 import { LanguageToggle } from './LanguageToggle';
 import { SaveTransferSection } from './SaveTransferSection';
@@ -439,6 +440,9 @@ export function TopHud() {
 
           {/* Effects Settings (Full/Compact/Off, Reduced Motion, Status Labels, Debug & Test Preview) */}
           <EffectsSettingsPanel />
+
+          {/* Cloud Save (PIN-encrypted cross-device sync) */}
+          <CloudSaveSection />
 
           {/* Portable Save Export / Import with Optional PIN */}
           <SaveTransferSection />

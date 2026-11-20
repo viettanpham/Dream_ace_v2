@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { HardDrive, Sliders, Volume2, VolumeX } from 'lucide-react';
+import { CloudDownload, HardDrive, Sliders, Volume2, VolumeX } from 'lucide-react';
 import { MECH_CLASS_LIST } from '../data/classes';
 import {
   getClassCode,
@@ -8,9 +8,12 @@ import {
   getClassRole,
   useI18n,
 } from '../i18n';
+import { useCloudSaveStore } from '../store/useCloudSaveStore';
 import { ENABLE_ADMIN_CP, useGameStore } from '../store/useGameStore';
 import type { MechClassId } from '../types/game';
 import { BottomSheet } from './BottomSheet';
+import { OpenRemoteSaveDialog } from './CloudSaveDialogs';
+import { CloudSaveSection } from './CloudSaveSection';
 import { FighterSvg } from './FighterSvg';
 import { LanguageToggle } from './LanguageToggle';
 import { SaveTransferSection } from './SaveTransferSection';
@@ -30,6 +33,8 @@ export function TitleScreen() {
 
   const [confirmReset, setConfirmReset] = useState(false);
   const [saveSheetOpen, setSaveSheetOpen] = useState(false);
+  const [openRemoteModalOpen, setOpenRemoteModalOpen] = useState(false);
+  const cloudConfigured = useCloudSaveStore((s) => s.isConfigured)();
   const [newPilotName, setNewPilotName] = useState(pilot.name || 'Kira');
   const [starterClass, setStarterClass] = useState<MechClassId>(
     pilot.activeGearId || 'striker'
@@ -155,8 +160,16 @@ export function TitleScreen() {
         title={t('save.sectionTitle')}
         subtitle={t('app.saveHint')}
       >
-        <SaveTransferSection />
+        <div className="space-y-4">
+          <CloudSaveSection />
+          <SaveTransferSection />
+        </div>
       </BottomSheet>
+
+      <OpenRemoteSaveDialog
+        open={openRemoteModalOpen}
+        onClose={() => setOpenRemoteModalOpen(false)}
+      />
 
       {/* Center Composition */}
       <main className="relative z-10 mx-auto w-full max-w-6xl px-4 sm:px-10 py-5 grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-center">
@@ -209,6 +222,22 @@ export function TitleScreen() {
                   className="h-12 px-8 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-semibold text-sm tracking-wide rounded transition-colors cursor-pointer whitespace-nowrap"
                 >
                   {t('title.continue')}
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="title-open-remote-save-btn"
+                  disabled={!cloudConfigured}
+                  onClick={() => setOpenRemoteModalOpen(true)}
+                  title={
+                    cloudConfigured
+                      ? t('cloud.openRemoteBtn')
+                      : t('cloud.notConfigured')
+                  }
+                  className="h-12 px-5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed border border-sky-500/45 disabled:border-slate-800 text-sky-200 disabled:text-slate-500 font-medium text-sm rounded transition-colors cursor-pointer inline-flex items-center gap-2 whitespace-nowrap"
+                >
+                  <CloudDownload className="w-4 h-4 shrink-0" />
+                  <span>{t('cloud.openRemoteBtn')}</span>
                 </button>
 
                 {!confirmReset ? (
@@ -310,13 +339,39 @@ export function TitleScreen() {
                 {getClassDesc(lang, starterClass)}
               </p>
 
-              <button
-                type="button"
-                onClick={() => startCampaign(newPilotName, starterClass)}
-                className="w-full sm:w-auto min-h-[48px] px-8 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-bold text-sm tracking-wide rounded-lg transition-colors cursor-pointer whitespace-nowrap"
-              >
-                {t('title.start')}
-              </button>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => startCampaign(newPilotName, starterClass)}
+                  className="w-full sm:w-auto min-h-[48px] px-8 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-bold text-sm tracking-wide rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  {t('title.start')}
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="title-open-remote-save-btn"
+                  disabled={!cloudConfigured}
+                  onClick={() => setOpenRemoteModalOpen(true)}
+                  title={
+                    cloudConfigured
+                      ? t('cloud.openRemoteBtn')
+                      : t('cloud.notConfigured')
+                  }
+                  className="w-full sm:w-auto min-h-[48px] px-5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed border border-sky-500/45 disabled:border-slate-800 text-sky-200 disabled:text-slate-500 font-semibold text-sm rounded-lg transition-colors cursor-pointer inline-flex items-center justify-center gap-2 whitespace-nowrap"
+                >
+                  <CloudDownload className="w-4 h-4 shrink-0" />
+                  <span>{t('cloud.openRemoteBtn')}</span>
+                </button>
+              </div>
+              {!cloudConfigured && (
+                <p
+                  data-testid="title-cloud-not-configured"
+                  className="text-[11px] text-slate-500"
+                >
+                  {t('cloud.notConfigured')}
+                </p>
+              )}
             </div>
           )}
         </div>

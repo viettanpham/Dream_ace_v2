@@ -2,10 +2,12 @@ import { useEffect } from 'react';
 import { AdminPanel } from './components/AdminPanel';
 import { AutoTacticsModal } from './components/AutoTacticsModal';
 import { BattleScreen } from './components/BattleScreen';
+import { CloudConflictDialog } from './components/CloudSaveDialogs';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { HangarScreen } from './components/HangarScreen';
 import { TitleScreen } from './components/TitleScreen';
 import { TopHud } from './components/TopHud';
+import { attachCloudAutosaveListeners } from './store/useCloudSaveStore';
 import { ENABLE_ADMIN_CP, useGameStore } from './store/useGameStore';
 import { useBattleLayoutMode } from './utils/battleDisplay';
 import { installGlobalErrorCapture } from './utils/errorLog';
@@ -49,6 +51,11 @@ function AppShell() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [unlockAdminMode, toggleAdminPanel]);
 
+  // Cloud save autosave (after every battle + when repeat loop ends, max 1/30s, auto-retry on online)
+  useEffect(() => {
+    return attachCloudAutosaveListeners();
+  }, []);
+
   if (screen === 'TITLE') {
     return (
       <div className="h-[100dvh] w-full overflow-hidden">
@@ -61,6 +68,7 @@ function AppShell() {
         >
           <AdminPanel />
         </ErrorBoundary>
+        <CloudConflictDialog />
       </div>
     );
   }
@@ -107,6 +115,8 @@ function AppShell() {
       >
         <AdminPanel />
       </ErrorBoundary>
+
+      <CloudConflictDialog />
     </div>
   );
 }
