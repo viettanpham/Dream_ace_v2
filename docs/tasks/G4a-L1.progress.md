@@ -1,8 +1,0 @@
-# TASK G4a-L1 Progress
-
-- [x] 1. Remove camera slot completely on all devices (battle-camera-slot, "Camera hành động" toggle, battleLayoutPrefs.ts if unused, battle.actionCamera in vi/en, old tests) + add test asserting no battle-camera-slot on phone & desktop (or skip if already gone)
-- [x] 2. Player block (desktop >640px): alive = max 64px (single row [TA] name + HP/SHD/SP thin bars side by side + status strip with desktop default rows = 1 while keeping existing player/Admin overrides); destroyed = ONE slim line max 28px ([TA], struck-through name, "Đã phát nổ" chip; no bars, no reserved status strip, no empty box)
-- [x] 3. Desktop 1440x900 hard limits (>640px): control row + force bar + player block together <= 150px (alive, 1 status row); radar/cards start inside first screen without scrolling; battle area fills remaining viewport height with min-height 420px; radar uses full main-column width with even lanes and no empty side margins (container sizing only)
-- [x] 4. Fix clipped left edge (nothing at x < 8px) and horizontal overflow at widths 1246 & 1440 in card AND radar mode (`min-w-0` on flex/grid children, no horizontal scrollbar)
-- [x] 5. SP color is ORANGE `#EF9F27`: define ONE shared token/constant and use it for every SP bar and SP value (player block, unit cards, selected-unit panel, log values), removing purple SP styling
-- [x] 6. Vitest tests (item 1 test, destroyed player slim line, alive player max-height, SP orange token & no purple, no fixed min-height on removed blocks, vi/en parity) + full checks (`vitest`, `tsc --noEmit`, build) + `docs/tasks/G4a-L1.report.md`
