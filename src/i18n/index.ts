@@ -1,0 +1,910 @@
+import { useCallback } from 'react';
+import { AFFIX_SUFFIX_MAP, getItemTemplate } from '../data/items';
+import { useGameStore } from '../store/useGameStore';
+import type {
+  ActiveStatusEffect,
+  AutoStopReason,
+  BattleSkillUsability,
+  CombatLogEntry,
+  CombatLogTag,
+  CombatUnit,
+  EnemyArchetype,
+  EquipmentSlot,
+  EquipValidationResult,
+  ItemInstance,
+  ItemRarity,
+  Language,
+  MechClassId,
+  SectorDifficulty,
+  SimpleTacticsConfig,
+  SkillCategory,
+  SkillTargetType,
+  StatKey,
+  StatusEffectType,
+  TacticsCondition,
+  TacticsPresetId,
+  TacticsRule,
+  TacticsTargetSelector,
+  TeamColorRole,
+} from '../types/game';
+import { BALANCE_CONFIG } from '../data/balance';
+import { EN_TRANSLATIONS, type TranslationKey } from './en';
+import { VI_TRANSLATIONS } from './vi';
+
+const DICTIONARIES: Record<Language, Record<TranslationKey, string>> = {
+  vi: VI_TRANSLATIONS,
+  en: EN_TRANSLATIONS,
+};
+
+export function formatMissingTranslationFallback(rawKey: string): string {
+  const cleaned = String(rawKey ?? '').trim();
+  if (!cleaned) return '';
+  const tail = cleaned.includes('.')
+    ? cleaned.slice(cleaned.lastIndexOf('.') + 1)
+    : cleaned;
+  const spaced = tail
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .trim();
+  if (!spaced) return cleaned;
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+export function translate(
+  lang: Language,
+  key: TranslationKey,
+  params?: Record<string, string | number>
+): string {
+  try {
+    if (useGameStore.getState()?.adminConfig?.showRawI18nKeys) {
+      return key;
+    }
+  } catch {
+    // Store may not be initialized during static module evaluation
+  }
+  const dict = DICTIONARIES[lang] ?? VI_TRANSLATIONS;
+  const rawEntry =
+    (dict as Record<string, string | undefined>)[key] ??
+    (EN_TRANSLATIONS as Record<string, string | undefined>)[key];
+  let text = rawEntry ?? formatMissingTranslationFallback(key);
+
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      text = text.replaceAll(`{${k}}`, String(v));
+    }
+  }
+  return text;
+}
+
+export function getClassName(lang: Language, classId: MechClassId): string {
+  return translate(lang, `class.${classId}.name` as TranslationKey);
+}
+
+export function getClassCode(lang: Language, classId: MechClassId): string {
+  return translate(lang, `class.${classId}.code` as TranslationKey);
+}
+
+export function getClassRole(lang: Language, classId: MechClassId): string {
+  return translate(lang, `class.${classId}.role` as TranslationKey);
+}
+
+export function getClassDesc(lang: Language, classId: MechClassId): string {
+  return translate(lang, `class.${classId}.desc` as TranslationKey);
+}
+
+export function getStatLabel(lang: Language, key: StatKey): string {
+  return translate(lang, `stat.${key}.label` as TranslationKey);
+}
+
+export function getStatShort(lang: Language, key: StatKey): string {
+  return translate(lang, `stat.${key}.short` as TranslationKey);
+}
+
+export function getStatDesc(lang: Language, key: StatKey): string {
+  return translate(lang, `stat.${key}.desc` as TranslationKey);
+}
+
+export function getSkillName(lang: Language, skillId: string): string {
+  return translate(lang, `skill.${skillId}.name` as TranslationKey);
+}
+
+export function getSkillDesc(lang: Language, skillId: string): string {
+  return translate(lang, `skill.${skillId}.desc` as TranslationKey);
+}
+
+export function getSkillCategoryLabel(
+  lang: Language,
+  category: SkillCategory
+): string {
+  return translate(lang, `skill.category.${category}` as TranslationKey);
+}
+
+export function getSkillTargetLabel(
+  lang: Language,
+  targetType: SkillTargetType
+): string {
+  return translate(lang, `skill.target.${targetType}` as TranslationKey);
+}
+
+export function getBattleSkillReason(
+  lang: Language,
+  usability: BattleSkillUsability
+): string | null {
+  if (usability.canUse) return null;
+  return translate(lang, `battle.skillReason.${usability.reason}` as TranslationKey, {
+    turns: usability.cooldownRemaining,
+    cost: usability.spCost,
+  });
+}
+
+export function getSectorName(lang: Language, sectorId: string): string {
+  return translate(lang, `sector.${sectorId}.name` as TranslationKey);
+}
+
+export function getSectorRegion(lang: Language, sectorId: string): string {
+  return translate(lang, `sector.${sectorId}.region` as TranslationKey);
+}
+
+export function getSectorDesc(lang: Language, sectorId: string): string {
+  return translate(lang, `sector.${sectorId}.desc` as TranslationKey);
+}
+
+export function getDifficultyLabel(
+  lang: Language,
+  difficulty: SectorDifficulty
+): string {
+  return translate(lang, `difficulty.${difficulty}` as TranslationKey);
+}
+
+export function getSlotLabel(lang: Language, slot: EquipmentSlot): string {
+  return translate(lang, `slot.${slot}` as TranslationKey);
+}
+
+export function getSlotShort(lang: Language, slot: EquipmentSlot): string {
+  return translate(lang, `slotShort.${slot}` as TranslationKey);
+}
+
+export function getRarityLabel(lang: Language, rarity: ItemRarity): string {
+  return translate(lang, `rarity.${rarity}` as TranslationKey);
+}
+
+export function getStatusLabel(
+  lang: Language,
+  status: StatusEffectType
+): string {
+  return translate(lang, `status.${status}` as TranslationKey);
+}
+
+export function getStatusDesc(
+  lang: Language,
+  status: StatusEffectType
+): string {
+  return translate(lang, `status.${status}.desc` as TranslationKey);
+}
+
+const STATUS_SHORT_LABELS: Record<
+  StatusEffectType,
+  { en: string; vi: string }
+> = {
+  burn: { en: 'Burn', vi: 'Thiêu' },
+  shield_break: { en: 'ShdBrk', vi: 'VỡKhiên' },
+  slow: { en: 'Slow', vi: 'Chậm' },
+  silence: { en: 'Silence', vi: 'Câm' },
+  stealth: { en: 'Stealth', vi: 'Ẩn' },
+  vulnerable: { en: 'Vuln', vi: 'TổnTh' },
+  def_up: { en: 'DEF+', vi: 'THỦ+' },
+  def_down: { en: 'DEF-', vi: 'THỦ-' },
+  eva_up: { en: 'EVA+', vi: 'NÉ+' },
+  atk_up: { en: 'ATK+', vi: 'CÔNG+' },
+  spd_up: { en: 'SPD+', vi: 'TỐC+' },
+  primary_dmg_up: { en: 'WPN+', vi: 'VK+' },
+  skill_dmg_up: { en: 'SKL+', vi: 'KN+' },
+  sure_hit: { en: 'Lock', vi: 'Khóa' },
+  counter: { en: 'Riposte', vi: 'Phản' },
+  evade_all: { en: 'Mirage', vi: 'ẢoẢnh' },
+  invincible: { en: 'Stasis', vi: 'BấtTử' },
+  regen_hp: { en: 'Regen', vi: 'HồiHP' },
+  siege_mode: { en: 'Siege', vi: 'Pháo' },
+  siege_defense: { en: 'Bastion', vi: 'PháoĐài' },
+  charging: { en: 'Charge', vi: 'Nạp' },
+};
+
+export function getStatusShortLabel(
+  lang: Language,
+  status: StatusEffectType
+): string {
+  const pair = STATUS_SHORT_LABELS[status];
+  if (pair) return lang === 'vi' ? pair.vi : pair.en;
+  return getStatusLabel(lang, status);
+}
+
+export interface StatusEffectDetail {
+  label: string;
+  valueText: string;
+  durationText: string | null;
+  shortText: string;
+  fullText: string;
+}
+
+/**
+ * Computes human-readable status chip text directly from real engine state & BALANCE_CONFIG.
+ * Examples:
+ *  - VI: "Làm chậm: -30% Tốc (2 lượt)", "Vỡ Khiên: Khóa Khiên (2 lượt)", "Hồi HP: +93/lượt"
+ *  - EN: "Slow: -30% SPD (2t)", "Shield Break: Shields off (2t)", "Regen HP: +93/t"
+ */
+export function formatStatusEffectDetail(
+  lang: Language,
+  st: ActiveStatusEffect,
+  unit?: CombatUnit | null
+): StatusEffectDetail {
+  const isVi = lang === 'vi';
+  const label = getStatusLabel(lang, st.type);
+  const maxHp = unit?.derived?.maxHp ?? 0;
+
+  let valueText = '';
+  let includeTurns = st.turnsRemaining > 0 && st.turnsRemaining < 50;
+
+  switch (st.type) {
+    case 'burn': {
+      if (maxHp > 0) {
+        const dmg = Math.max(
+          5,
+          Math.round(maxHp * BALANCE_CONFIG.burnDamageRatio)
+        );
+        valueText = isVi ? `-${dmg} HP/lượt` : `-${dmg} HP/t`;
+      } else {
+        const pct = Math.round(BALANCE_CONFIG.burnDamageRatio * 100);
+        valueText = isVi ? `-${pct}% HP/lượt` : `-${pct}% HP/t`;
+      }
+      break;
+    }
+    case 'regen_hp': {
+      const ratio = st.magnitude ?? 0.1;
+      if (maxHp > 0) {
+        const heal = Math.max(4, Math.round(maxHp * ratio));
+        valueText = isVi ? `+${heal}/lượt` : `+${heal}/t`;
+      } else {
+        const pct = Math.round(ratio * 100);
+        valueText = isVi ? `+${pct}% HP/lượt` : `+${pct}% HP/t`;
+      }
+      break;
+    }
+    case 'slow': {
+      const pct = Math.round(
+        (st.magnitude ?? BALANCE_CONFIG.slowSpeedPenalty) * 100
+      );
+      valueText = isVi ? `-${pct}% Tốc` : `-${pct}% SPD`;
+      break;
+    }
+    case 'spd_up': {
+      const pct = Math.round((st.magnitude ?? 0.5) * 100);
+      valueText = isVi ? `+${pct}% Tốc` : `+${pct}% SPD`;
+      break;
+    }
+    case 'def_up': {
+      const pct = Math.round((st.magnitude ?? 0.25) * 100);
+      valueText = isVi ? `+${pct}% Giáp` : `+${pct}% DEF`;
+      break;
+    }
+    case 'def_down': {
+      const pct = Math.round((st.magnitude ?? 0.3) * 100);
+      valueText = isVi ? `-${pct}% Giáp` : `-${pct}% DEF`;
+      break;
+    }
+    case 'atk_up': {
+      const pct = Math.round((st.magnitude ?? 0.2) * 100);
+      valueText = isVi ? `+${pct}% Công` : `+${pct}% ATK`;
+      break;
+    }
+    case 'primary_dmg_up': {
+      const pct = Math.round((st.magnitude ?? 0.3) * 100);
+      valueText = isVi ? `+${pct}% ST thường` : `+${pct}% Primary`;
+      break;
+    }
+    case 'skill_dmg_up': {
+      const pct = Math.round((st.magnitude ?? 0.3) * 100);
+      valueText = isVi ? `+${pct}% ST kỹ năng` : `+${pct}% Skill DMG`;
+      break;
+    }
+    case 'eva_up': {
+      // Exact engine formula in combat.ts: dodge += Math.round((mag ?? 0.25) * 40)
+      const bonusPct = Math.round((st.magnitude ?? 0.25) * 40);
+      valueText = isVi ? `+${bonusPct}% Né` : `+${bonusPct}% EVA`;
+      break;
+    }
+    case 'vulnerable': {
+      const pct = Math.round((st.magnitude ?? 0.15) * 100);
+      valueText = isVi ? `+${pct}% ST nhận` : `+${pct}% DMG taken`;
+      break;
+    }
+    case 'shield_break': {
+      // Exact engine behavior: bypasses shields & blocks shield restore (combat.ts)
+      valueText = isVi ? 'Khóa Khiên' : 'Shields off';
+      break;
+    }
+    case 'silence': {
+      valueText = isVi ? 'Khóa kỹ năng' : 'Skills locked';
+      break;
+    }
+    case 'stealth': {
+      valueText = isVi ? 'Không thể nhắm' : 'Untargetable';
+      break;
+    }
+    case 'evade_all': {
+      valueText = isVi ? 'Né 100%' : '100% Evade';
+      break;
+    }
+    case 'invincible': {
+      valueText = isVi ? 'Miễn sát thương' : '0 DMG taken';
+      break;
+    }
+    case 'sure_hit': {
+      const charges = st.charges ?? 1;
+      valueText = isVi ? `Chắc trúng (${charges} lần)` : `Sure hit (${charges}x)`;
+      if (st.turnsRemaining >= 50) includeTurns = false;
+      break;
+    }
+    case 'counter': {
+      const pct = Math.round((st.magnitude ?? 1.0) * 100);
+      const charges = st.charges ?? 1;
+      valueText = isVi
+        ? `Phản ${pct}% (${charges} lần)`
+        : `Counter ${pct}% (${charges}x)`;
+      if (st.turnsRemaining >= 50) includeTurns = false;
+      break;
+    }
+    case 'siege_mode': {
+      const pct = Math.round((st.magnitude ?? 0.6) * 100);
+      valueText = isVi ? `+${pct}% ST, 0% Né` : `+${pct}% DMG, 0 EVA`;
+      includeTurns = false;
+      break;
+    }
+    case 'siege_defense': {
+      const pct = Math.round((st.magnitude ?? 0.8) * 100);
+      valueText = isVi ? `+${pct}% Giáp, -30% ST` : `+${pct}% DEF, -30% DMG`;
+      includeTurns = false;
+      break;
+    }
+    case 'charging': {
+      valueText = isVi ? 'Khai hỏa lượt sau' : 'Fires next turn';
+      includeTurns = false;
+      break;
+    }
+  }
+
+  const durationText = includeTurns
+    ? isVi
+      ? `(${st.turnsRemaining} lượt)`
+      : `(${st.turnsRemaining}t)`
+    : null;
+
+  const fullText = valueText
+    ? durationText
+      ? `${label}: ${valueText} ${durationText}`
+      : `${label}: ${valueText}`
+    : durationText
+    ? `${label} ${durationText}`
+    : label;
+
+  const shortLabel = getStatusShortLabel(lang, st.type);
+  const shortText = valueText ? `${shortLabel}: ${valueText}` : shortLabel;
+
+  return {
+    label,
+    valueText,
+    durationText,
+    shortText,
+    fullText,
+  };
+}
+
+export function getArchetypeLabel(
+  lang: Language,
+  archetype: EnemyArchetype
+): string {
+  return translate(lang, `archetype.${archetype}` as TranslationKey);
+}
+
+export function getTeamTagLabel(lang: Language, role: TeamColorRole): string {
+  if (role === 'me' || role === 'ally') {
+    return translate(lang, 'queue.teamTag.ally');
+  }
+  if (role === 'boss') {
+    return translate(lang, 'queue.teamTag.boss');
+  }
+  return translate(lang, 'queue.teamTag.enemy');
+}
+
+export function getAutoStopReasonLabel(
+  lang: Language,
+  reason: AutoStopReason
+): string {
+  return translate(lang, `auto.repeatReason.${reason}` as TranslationKey, {
+    max: BALANCE_CONFIG.maxInventorySize,
+  });
+}
+
+export function getTacticsPresetLabel(
+  lang: Language,
+  presetId: TacticsPresetId
+): string {
+  return translate(lang, `auto.preset.${presetId}` as TranslationKey);
+}
+
+export function getTacticsTargetLabel(
+  lang: Language,
+  selector: TacticsTargetSelector
+): string {
+  return translate(lang, `auto.target.${selector}` as TranslationKey);
+}
+
+export function formatTacticsConditionText(
+  lang: Language,
+  cond: TacticsCondition
+): string {
+  const buffLabel = cond.buffType ? getStatusLabel(lang, cond.buffType) : '';
+  const skillLabel = cond.skillId ? getSkillName(lang, cond.skillId) : '—';
+  return translate(lang, `auto.cond.${cond.kind}` as TranslationKey, {
+    value: cond.value ?? 0,
+    buff: buffLabel,
+    skill: skillLabel,
+  });
+}
+
+export function formatTacticsRuleSentence(
+  lang: Language,
+  rule: TacticsRule
+): string {
+  const ifWord = translate(lang, 'auto.colIf');
+  const condStr = formatTacticsConditionText(lang, rule.condition);
+  const actionStr =
+    rule.action.type === 'defend'
+      ? translate(lang, 'auto.actionDefend')
+      : rule.action.type === 'skill' && rule.action.skillId
+      ? getSkillName(lang, rule.action.skillId)
+      : translate(lang, 'auto.actionAttack');
+  const targetStr = getTacticsTargetLabel(lang, rule.targetSelector);
+  return `${ifWord} ${condStr} → ${actionStr} → ${targetStr}`;
+}
+
+export function getStatsSkillLabel(lang: Language, skillKey: string): string {
+  if (skillKey === 'basic_attack' || !skillKey) {
+    return translate(lang, 'stats.basicAttack');
+  }
+  if (skillKey === 'defend') {
+    return translate(lang, 'stats.defendAction');
+  }
+  if (skillKey === 'regen_hp') {
+    return translate(lang, 'stats.regenTick');
+  }
+  return getSkillName(lang, skillKey);
+}
+
+/**
+ * Generates a natural plain-language sentence describing what Simple Auto will do.
+ */
+export function formatSimpleTacticsSummary(
+  lang: Language,
+  config: SimpleTacticsConfig
+): string {
+  const targetLabel = translate(
+    lang,
+    `auto.simple.target.${config.preferredTarget}` as TranslationKey
+  ).toLowerCase();
+  const firstSkill = config.prioritySkillIds[0]
+    ? getSkillName(lang, config.prioritySkillIds[0])
+    : null;
+  const skillUsageClauseEn =
+    config.skillUsage === 'save_sp_50'
+      ? 'only cast skills above 50% SP'
+      : config.skillUsage === 'needed_only'
+      ? 'only cast skills when needed'
+      : firstSkill
+      ? `prioritize ${firstSkill}`
+      : 'use equipped skills whenever ready';
+  const skillUsageClauseVi =
+    config.skillUsage === 'save_sp_50'
+      ? 'chỉ dùng kỹ năng khi trên 50% SP'
+      : config.skillUsage === 'needed_only'
+      ? 'chỉ dùng kỹ năng khi thật sự cần'
+      : firstSkill
+      ? `ưu tiên tung ${firstSkill}`
+      : 'dùng kỹ năng ngay khi sẵn sàng';
+
+  const lowHpClauseEn =
+    config.lowHpAction === 'defend'
+      ? `defend below ${config.lowHpThresholdPct}% HP`
+      : config.lowHpAction === 'heal'
+      ? `heal itself below ${config.lowHpThresholdPct}% HP`
+      : config.lowHpAction === 'retreat'
+      ? `auto-retreat below ${config.lowHpThresholdPct}% HP`
+      : 'keep attacking even at low HP';
+  const lowHpClauseVi =
+    config.lowHpAction === 'defend'
+      ? `phòng thủ khi HP dưới ${config.lowHpThresholdPct}%`
+      : config.lowHpAction === 'heal'
+      ? `tự hồi phục khi HP dưới ${config.lowHpThresholdPct}%`
+      : config.lowHpAction === 'retreat'
+      ? `tự rút lui khi HP dưới ${config.lowHpThresholdPct}%`
+      : 'tiếp tục tấn công dù HP thấp';
+
+  const eliteClauseEn =
+    config.elitePolicy === 'boss_only'
+      ? 'save Elite skills for bosses'
+      : config.elitePolicy === 'immediate'
+      ? 'fire Elite skills immediately'
+      : 'leave Elite skills for manual use';
+  const eliteClauseVi =
+    config.elitePolicy === 'boss_only'
+      ? 'để dành kỹ năng Tinh Anh cho Boss'
+      : config.elitePolicy === 'immediate'
+      ? 'tung kỹ năng Tinh Anh ngay khi sẵn sàng'
+      : 'không tự động dùng kỹ năng Tinh Anh';
+
+  if (lang === 'vi') {
+    return `Auto sẽ ưu tiên mục tiêu ${targetLabel}, ${skillUsageClauseVi}, ${lowHpClauseVi}, và ${eliteClauseVi}.`;
+  }
+  return `Auto will focus the ${targetLabel} enemy, ${skillUsageClauseEn}, ${lowHpClauseEn}, and ${eliteClauseEn}.`;
+}
+
+/**
+ * Formats randomized ItemInstance name: Template Name + Affix-based Suffix (+Enchant).
+ */
+export function getItemInstanceName(
+  lang: Language,
+  instance: ItemInstance,
+  includeEnchant = false
+): string {
+  const tpl = getItemTemplate(instance.templateId);
+  const baseName = tpl
+    ? lang === 'vi'
+      ? tpl.nameVi
+      : tpl.nameEn
+    : instance.templateId;
+  const suffixMeta = instance.suffixId
+    ? AFFIX_SUFFIX_MAP[instance.suffixId]
+    : null;
+  const suffixText = suffixMeta
+    ? lang === 'vi'
+      ? ` ${suffixMeta.vi}`
+      : ` ${suffixMeta.en}`
+    : '';
+  const enchantText =
+    includeEnchant && instance.enchantLevel > 0
+      ? ` +${instance.enchantLevel}`
+      : '';
+  return `${baseName}${suffixText}${enchantText}`;
+}
+
+export function getItemInstanceDesc(
+  lang: Language,
+  instance: ItemInstance
+): string {
+  const tpl = getItemTemplate(instance.templateId);
+  if (!tpl) return '';
+  return lang === 'vi' ? tpl.descVi : tpl.descEn;
+}
+
+export function formatItemTraitsList(
+  lang: Language,
+  instance: ItemInstance
+): string[] {
+  const tr = instance.specialTraits;
+  if (!tr) return [];
+  const list: string[] = [];
+  if (tr.critBonusPct) {
+    list.push(translate(lang, 'trait.crit', { val: tr.critBonusPct }));
+  }
+  if (tr.armorPiercePct) {
+    list.push(translate(lang, 'trait.pierce', { val: tr.armorPiercePct }));
+  }
+  if (tr.splashPct) {
+    list.push(translate(lang, 'trait.splash', { val: tr.splashPct }));
+  }
+  if (tr.spRegenPerTurn) {
+    list.push(translate(lang, 'trait.spRegen', { val: tr.spRegenPerTurn }));
+  }
+  if (tr.evasionMod) {
+    list.push(
+      translate(lang, 'trait.evasionMod', {
+        val: tr.evasionMod > 0 ? `+${tr.evasionMod}` : tr.evasionMod,
+      })
+    );
+  }
+  if (tr.longRange) {
+    list.push(translate(lang, 'trait.longRange'));
+  }
+  return list;
+}
+
+export function getLogTagLabel(lang: Language, tag: CombatLogTag): string {
+  return translate(lang, `log.tag.${tag}` as TranslationKey);
+}
+
+export function formatEquipValidationReason(
+  lang: Language,
+  validation: EquipValidationResult
+): string | null {
+  if (validation.canEquip) return null;
+  const parts: string[] = [];
+  if (validation.missingLevel !== null) {
+    parts.push(translate(lang, 'common.reqLevel', { level: validation.missingLevel }));
+  }
+  if (validation.requiredClass !== null) {
+    parts.push(
+      translate(lang, 'common.reqClass', {
+        className: getClassName(lang, validation.requiredClass),
+      })
+    );
+  }
+  if (validation.equippedOnOtherGear !== null) {
+    parts.push(
+      translate(lang, 'common.equippedOnGear', {
+        gear: getClassName(lang, validation.equippedOnOtherGear),
+      })
+    );
+  }
+  return parts.join(' · ');
+}
+
+export function formatCombatLogMessage(
+  lang: Language,
+  entry: CombatLogEntry
+): string {
+  const autoPrefix =
+    entry.autoRuleNumber !== undefined
+      ? entry.autoRuleNumber > 0
+        ? `[AUTO #${entry.autoRuleNumber}] `
+        : '[AUTO] '
+      : '';
+  return `${autoPrefix}${formatCombatLogBody(lang, entry)}`;
+}
+
+function formatCombatLogBody(
+  lang: Language,
+  entry: CombatLogEntry
+): string {
+  const p = entry.params;
+
+  switch (entry.templateKey) {
+    case 'log.battleStart': {
+      const sectorId = String(p.sectorId ?? 'border_outpost');
+      const diff = String(p.difficulty ?? 'Standard') as SectorDifficulty;
+      return translate(lang, 'log.battleStart', {
+        sector: getSectorName(lang, sectorId),
+        difficulty: getDifficultyLabel(lang, diff),
+      });
+    }
+
+    case 'log.defend': {
+      const shd = Number(p.shieldRecovered ?? 0);
+      const sp = Number(p.spRecovered ?? 0);
+      const shieldPart =
+        shd > 0 ? `, +${shd} ${getStatShort(lang, 'shield')}` : '';
+      const spPart = sp > 0 ? `, +${sp} SP` : '';
+      return translate(lang, 'log.defend', {
+        actor: String(p.actor ?? ''),
+        shieldPart,
+        spPart,
+      });
+    }
+
+    case 'log.healSquad': {
+      const skillId = String(p.skillId ?? 'sup_aegis_field');
+      return translate(lang, 'log.healSquad', {
+        actor: String(p.actor ?? ''),
+        skill: getSkillName(lang, skillId),
+        spCost: Number(p.spCost ?? 0),
+        total: Number(p.total ?? 0),
+      });
+    }
+
+    case 'log.healSingle': {
+      const skillId = String(p.skillId ?? 'sup_nanite_mend');
+      return translate(lang, 'log.healSingle', {
+        actor: String(p.actor ?? ''),
+        target: String(p.target ?? ''),
+        skill: getSkillName(lang, skillId),
+        amount: Number(p.amount ?? 0),
+      });
+    }
+
+    case 'log.energize': {
+      const skillId = String(p.skillId ?? 'sup_flux_transfer');
+      return translate(lang, 'log.energize', {
+        actor: String(p.actor ?? ''),
+        target: String(p.target ?? ''),
+        skill: getSkillName(lang, skillId),
+        amount: Number(p.amount ?? 0),
+      });
+    }
+
+    case 'log.evade': {
+      const actionText = formatActionParam(lang, p);
+      return translate(lang, 'log.evade', {
+        target: String(p.target ?? ''),
+        actor: String(p.actor ?? ''),
+        action: actionText,
+      });
+    }
+
+    case 'log.damage': {
+      const actionText = formatActionParam(lang, p);
+      const shd = Number(p.shieldAbsorbed ?? 0);
+      const hp = Number(p.hullDamage ?? 0);
+      const breakdown =
+        shd > 0 && hp > 0
+          ? translate(lang, 'log.breakdownBoth', { shield: shd, hp })
+          : shd > 0
+          ? translate(lang, 'log.breakdownShield', { shield: shd })
+          : translate(lang, 'log.breakdownHp', { hp });
+      const critTag = Number(p.isCrit ?? 0)
+        ? translate(lang, 'log.critTag')
+        : '';
+      const defendTag = Number(p.isDefending ?? 0)
+        ? translate(lang, 'log.defendTag')
+        : '';
+
+      return translate(lang, 'log.damage', {
+        actor: String(p.actor ?? ''),
+        action: actionText,
+        target: String(p.target ?? ''),
+        breakdown,
+        critTag,
+        defendTag,
+      });
+    }
+
+    case 'log.destroyed': {
+      const classId = String(p.classId ?? 'striker') as MechClassId;
+      return translate(lang, 'log.destroyed', {
+        target: String(p.target ?? ''),
+        className: getClassName(lang, classId),
+      });
+    }
+
+    case 'log.statusApplied': {
+      const status = String(p.status ?? 'burn') as StatusEffectType;
+      return translate(lang, 'log.statusApplied', {
+        target: String(p.target ?? ''),
+        status: getStatusLabel(lang, status),
+        turns: Number(p.turns ?? 2),
+      });
+    }
+
+    case 'log.burnTick':
+      return translate(lang, 'log.burnTick', {
+        target: String(p.target ?? ''),
+        damage: Number(p.damage ?? 0),
+      });
+
+    case 'log.regenTick':
+      return translate(lang, 'log.regenTick', {
+        target: String(p.target ?? ''),
+        amount: Number(p.amount ?? 0),
+      });
+
+    case 'log.statusCleansed':
+      return translate(lang, 'log.statusCleansed', {
+        actor: String(p.actor ?? ''),
+      });
+
+    case 'log.splashDamage':
+      return translate(lang, 'log.splashDamage', {
+        actor: String(p.actor ?? ''),
+        target: String(p.target ?? ''),
+        damage: Number(p.damage ?? 0),
+      });
+
+    case 'log.retreat':
+      return translate(lang, 'log.retreat', {
+        actor: String(p.actor ?? ''),
+      });
+
+    case 'log.buffApplied': {
+      const skillId = String(p.skillId ?? 'gen_hull_brace');
+      return translate(lang, 'log.buffApplied', {
+        actor: String(p.actor ?? ''),
+        skill: getSkillName(lang, skillId),
+        spCost: Number(p.spCost ?? 0),
+      });
+    }
+
+    case 'log.stanceToggle': {
+      const skillId = String(p.skillId ?? 'sge_anchor_protocol');
+      return translate(lang, 'log.stanceToggle', {
+        actor: String(p.actor ?? ''),
+        skill: getSkillName(lang, skillId),
+        state: String(p.state ?? 'ON'),
+      });
+    }
+
+    case 'log.charging': {
+      const skillId = String(p.skillId ?? 'str_solar_capacitor');
+      return translate(lang, 'log.charging', {
+        actor: String(p.actor ?? ''),
+        skill: getSkillName(lang, skillId),
+      });
+    }
+
+    case 'log.counterAttack':
+      return translate(lang, 'log.counterAttack', {
+        target: String(p.target ?? ''),
+        actor: String(p.actor ?? ''),
+        damage: Number(p.damage ?? 0),
+      });
+
+    case 'log.scanReveal': {
+      const skillId = String(p.skillId ?? 'sup_lidar_sweep');
+      return translate(lang, 'log.scanReveal', {
+        actor: String(p.actor ?? ''),
+        skill: getSkillName(lang, skillId),
+        revealed: Number(p.revealed ?? 0),
+      });
+    }
+
+    case 'log.invincibleBlock':
+      return translate(lang, 'log.invincibleBlock', {
+        target: String(p.target ?? ''),
+        actor: String(p.actor ?? ''),
+      });
+
+    case 'log.silencedBlocked':
+      return translate(lang, 'log.silencedBlocked', {
+        actor: String(p.actor ?? ''),
+      });
+
+    case 'log.wingmanChat': {
+      const chatKey = String(p.chatKey ?? 'chat.engaging') as TranslationKey;
+      return translate(lang, 'log.wingmanChat', {
+        actor: String(p.actor ?? ''),
+        quote: translate(lang, chatKey),
+      });
+    }
+
+    case 'log.unitMovesRow': {
+      const rowKey =
+        p.row === 'front'
+          ? 'common.frontRow'
+          : p.row === 'middle'
+          ? 'common.middleRow'
+          : 'common.backRow';
+      return translate(lang, 'log.unitMovesRow', {
+        actor: String(p.actor ?? ''),
+        row: translate(lang, rowKey),
+      });
+    }
+
+    default:
+      return '';
+  }
+}
+
+function formatActionParam(
+  lang: Language,
+  params: Record<string, string | number>
+): string {
+  const skillId = params.skillId ? String(params.skillId) : '';
+  const hitIndex = Number(params.hitIndex ?? 0);
+  const totalHits = Number(params.totalHits ?? 1);
+
+  if (!skillId) {
+    return translate(lang, 'log.primaryWeapons');
+  }
+  const base = getSkillName(lang, skillId);
+  return totalHits > 1 ? `${base} (${hitIndex}/${totalHits})` : base;
+}
+
+export function useI18n() {
+  const lang = useGameStore((s) => s.language);
+  const showRawKeys = useGameStore((s) => s.adminConfig.showRawI18nKeys);
+  const setLanguage = useGameStore((s) => s.setLanguage);
+
+  const t = useCallback(
+    (key: TranslationKey, params?: Record<string, string | number>) =>
+      showRawKeys ? key : translate(lang, key, params),
+    [lang, showRawKeys]
+  );
+
+  return { lang, t, setLanguage };
+}
