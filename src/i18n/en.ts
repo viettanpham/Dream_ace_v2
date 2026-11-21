@@ -1317,6 +1317,8 @@ export const EN_TRANSLATIONS = {
   'log.filter.system': 'System',
   'log.modeDocked': 'Docked',
   'log.modePopup': 'Popup',
+  'log.modeLine': 'Line',
+  'log.modeExpanded': 'Expanded',
   'log.loadOlder': 'Load older ({count})',
   'log.emptyChannel': 'No entries in this channel yet.',
   'log.dockedCapHint': 'Latest {shown}/{total}',

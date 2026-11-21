@@ -5,7 +5,6 @@ import {
   Backpack,
   BarChart3,
   Bot,
-  ChevronUp,
   ChevronsDownUp,
   ChevronsUpDown,
   Crosshair,
@@ -46,7 +45,6 @@ import {
 import { getEffectiveItemStats } from '../engine/equipment';
 import { canUnitUseSkill } from '../engine/skills';
 import {
-  formatCombatLogMessage,
   getAutoStopReasonLabel,
   getBattleSkillReason,
   getClassName,
@@ -85,12 +83,13 @@ import {
   useFxSettings,
 } from '../utils/battleVfx';
 import {
+  parseStructuredCombatLogRow,
   readCombatLogExpandAll,
-  readCombatLogMode,
+  readSidebarLogMode,
   writeCombatLogExpandAll,
-  writeCombatLogMode,
+  writeSidebarLogMode,
   type CombatLogChannel,
-  type CombatLogDisplayMode,
+  type SidebarCombatLogMode,
 } from '../utils/combatLogFormat';
 import { useStatusDisplaySettings } from '../utils/statusDisplayPrefs';
 import { BattleRadarView } from './BattleRadarView';
@@ -187,8 +186,8 @@ export function BattleScreen() {
     () => readSpeechBubblesEnabled()
   );
   const [fxSettings] = useFxSettings();
-  const [combatLogMode, setCombatLogMode] = useState<CombatLogDisplayMode>(() =>
-    readCombatLogMode()
+  const [sidebarLogMode, setSidebarLogMode] = useState<SidebarCombatLogMode>(
+    () => readSidebarLogMode()
   );
   const [logChannel, setLogChannel] = useState<CombatLogChannel>('all');
   const [logExpandAll, setLogExpandAll] = useState<boolean>(() =>
@@ -258,21 +257,12 @@ export function BattleScreen() {
     });
   };
 
-  const handleSetCombatLogMode = (nextMode: CombatLogDisplayMode) => {
-    setCombatLogMode(nextMode);
-    writeCombatLogMode(nextMode);
-    setLogSheetOpen(nextMode === 'popup');
-  };
-
-  const handleToggleCombatLogMode = () => {
-    const nextMode: CombatLogDisplayMode =
-      combatLogMode === 'docked' ? 'popup' : 'docked';
-    handleSetCombatLogMode(nextMode);
+  const handleSetSidebarLogMode = (nextMode: SidebarCombatLogMode) => {
+    setSidebarLogMode(nextMode);
+    writeSidebarLogMode(nextMode);
   };
 
   const handleOpenCombatLogPopup = () => {
-    setCombatLogMode('popup');
-    writeCombatLogMode('popup');
     setLogSheetOpen(true);
   };
 
@@ -288,6 +278,42 @@ export function BattleScreen() {
     setLogExpandNonce((n) => n + 1);
   };
 
+  const renderLogModeSegmented = () => (
+    <div
+      role="group"
+      aria-label={t('battle.combatLog')}
+      data-testid="combat-log-mode-segmented"
+      className="inline-flex items-center rounded border border-slate-700 bg-slate-950 p-0.5 shrink-0"
+    >
+      <button
+        type="button"
+        data-testid="combat-log-mode-line"
+        aria-pressed={sidebarLogMode === 'line'}
+        onClick={() => handleSetSidebarLogMode('line')}
+        className={`min-h-[24px] px-1.5 rounded text-[10px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+          sidebarLogMode === 'line'
+            ? 'bg-sky-500 text-slate-950'
+            : 'text-slate-300 hover:text-slate-100'
+        }`}
+      >
+        {t('log.modeLine')}
+      </button>
+      <button
+        type="button"
+        data-testid="combat-log-mode-expanded"
+        aria-pressed={sidebarLogMode === 'expanded'}
+        onClick={() => handleSetSidebarLogMode('expanded')}
+        className={`min-h-[24px] px-1.5 rounded text-[10px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+          sidebarLogMode === 'expanded'
+            ? 'bg-sky-500 text-slate-950'
+            : 'text-slate-300 hover:text-slate-100'
+        }`}
+      >
+        {t('log.modeExpanded')}
+      </button>
+    </div>
+  );
+
   const renderCombatLogExpandButtons = (compact = false) => (
     <div className="inline-flex items-center gap-1 shrink-0">
       <button
@@ -297,7 +323,7 @@ export function BattleScreen() {
         onClick={handleExpandAllLogs}
         title={t('log.expandAll')}
         className={`${
-          compact ? 'min-h-[26px] px-1.5 text-[10px]' : 'min-h-[28px] px-2 text-[11px]'
+          compact ? 'min-h-[24px] px-1.5 text-[10px]' : 'min-h-[28px] px-2 text-[11px]'
         } rounded border font-semibold inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap ${
           logExpandAll
             ? 'border-sky-400/70 bg-sky-500/20 text-sky-200'
@@ -314,7 +340,7 @@ export function BattleScreen() {
         onClick={handleCollapseAllLogs}
         title={t('log.collapseAll')}
         className={`${
-          compact ? 'min-h-[26px] px-1.5 text-[10px]' : 'min-h-[28px] px-2 text-[11px]'
+          compact ? 'min-h-[24px] px-1.5 text-[10px]' : 'min-h-[28px] px-2 text-[11px]'
         } rounded border font-semibold inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap ${
           !logExpandAll
             ? 'border-slate-600 bg-slate-800 text-slate-100'
@@ -1148,8 +1174,7 @@ export function BattleScreen() {
       return (
         <div
           data-testid="battle-selected-unit-panel"
-          data-fixed-height="true"
-          className="h-[244px] rounded-lg border border-slate-800 bg-[#0A101B] p-3 text-[13px] text-slate-400 flex items-center justify-center text-center shrink-0"
+          className="rounded-lg border border-slate-800 bg-[#0A101B] p-2.5 text-[13px] text-slate-400 text-center shrink-0"
         >
           {t('battle.noUnitSelected')}
         </div>
@@ -1179,12 +1204,13 @@ export function BattleScreen() {
       (!isEnemy &&
         hasSingleAllySkill &&
         battle.selectedAllyTargetId === sidebarUnit.id);
+    const showLockTargetBtn =
+      sidebarUnit.alive && isEnemy && !isStealthed && canPlayerManualAct;
 
     return (
       <div
         data-testid="battle-selected-unit-panel"
-        data-fixed-height="true"
-        className="h-[244px] rounded-lg border border-slate-800 bg-[#0A101B] p-2.5 flex flex-col justify-between gap-1.5 overflow-y-auto tactical-scroll shrink-0"
+        className="rounded-lg border border-slate-800 bg-[#0A101B] p-2.5 flex flex-col gap-1.5 shrink-0"
       >
         <div className="space-y-1.5 min-w-0">
           <div className="flex items-center justify-between gap-2">
@@ -1287,42 +1313,41 @@ export function BattleScreen() {
             </div>
           )}
 
-          <FixedStatusArea
-            statuses={sidebarUnit.statuses}
-            rows={activeUnitRows}
-            unit={sidebarUnit}
-            unitTitle={sidebarUnit.name}
-            badgeLayout={statusSettings.badgeLayout}
-            iconMods={adminConfig.iconCatalogMods}
-            showLabels={fxSettings.showStatusLabels}
-            fallbackWidthPx={290}
-            rootTestId="sidebar-status-area"
-            chipTestIdPrefix="sidebar-status-chip"
-            overflowTestId="sidebar-status-overflow"
-          />
-        </div>
-
-        <div className="shrink-0 min-h-[36px] flex items-end">
-          {sidebarUnit.alive && isEnemy && !isStealthed && canPlayerManualAct ? (
-            <button
-              type="button"
-              disabled={isLocked}
-              onClick={() => selectTarget(sidebarUnit.id)}
-              className={`w-full min-h-[36px] px-3 rounded-lg text-[12px] font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${
-                isLocked
-                  ? 'border border-red-500/45 bg-red-500/15 text-red-200 cursor-default'
-                  : 'bg-red-500 hover:bg-red-400 text-slate-950 cursor-pointer'
-              }`}
-            >
-              <Crosshair className="w-4 h-4 shrink-0" />
-              <span>
-                {isLocked ? t('battle.targetLockedBtn') : t('battle.lockTargetBtn')}
-              </span>
-            </button>
-          ) : (
-            <div className="w-full h-[36px] opacity-0 pointer-events-none" aria-hidden="true" />
+          {sidebarUnit.statuses.length > 0 && (
+            <FixedStatusArea
+              statuses={sidebarUnit.statuses}
+              rows={Math.min(2, Math.max(1, activeUnitRows))}
+              autoHeight
+              unit={sidebarUnit}
+              unitTitle={sidebarUnit.name}
+              badgeLayout={statusSettings.badgeLayout}
+              iconMods={adminConfig.iconCatalogMods}
+              showLabels={fxSettings.showStatusLabels}
+              fallbackWidthPx={290}
+              rootTestId="sidebar-status-area"
+              chipTestIdPrefix="sidebar-status-chip"
+              overflowTestId="sidebar-status-overflow"
+            />
           )}
         </div>
+
+        {showLockTargetBtn && (
+          <button
+            type="button"
+            disabled={isLocked}
+            onClick={() => selectTarget(sidebarUnit.id)}
+            className={`w-full min-h-[34px] px-3 rounded-lg text-[12px] font-semibold inline-flex items-center justify-center gap-1.5 transition-colors shrink-0 ${
+              isLocked
+                ? 'border border-red-500/45 bg-red-500/15 text-red-200 cursor-default'
+                : 'bg-red-500 hover:bg-red-400 text-slate-950 cursor-pointer'
+            }`}
+          >
+            <Crosshair className="w-4 h-4 shrink-0" />
+            <span>
+              {isLocked ? t('battle.targetLockedBtn') : t('battle.lockTargetBtn')}
+            </span>
+          </button>
+        )}
       </div>
     );
   };
@@ -1747,82 +1772,65 @@ export function BattleScreen() {
             {renderFieldContent()}
           </div>
 
-          {/* 5) Combat log: fixed-height scrollable docked panel or 1-line popup trigger */}
+          {/* 5) Combat log: flows inside page scroll with zero nested scroll box; Dòng = 1 line, Mở rộng = full flow, Cửa sổ = bottom sheet */}
           <div className="shrink-0 px-2 pb-1">
-            {combatLogMode === 'docked' ? (
-              <div
-                data-testid="battle-phone-docked-log"
-                data-fixed-height="true"
-                className="rounded-lg border border-slate-800 bg-[#070A10] flex flex-col overflow-hidden h-[144px]"
-              >
-                <div className="shrink-0 px-2 py-1 border-b border-slate-800/90 flex items-center justify-between gap-1.5 text-[11px] text-slate-400">
-                  <span className="font-semibold text-slate-200 inline-flex items-center gap-1 min-w-0 truncate">
-                    <ScrollText className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                    <span className="truncate">{t('battle.combatLog')}</span>
-                    <span className="font-mono-nums text-slate-400 shrink-0">
-                      ({battle.log.length})
-                    </span>
+            <div
+              data-testid="battle-phone-docked-log"
+              className="rounded-lg border border-slate-800 bg-[#070A10] flex flex-col"
+            >
+              <div className="shrink-0 px-2 py-1 border-b border-slate-800/90 flex flex-wrap items-center justify-between gap-1.5 text-[11px] text-slate-400">
+                <div className="inline-flex items-center gap-1.5 shrink-0">
+                  <ScrollText className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                  <span className="font-semibold text-slate-200 whitespace-nowrap">
+                    {t('battle.combatLog')}
                   </span>
-                  <div className="flex items-center gap-1 shrink-0">
-                    {renderCombatLogExpandButtons(true)}
-                    <button
-                      type="button"
-                      data-testid="combat-log-mode-toggle"
-                      data-log-mode={combatLogMode}
-                      onClick={handleToggleCombatLogMode}
-                      className="min-h-[26px] px-1.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-[10px] font-semibold inline-flex items-center gap-1 cursor-pointer shrink-0"
-                    >
-                      <Maximize2 className="w-3 h-3 text-sky-400" />
-                      <span>{t('log.modePopup')}</span>
-                    </button>
-                  </div>
+                  <span className="font-mono-nums text-slate-400 whitespace-nowrap">
+                    ({battle.log.length})
+                  </span>
                 </div>
+                <div className="flex items-center gap-1 flex-wrap shrink-0">
+                  {renderLogModeSegmented()}
+                  {sidebarLogMode === 'expanded' &&
+                    renderCombatLogExpandButtons(true)}
+                  <button
+                    type="button"
+                    data-testid="combat-log-mode-toggle"
+                    data-popup-open={logSheetOpen ? 'true' : 'false'}
+                    onClick={handleOpenCombatLogPopup}
+                    title={t('log.modePopup')}
+                    aria-label={t('log.modePopup')}
+                    className="min-h-[24px] px-1.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-[10px] font-semibold inline-flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
+                  >
+                    <Maximize2 className="w-3 h-3 text-sky-400 shrink-0" />
+                    <span>{t('log.modePopup')}</span>
+                  </button>
+                </div>
+              </div>
+              {sidebarLogMode === 'line' ? (
+                <div
+                  data-testid="battle-phone-log-line"
+                  className="px-2.5 py-1.5 text-[12px] text-slate-200 truncate"
+                >
+                  {latestLog
+                    ? parseStructuredCombatLogRow(lang, latestLog, battle.units)
+                        .sentence
+                    : t('log.emptyChannel')}
+                </div>
+              ) : (
                 <CombatLogList
                   entries={battle.log}
                   units={battle.units}
-                  active={isPhonePortrait && combatLogMode === 'docked'}
+                  active={isPhonePortrait}
                   density="compact"
                   mode="docked"
                   channel={logChannel}
                   onChannelChange={setLogChannel}
                   expandAll={logExpandAll}
                   expandNonce={logExpandNonce}
+                  inlineFlow
                 />
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  data-testid="battle-log-ticker"
-                  onClick={() => setLogSheetOpen(true)}
-                  className="flex-1 min-w-0 min-h-[44px] px-3 rounded-lg border border-slate-800 bg-[#080D16] hover:bg-slate-900 flex items-center justify-between gap-2 text-left cursor-pointer"
-                >
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <ScrollText className="w-4 h-4 text-sky-400 shrink-0" />
-                    <span className="text-[13px] text-slate-200 truncate">
-                      {latestLog
-                        ? formatCombatLogMessage(lang, latestLog)
-                        : t('battle.logSheetHint', { count: battle.log.length })}
-                    </span>
-                  </div>
-                  <span className="text-[12px] font-mono-nums text-slate-400 inline-flex items-center gap-1 shrink-0">
-                    <span>{battle.log.length}</span>
-                    <ChevronUp className="w-4 h-4" />
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  data-testid="combat-log-mode-toggle"
-                  data-log-mode={combatLogMode}
-                  onClick={handleToggleCombatLogMode}
-                  className="min-h-[44px] px-2.5 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-[12px] font-semibold inline-flex items-center gap-1 cursor-pointer shrink-0"
-                  title={t('log.modeDocked')}
-                >
-                  <Minimize2 className="w-3.5 h-3.5 text-sky-400" />
-                  <span>{t('log.modeDocked')}</span>
-                </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           {/* 6) Single-row bottom action dock (hidden in Auto mode — no separate AUTO bar) */}
@@ -1881,7 +1889,7 @@ export function BattleScreen() {
         /* ==================== TABLET (600-1023) & PC (>= 1024) & LANDSCAPE PHONE LAYOUT ==================== */
         <div
           data-testid="battle-desktop-layout"
-          className="flex-1 min-h-full w-full max-w-full grid grid-cols-[minmax(0,65fr)_minmax(260px,35fr)] gap-2 px-2.5 py-2 overflow-x-hidden"
+          className="flex-1 min-h-0 h-full w-full max-w-full grid grid-cols-[minmax(0,65fr)_minmax(260px,35fr)] gap-2 px-2.5 py-2 overflow-x-hidden"
         >
           {/* LEFT COLUMN (~65%): Controls + Balance Bar + Player Status + Field + Action Bar under field */}
           <div
@@ -2291,7 +2299,10 @@ export function BattleScreen() {
           </div>
 
           {/* RIGHT COLUMN (~35%): Turn Queue + Selected Unit Detail + Full Combat Log */}
-          <aside className="min-w-0 min-h-0 flex flex-col gap-2 overflow-hidden">
+          <aside
+            data-testid="battle-right-sidebar"
+            className="min-w-0 min-h-0 h-full flex flex-col gap-2 overflow-hidden"
+          >
             <TurnQueueBar
               battle={battle}
               battleSpeed={battleSpeed}
@@ -2299,6 +2310,8 @@ export function BattleScreen() {
               enrageBonusPct={enrageBonusPct}
               variant="sidebar"
               targetName={actingTargetName}
+              maxUpcoming={sidebarLogMode === 'line' ? 10 : 4}
+              fillHeight={sidebarLogMode === 'line'}
               onSelectUnit={(id) => setInspectedUnitId(id)}
             />
 
@@ -2306,52 +2319,47 @@ export function BattleScreen() {
 
             <div
               data-testid="battle-desktop-docked-log"
-              className="flex-1 min-h-0 rounded-lg border border-slate-800 bg-[#070A10] flex flex-col overflow-hidden"
+              data-log-mode={sidebarLogMode}
+              className={`${
+                sidebarLogMode === 'expanded'
+                  ? 'flex-1 min-h-[220px]'
+                  : 'shrink-0'
+              } rounded-lg border border-slate-800 bg-[#070A10] flex flex-col overflow-hidden`}
             >
-              <div className="shrink-0 px-3 py-1.5 border-b border-slate-800/90 flex items-center justify-between gap-2 text-[12px] text-slate-400">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="font-semibold text-slate-200 truncate">
+              <div className="shrink-0 px-2.5 py-1.5 border-b border-slate-800/90 flex flex-wrap items-center justify-between gap-1.5 text-[12px] text-slate-400">
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span
+                    data-testid="combat-log-header-title"
+                    className="font-semibold text-slate-200 whitespace-nowrap"
+                  >
                     {t('battle.combatLog')}
                   </span>
-                  <span className="font-mono-nums text-[11px] text-slate-400 shrink-0">
+                  <span
+                    data-testid="combat-log-header-count"
+                    className="font-mono-nums text-[11px] text-slate-400 whitespace-nowrap"
+                  >
                     {t('battle.eventsCount', { count: battle.log.length })}
                   </span>
                 </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {combatLogMode === 'docked' && renderCombatLogExpandButtons(false)}
-                  {combatLogMode === 'popup' && !logSheetOpen && (
-                    <button
-                      type="button"
-                      data-testid="combat-log-reopen-popup"
-                      onClick={() => setLogSheetOpen(true)}
-                      className="min-h-[28px] px-2 rounded border border-sky-500/50 bg-sky-500/15 hover:bg-sky-500/25 text-sky-200 text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer"
-                    >
-                      <Maximize2 className="w-3 h-3" />
-                      <span>{t('log.modePopup')}</span>
-                    </button>
-                  )}
+                <div className="flex items-center gap-1 shrink-0">
+                  {renderLogModeSegmented()}
+                  {sidebarLogMode === 'expanded' &&
+                    renderCombatLogExpandButtons(true)}
                   <button
                     type="button"
                     data-testid="combat-log-mode-toggle"
-                    data-log-mode={combatLogMode}
-                    onClick={handleToggleCombatLogMode}
-                    className="min-h-[28px] px-2 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer"
+                    data-popup-open={logSheetOpen ? 'true' : 'false'}
+                    onClick={handleOpenCombatLogPopup}
+                    title={t('log.modePopup')}
+                    aria-label={t('log.modePopup')}
+                    className="min-h-[24px] px-1.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-[10px] font-semibold inline-flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
                   >
-                    {combatLogMode === 'docked' ? (
-                      <>
-                        <Maximize2 className="w-3 h-3 text-sky-400" />
-                        <span>{t('log.modePopup')}</span>
-                      </>
-                    ) : (
-                      <>
-                        <Minimize2 className="w-3 h-3 text-sky-400" />
-                        <span>{t('log.modeDocked')}</span>
-                      </>
-                    )}
+                    <Maximize2 className="w-3 h-3 text-sky-400 shrink-0" />
+                    <span>{t('log.modePopup')}</span>
                   </button>
                 </div>
               </div>
-              {combatLogMode === 'docked' ? (
+              {sidebarLogMode === 'expanded' ? (
                 <CombatLogList
                   entries={battle.log}
                   units={battle.units}
@@ -2364,21 +2372,14 @@ export function BattleScreen() {
                   expandNonce={logExpandNonce}
                 />
               ) : (
-                <div className="flex-1 min-h-0 flex flex-col items-center justify-center p-4 text-center gap-2 text-[12px] text-slate-400">
-                  <ScrollText className="w-5 h-5 text-sky-400/80" />
-                  <div className="text-slate-300">
-                    {latestLog
-                      ? formatCombatLogMessage(lang, latestLog)
-                      : t('battle.logSheetHint', { count: battle.log.length })}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setLogSheetOpen(true)}
-                    className="min-h-[34px] px-3 rounded-lg border border-sky-500/50 bg-sky-500/15 hover:bg-sky-500/25 text-sky-200 text-[12px] font-semibold inline-flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Maximize2 className="w-3.5 h-3.5" />
-                    <span>{t('stats.openCombatLog')}</span>
-                  </button>
+                <div
+                  data-testid="battle-desktop-log-line"
+                  className="px-2.5 py-1.5 text-[12px] text-slate-200 truncate"
+                >
+                  {latestLog
+                    ? parseStructuredCombatLogRow(lang, latestLog, battle.units)
+                        .sentence
+                    : t('log.emptyChannel')}
                 </div>
               )}
             </div>
@@ -3169,7 +3170,7 @@ export function BattleScreen() {
                   <button
                     type="button"
                     data-testid="combat-log-popup-dock-btn"
-                    onClick={() => handleSetCombatLogMode('docked')}
+                    onClick={() => setLogSheetOpen(false)}
                     className="min-h-[36px] px-2.5 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-[12px] font-semibold inline-flex items-center gap-1.5 cursor-pointer"
                   >
                     <Minimize2 className="w-3.5 h-3.5 text-sky-400" />

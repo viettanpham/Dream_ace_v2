@@ -34,6 +34,10 @@ interface TurnQueueBarProps {
   variant?: TurnQueueVariant;
   targetName?: string | null;
   onSelectUnit?: (unitId: string) => void;
+  /** Maximum upcoming rows shown in sidebar variant (4 in Expanded log mode, 10 in Line mode) */
+  maxUpcoming?: number;
+  /** When true in sidebar variant, allows card to absorb freed height in Line log mode */
+  fillHeight?: boolean;
 }
 
 function getTeamCssVar(role: TeamColorRole): string {
@@ -312,6 +316,8 @@ export function TurnQueueBar({
   variant = 'default',
   targetName = null,
   onSelectUnit,
+  maxUpcoming = 4,
+  fillHeight = false,
 }: TurnQueueBarProps) {
   const { lang, t } = useI18n();
   const trackRef = useRef<HTMLDivElement | null>(null);
@@ -385,8 +391,12 @@ export function TurnQueueBar({
 
   const queue = useMemo(() => buildTurnQueue(battle), [battle]);
   const upcomingData = useMemo(
-    () => buildUpcomingTurnList(battle, TURN_QUEUE_UPCOMING_MAX),
-    [battle]
+    () =>
+      buildUpcomingTurnList(
+        battle,
+        variant === 'sidebar' ? 100 : TURN_QUEUE_UPCOMING_MAX
+      ),
+    [battle, variant]
   );
   const currentRoundChips = queue.current;
   const nextRoundChips = queue.next;
@@ -471,6 +481,104 @@ export function TurnQueueBar({
 
   const enragePct = Math.round(enrageBonusPct * 100);
   const enrageMult = (1 + enrageBonusPct).toFixed(1);
+
+  const renderFullQueuePopover = () => (
+    <div
+      role="dialog"
+      data-testid="turn-queue-popover"
+      aria-label={t('queue.fullQueueTitle')}
+      className="absolute right-0 top-full mt-2 z-50 w-[min(92vw,340px)] max-h-[70vh] flex flex-col rounded-lg border border-slate-700 bg-[#0B111D] shadow-2xl overflow-hidden"
+    >
+      <div className="shrink-0 px-3 py-2 border-b border-slate-800 bg-[#080C15] flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 text-[13px] font-bold text-slate-100">
+          <ListOrdered className="w-3.5 h-3.5 text-amber-300" />
+          <span>{t('queue.fullQueueTitle')}</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => setOverflowOpen(false)}
+          aria-label={t('common.close')}
+          className="h-8 w-8 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 flex items-center justify-center cursor-pointer"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3 tactical-scroll">
+        <div className="space-y-1.5">
+          <div className="text-[12px] font-bold uppercase tracking-wider text-amber-300">
+            {t('queue.currentRoundGroup', { round: queue.round })}
+          </div>
+          {currentRoundChips.map((entry, idx) => {
+            const color = getTeamCssVar(entry.teamRole);
+            const isFirst = idx === 0 && !battle.summary;
+            return (
+              <div
+                key={`pop-cur-${entry.unitId}`}
+                className={`rounded border px-2.5 py-1.5 flex items-center justify-between gap-2 ${
+                  isFirst
+                    ? 'border-amber-300 bg-amber-400/15'
+                    : 'border-slate-800 bg-[#0A101B]'
+                }`}
+                style={{ borderLeftWidth: '3px', borderLeftColor: color }}
+              >
+                <div className="min-w-0 flex items-center gap-1.5">
+                  <span
+                    className="text-[12px] font-bold shrink-0"
+                    style={{ color }}
+                  >
+                    {getTeamTagLabel(lang, entry.teamRole)}
+                  </span>
+                  <span className="text-[13px] font-semibold text-slate-100 truncate">
+                    {entry.name}
+                  </span>
+                  {isFirst && (
+                    <span className="px-1.5 py-0.5 rounded bg-amber-300 text-slate-950 text-[11px] font-bold uppercase shrink-0">
+                      {t('queue.actingNow')}
+                    </span>
+                  )}
+                </div>
+                <div className="font-mono-nums text-[12px] text-slate-300 shrink-0">
+                  {t('queue.speedLabel')} {entry.effectiveSpeed}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="space-y-1.5">
+          <div className="text-[12px] font-bold uppercase tracking-wider text-slate-400">
+            {t('queue.nextRoundGroup', { round: queue.round + 1 })}
+          </div>
+          {nextRoundChips.map((entry) => {
+            const color = getTeamCssVar(entry.teamRole);
+            return (
+              <div
+                key={`pop-next-${entry.unitId}`}
+                className="rounded border border-slate-800/80 bg-[#090E18] px-2.5 py-1.5 flex items-center justify-between gap-2"
+                style={{ borderLeftWidth: '3px', borderLeftColor: color }}
+              >
+                <div className="min-w-0 flex items-center gap-1.5">
+                  <span
+                    className="text-[12px] font-bold shrink-0"
+                    style={{ color }}
+                  >
+                    {getTeamTagLabel(lang, entry.teamRole)}
+                  </span>
+                  <span className="text-[13px] text-slate-200 truncate">
+                    {entry.name}
+                  </span>
+                </div>
+                <div className="font-mono-nums text-[12px] text-slate-400 shrink-0">
+                  {t('queue.speedLabel')} {entry.effectiveSpeed}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
 
   // PHONE ONE-LINE STRIP VARIANT (max 44px, internal horizontal scroll only, zero chip clipping, zero page overflow)
   if (variant === 'phone') {
@@ -580,10 +688,16 @@ export function TurnQueueBar({
     );
   }
 
-  // SIDEBAR VARIANT (Tablet / PC right column: highlighted actor at top + "Next" label + compact vertical 1..5 list)
+  // SIDEBAR VARIANT (Tablet / PC right column: 32px header + acting unit + next 4 (or up to 10 in Line log mode) 26px rows + "+N")
   if (variant === 'sidebar') {
     const actingEntry = upcomingData.actingEntry;
-    const upcomingList = upcomingData.upcoming;
+    const sidebarLimit = Math.max(1, Math.floor(maxUpcoming));
+    const allUpcoming = upcomingData.upcoming;
+    const visibleUpcoming = allUpcoming.slice(0, sidebarLimit);
+    const sidebarHiddenCount = Math.max(
+      0,
+      allUpcoming.length - visibleUpcoming.length
+    );
 
     const actingShort = actingEntry
       ? formatShortUnitName(actingEntry.name, 10)
@@ -596,9 +710,14 @@ export function TurnQueueBar({
     return (
       <div
         data-testid="turn-queue-sidebar"
-        className="rounded-lg border border-slate-800 bg-[#0A101B] p-2 space-y-2 shrink-0"
+        className={`rounded-lg border border-slate-800 bg-[#0A101B] p-2 flex flex-col gap-1.5 ${
+          fillHeight ? 'flex-1 min-h-0' : 'shrink-0'
+        }`}
       >
-        <div className="flex items-center justify-between gap-2">
+        <div
+          data-testid="turn-queue-sidebar-header"
+          className="h-[32px] min-h-[32px] max-h-[32px] shrink-0 flex items-center justify-between gap-2"
+        >
           <div className="flex items-center gap-1.5 min-w-0">
             {!battle.summary && (
               <span
@@ -637,13 +756,13 @@ export function TurnQueueBar({
             </span>
           </div>
 
-          <span className="text-[12px] text-slate-400 font-medium truncate">
+          <span className="text-[12px] text-slate-400 font-medium whitespace-nowrap">
             {t('battle.turnOrder')}
           </span>
         </div>
 
-        {/* Acting Unit Highlight (fixed height even when battle ended) */}
-        {actingEntry ? (
+        {/* Acting Unit Highlight (no reserved blank box when battle finished) */}
+        {actingEntry && (
           <button
             type="button"
             data-testid="turn-queue-acting-chip"
@@ -656,7 +775,7 @@ export function TurnQueueBar({
             } (${getClassName(lang, actingEntry.classId)}) · ${t(
               'queue.speedLabel'
             )} ${actingEntry.effectiveSpeed}`}
-            className="w-full h-[44px] min-h-[44px] px-2.5 py-1.5 rounded-lg border bg-amber-400/15 hover:bg-amber-400/20 flex items-center justify-between gap-2 text-left cursor-pointer transition-colors"
+            className="w-full h-[36px] min-h-[36px] max-h-[36px] shrink-0 px-2.5 rounded-lg border bg-amber-400/15 hover:bg-amber-400/20 flex items-center justify-between gap-2 text-left cursor-pointer transition-colors"
             style={{ borderColor: 'var(--turn-active)' }}
           >
             <div className="flex items-center gap-2 min-w-0">
@@ -682,102 +801,108 @@ export function TurnQueueBar({
               SPD {actingEntry.effectiveSpeed}
             </span>
           </button>
-        ) : (
-          <div
-            data-testid="turn-queue-acting-empty"
-            aria-hidden="true"
-            className="w-full h-[44px] min-h-[44px] px-2.5 py-1.5 rounded-lg border border-slate-800/50 bg-[#090E18] opacity-35 flex items-center justify-between text-[12px] font-mono-nums text-slate-600 select-none"
-          >
-            <span>—</span>
-          </div>
         )}
 
-        {/* Fixed-Height Vertical Upcoming List (always 5 slots: "Next" label + 1..5, empty slots faded) */}
-        <div className="space-y-1">
+        {/* Upcoming List: next 4 rows of 26px in Expanded mode, up to 10 in Line mode, "+N" popover trigger */}
+        {visibleUpcoming.length > 0 && (
           <div
-            data-testid="turn-queue-next-label"
-            className="px-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400"
+            className={`space-y-1 ${
+              fillHeight ? 'flex-1 min-h-0 flex flex-col' : 'shrink-0'
+            }`}
           >
-            {t('queue.nextSectionLabel')}
-          </div>
-          <div
-            data-testid="turn-queue-upcoming-list"
-            className="flex flex-col gap-1 h-[166px]"
-          >
-            {Array.from({ length: 5 }, (_, slotIdx) => {
-              const item = upcomingList[slotIdx] ?? null;
-              if (!item) {
+            <div className="px-1 flex items-center justify-between gap-2 shrink-0 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              <span data-testid="turn-queue-next-label">
+                {t('queue.nextSectionLabel')}
+              </span>
+              {sidebarHiddenCount > 0 && (
+                <div ref={popoverAnchorRef} className="relative shrink-0">
+                  <button
+                    type="button"
+                    data-testid="turn-queue-overflow"
+                    onClick={() => setOverflowOpen((v) => !v)}
+                    aria-expanded={overflowOpen}
+                    aria-haspopup="dialog"
+                    title={t('queue.overflowHint', {
+                      count: sidebarHiddenCount,
+                    })}
+                    aria-label={t('queue.overflowHint', {
+                      count: sidebarHiddenCount,
+                    })}
+                    className="h-[20px] px-1.5 rounded border border-slate-600 bg-slate-900 hover:bg-slate-800 hover:border-amber-400/60 text-[11px] font-mono-nums font-bold text-amber-300 inline-flex items-center justify-center gap-0.5 cursor-pointer"
+                  >
+                    <span>+{sidebarHiddenCount}</span>
+                    <ChevronDown className="w-3 h-3" />
+                  </button>
+                  {overflowOpen && renderFullQueuePopover()}
+                </div>
+              )}
+            </div>
+            <div
+              data-testid="turn-queue-upcoming-list"
+              className={`flex flex-col gap-1 ${
+                fillHeight ? 'flex-1 min-h-0 overflow-y-auto tactical-scroll' : ''
+              }`}
+            >
+              {visibleUpcoming.map((item) => {
+                const entry = item.entry;
+                const tip = `${item.order}. ${getTeamTagLabel(
+                  lang,
+                  entry.teamRole
+                )} ${entry.name} (${getClassName(lang, entry.classId)}) · ${t(
+                  'queue.speedLabel'
+                )} ${entry.effectiveSpeed}`;
+                const speedTone = entry.isSlowed
+                  ? 'text-red-300'
+                  : entry.isSpeedBoosted
+                  ? 'text-emerald-300'
+                  : 'text-slate-300';
                 return (
-                  <div
-                    key={`sb-empty-${slotIdx}`}
-                    data-testid="turn-queue-sidebar-slot-empty"
-                    data-empty="true"
-                    aria-hidden="true"
-                    className="w-full h-[30px] px-2 rounded border border-slate-800/40 bg-[#0A101B]/60 opacity-25 flex items-center justify-between text-[11px] font-mono-nums text-slate-600 select-none shrink-0"
+                  <button
+                    key={`sb-${entry.phase}-${entry.unitId}-${item.order}`}
+                    type="button"
+                    data-testid="turn-queue-sidebar-chip"
+                    data-unit-id={entry.unitId}
+                    data-full-name={entry.name}
+                    data-order={item.order}
+                    onClick={() => handleChipClick(entry)}
+                    title={tip}
+                    aria-label={tip}
+                    className={`w-full h-[26px] min-h-[26px] max-h-[26px] px-2 rounded border border-slate-800/90 bg-[#0E1522] hover:bg-slate-800/85 text-[12px] flex items-center justify-between gap-2 text-left cursor-pointer transition-colors shrink-0 ${
+                      entry.phase === 'next_round' ? 'opacity-75' : ''
+                    }`}
                   >
-                    <span className="w-4 text-center">{slotIdx + 1}</span>
-                    <span>—</span>
-                  </div>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span
+                        data-testid="turn-queue-order-num"
+                        className="w-4 text-center font-mono-nums text-[11px] font-bold text-slate-400 shrink-0"
+                      >
+                        {item.order}
+                      </span>
+                      <TeamShapeIcon role={entry.teamRole} />
+                      <span
+                        data-testid="turn-queue-chip-name"
+                        className="font-medium text-slate-100 whitespace-nowrap truncate"
+                      >
+                        {item.shortName}
+                      </span>
+                    </div>
+                    <span
+                      className={`font-mono-nums text-[11px] font-semibold shrink-0 inline-flex items-center gap-0.5 ${speedTone}`}
+                    >
+                      {entry.isSlowed && (
+                        <TrendingDown className="w-3 h-3 text-red-400" />
+                      )}
+                      {entry.isSpeedBoosted && (
+                        <TrendingUp className="w-3 h-3 text-emerald-400" />
+                      )}
+                      <span>SPD {entry.effectiveSpeed}</span>
+                    </span>
+                  </button>
                 );
-              }
-              const entry = item.entry;
-              const tip = `${item.order}. ${getTeamTagLabel(
-                lang,
-                entry.teamRole
-              )} ${entry.name} (${getClassName(lang, entry.classId)}) · ${t(
-                'queue.speedLabel'
-              )} ${entry.effectiveSpeed}`;
-              const speedTone = entry.isSlowed
-                ? 'text-red-300'
-                : entry.isSpeedBoosted
-                ? 'text-emerald-300'
-                : 'text-slate-300';
-              return (
-                <button
-                  key={`sb-${entry.phase}-${entry.unitId}-${item.order}`}
-                  type="button"
-                  data-testid="turn-queue-sidebar-chip"
-                  data-unit-id={entry.unitId}
-                  data-full-name={entry.name}
-                  data-order={item.order}
-                  onClick={() => handleChipClick(entry)}
-                  title={tip}
-                  aria-label={tip}
-                  className={`w-full h-[30px] px-2 rounded border border-slate-800/90 bg-[#0E1522] hover:bg-slate-800/85 text-[12px] flex items-center justify-between gap-2 text-left cursor-pointer transition-colors shrink-0 ${
-                    entry.phase === 'next_round' ? 'opacity-75' : ''
-                  }`}
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span
-                      data-testid="turn-queue-order-num"
-                      className="w-4 text-center font-mono-nums text-[11px] font-bold text-slate-400 shrink-0"
-                    >
-                      {item.order}
-                    </span>
-                    <TeamShapeIcon role={entry.teamRole} />
-                    <span
-                      data-testid="turn-queue-chip-name"
-                      className="font-medium text-slate-100 whitespace-nowrap truncate"
-                    >
-                      {item.shortName}
-                    </span>
-                  </div>
-                  <span
-                    className={`font-mono-nums text-[11px] font-semibold shrink-0 inline-flex items-center gap-0.5 ${speedTone}`}
-                  >
-                    {entry.isSlowed && (
-                      <TrendingDown className="w-3 h-3 text-red-400" />
-                    )}
-                    {entry.isSpeedBoosted && (
-                      <TrendingUp className="w-3 h-3 text-emerald-400" />
-                    )}
-                    <span>SPD {entry.effectiveSpeed}</span>
-                  </span>
-                </button>
-              );
-            })}
+              })}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     );
   }
@@ -888,103 +1013,7 @@ export function TurnQueueBar({
             <ChevronDown className="w-3 h-3" />
           </button>
 
-          {overflowOpen && (
-            <div
-              role="dialog"
-              data-testid="turn-queue-popover"
-              aria-label={t('queue.fullQueueTitle')}
-              className="absolute right-0 top-full mt-2 z-50 w-[min(92vw,340px)] max-h-[70vh] flex flex-col rounded-lg border border-slate-700 bg-[#0B111D] shadow-2xl overflow-hidden"
-            >
-              <div className="shrink-0 px-3 py-2 border-b border-slate-800 bg-[#080C15] flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 text-[13px] font-bold text-slate-100">
-                  <ListOrdered className="w-3.5 h-3.5 text-amber-300" />
-                  <span>{t('queue.fullQueueTitle')}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setOverflowOpen(false)}
-                  aria-label={t('common.close')}
-                  className="h-8 w-8 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 flex items-center justify-center cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-
-              <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3 tactical-scroll">
-                <div className="space-y-1.5">
-                  <div className="text-[12px] font-bold uppercase tracking-wider text-amber-300">
-                    {t('queue.currentRoundGroup', { round: queue.round })}
-                  </div>
-                  {currentRoundChips.map((entry, idx) => {
-                    const color = getTeamCssVar(entry.teamRole);
-                    const isFirst = idx === 0 && !battle.summary;
-                    return (
-                      <div
-                        key={`pop-cur-${entry.unitId}`}
-                        className={`rounded border px-2.5 py-1.5 flex items-center justify-between gap-2 ${
-                          isFirst
-                            ? 'border-amber-300 bg-amber-400/15'
-                            : 'border-slate-800 bg-[#0A101B]'
-                        }`}
-                        style={{ borderLeftWidth: '3px', borderLeftColor: color }}
-                      >
-                        <div className="min-w-0 flex items-center gap-1.5">
-                          <span
-                            className="text-[12px] font-bold shrink-0"
-                            style={{ color }}
-                          >
-                            {getTeamTagLabel(lang, entry.teamRole)}
-                          </span>
-                          <span className="text-[13px] font-semibold text-slate-100 truncate">
-                            {entry.name}
-                          </span>
-                          {isFirst && (
-                            <span className="px-1.5 py-0.5 rounded bg-amber-300 text-slate-950 text-[11px] font-bold uppercase shrink-0">
-                              {t('queue.actingNow')}
-                            </span>
-                          )}
-                        </div>
-                        <div className="font-mono-nums text-[12px] text-slate-300 shrink-0">
-                          {t('queue.speedLabel')} {entry.effectiveSpeed}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div className="space-y-1.5">
-                  <div className="text-[12px] font-bold uppercase tracking-wider text-slate-400">
-                    {t('queue.nextRoundGroup', { round: queue.round + 1 })}
-                  </div>
-                  {nextRoundChips.map((entry) => {
-                    const color = getTeamCssVar(entry.teamRole);
-                    return (
-                      <div
-                        key={`pop-next-${entry.unitId}`}
-                        className="rounded border border-slate-800/80 bg-[#090E18] px-2.5 py-1.5 flex items-center justify-between gap-2"
-                        style={{ borderLeftWidth: '3px', borderLeftColor: color }}
-                      >
-                        <div className="min-w-0 flex items-center gap-1.5">
-                          <span
-                            className="text-[12px] font-bold shrink-0"
-                            style={{ color }}
-                          >
-                            {getTeamTagLabel(lang, entry.teamRole)}
-                          </span>
-                          <span className="text-[13px] text-slate-200 truncate">
-                            {entry.name}
-                          </span>
-                        </div>
-                        <div className="font-mono-nums text-[12px] text-slate-400 shrink-0">
-                          {t('queue.speedLabel')} {entry.effectiveSpeed}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
+          {overflowOpen && renderFullQueuePopover()}
         </div>
       )}
 

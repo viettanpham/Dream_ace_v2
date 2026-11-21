@@ -27,6 +27,7 @@ import {
 
 export type CombatLogChannel = 'all' | 'ally' | 'enemy' | 'system';
 export type CombatLogDisplayMode = 'docked' | 'popup';
+export type SidebarCombatLogMode = 'line' | 'expanded';
 export type CombatLogActionKind =
   | 'attack'
   | 'skill'
@@ -47,6 +48,7 @@ export type CombatLogValueTone =
 
 export const DOCKED_LOG_MAX_ENTRIES = 200;
 export const POPUP_LOG_PAGE_SIZE = 200;
+export const LOG_MODE_STORAGE_KEY = 'dreamAce.logMode.v1';
 export const COMBAT_LOG_MODE_STORAGE_KEY = 'starfront_combat_log_mode_v1';
 export const COMBAT_LOG_EXPAND_ALL_STORAGE_KEY =
   'starfront_combat_log_expand_all_v1';
@@ -131,6 +133,27 @@ export interface LiveBattleProgress {
   enemyActiveBuffs: number;
   enemyActiveDebuffs: number;
   killTimeline: KillTimelineItem[];
+}
+
+export function readSidebarLogMode(): SidebarCombatLogMode {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return 'expanded';
+    }
+    const raw = window.localStorage.getItem(LOG_MODE_STORAGE_KEY);
+    return raw === 'line' ? 'line' : 'expanded';
+  } catch {
+    return 'expanded';
+  }
+}
+
+export function writeSidebarLogMode(mode: SidebarCombatLogMode): void {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    window.localStorage.setItem(LOG_MODE_STORAGE_KEY, mode);
+  } catch {
+    // Ignore storage quota or private mode failures
+  }
 }
 
 export function readCombatLogMode(): CombatLogDisplayMode {

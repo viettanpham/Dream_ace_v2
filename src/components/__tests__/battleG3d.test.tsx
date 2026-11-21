@@ -662,8 +662,7 @@ describe('Task G3d — i18n audit, detailed status chips, readable combat log, p
     expect(phoneBar.getAttribute('data-collapsed')).toBe('true');
   });
 
-  it('5) Layout stability: TurnQueueBar sidebar keeps 5 fixed slots, selected-unit panel and phone docked log keep fixed height', () => {
-    // Only 1 enemy + 1 ally -> fewer than 5 turns in current round, still renders 5 total slots
+  it('5) Layout stability: TurnQueueBar sidebar renders only populated rows (no empty slots), selected-unit panel & phone log never reserve empty height', () => {
     const slimBattle = makeBattle({
       units: [
         makeUnit('u_p', 'Kaelen', 'ally', { isPlayer: true, speed: 80 }),
@@ -689,10 +688,10 @@ describe('Task G3d — i18n audit, detailed status chips, readable combat log, p
     const emptySlots = container!.querySelectorAll(
       '[data-testid="turn-queue-sidebar-slot-empty"]'
     );
-    expect(populated.length + emptySlots.length).toBe(5);
-    expect(emptySlots.length).toBeGreaterThanOrEqual(2);
+    expect(populated.length).toBe(3);
+    expect(emptySlots.length).toBe(0);
 
-    // Selected-unit panel stays fixed h-[244px] across Desktop BattleScreen
+    // Selected-unit panel uses content height (no fixed h-[244px])
     act(() => {
       useGameStore.setState({ battle: slimBattle });
       root!.render(createElement(BattleScreen));
@@ -700,17 +699,16 @@ describe('Task G3d — i18n audit, detailed status chips, readable combat log, p
     const selectedPanel = container!.querySelector(
       '[data-testid="battle-selected-unit-panel"]'
     ) as HTMLElement;
-    expect(selectedPanel.getAttribute('data-fixed-height')).toBe('true');
-    expect(selectedPanel.className).toContain('h-[244px]');
+    expect(selectedPanel.className).not.toContain('h-[244px]');
 
-    // Phone docked log keeps fixed h-[144px]
+    // Phone docked log flows inside page scroll (no fixed h-[144px] or overflow-y-auto)
     act(() => {
       setViewport(390, 844);
     });
     const phoneDockedLog = container!.querySelector(
       '[data-testid="battle-phone-docked-log"]'
     ) as HTMLElement;
-    expect(phoneDockedLog.getAttribute('data-fixed-height')).toBe('true');
-    expect(phoneDockedLog.className).toContain('h-[144px]');
+    expect(phoneDockedLog.className).not.toContain('h-[144px]');
+    expect(phoneDockedLog.querySelector('.overflow-y-auto')).toBeNull();
   });
 });

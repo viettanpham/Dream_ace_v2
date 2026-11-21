@@ -1319,6 +1319,8 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'log.filter.system': 'Hệ thống',
   'log.modeDocked': 'Gắn khung',
   'log.modePopup': 'Cửa sổ',
+  'log.modeLine': 'Dòng',
+  'log.modeExpanded': 'Mở rộng',
   'log.loadOlder': 'Tải thêm cũ hơn ({count})',
   'log.emptyChannel': 'Chưa có mục nào trong kênh này.',
   'log.dockedCapHint': '{shown}/{total} mới nhất',

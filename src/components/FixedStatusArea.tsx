@@ -34,6 +34,8 @@ interface FixedStatusAreaProps {
   chipTestIdPrefix?: string;
   labelTestIdPrefix?: string;
   overflowTestId?: string;
+  /** When true, shrinks container height to packed row count (1..rows) instead of reserving unused rows */
+  autoHeight?: boolean;
   className?: string;
 }
 
@@ -66,14 +68,14 @@ function packStatusChips(
   items: ReadonlyArray<{ status: ActiveStatusEffect; widthPx: number }>,
   containerWidthPx: number,
   maxRows: number
-): { visible: ActiveStatusEffect[]; overflowCount: number } {
-  if (items.length === 0) return { visible: [], overflowCount: 0 };
+): { visible: ActiveStatusEffect[]; overflowCount: number; usedRows: number } {
+  if (items.length === 0) return { visible: [], overflowCount: 0, usedRows: 0 };
 
   const usableW = Math.max(84, containerWidthPx - 12);
   const safeRows = Math.max(1, Math.min(5, maxRows));
   const overflowChipW = 34;
 
-  const fitsCount = (count: number, withOverflow: boolean): boolean => {
+  const measureFit = (count: number, withOverflow: boolean): number | null => {
     let row = 1;
     let curW = 0;
 
@@ -91,26 +93,30 @@ function packStatusChips(
     };
 
     for (let i = 0; i < count; i += 1) {
-      if (!placeWidth(items[i].widthPx)) return false;
+      if (!placeWidth(items[i].widthPx)) return null;
     }
     if (withOverflow && !placeWidth(overflowChipW)) {
-      return false;
+      return null;
     }
-    return true;
+    return row;
   };
 
-  if (fitsCount(items.length, false)) {
+  const fullRows = measureFit(items.length, false);
+  if (fullRows !== null) {
     return {
       visible: items.map((x) => x.status),
       overflowCount: 0,
+      usedRows: fullRows,
     };
   }
 
   for (let k = items.length - 1; k >= 1; k -= 1) {
-    if (fitsCount(k, true)) {
+    const used = measureFit(k, true);
+    if (used !== null) {
       return {
         visible: items.slice(0, k).map((x) => x.status),
         overflowCount: items.length - k,
+        usedRows: used,
       };
     }
   }
@@ -118,6 +124,7 @@ function packStatusChips(
   return {
     visible: [],
     overflowCount: items.length,
+    usedRows: 1,
   };
 }
 
@@ -135,6 +142,7 @@ export function FixedStatusArea({
   chipTestIdPrefix,
   labelTestIdPrefix,
   overflowTestId,
+  autoHeight = false,
   className = '',
 }: FixedStatusAreaProps) {
   const { lang, t } = useI18n();
@@ -191,7 +199,11 @@ export function FixedStatusArea({
     return packStatusChips(measured, widthToUse, rows);
   }, [sorted, lang, unit, showLabels, compact, measuredWidth, fallbackWidthPx, rows]);
 
-  const heightPx = getFixedStatusAreaHeightPx(rows, compact);
+  const effectiveRows = autoHeight
+    ? Math.max(0, Math.min(rows, packed.usedRows))
+    : rows;
+  const heightPx =
+    effectiveRows === 0 ? 0 : getFixedStatusAreaHeightPx(effectiveRows, compact);
 
   const openDetails = (e: React.SyntheticEvent) => {
     e.stopPropagation();
@@ -279,7 +291,7 @@ export function FixedStatusArea({
       <div
         ref={areaRef}
         data-testid={rootTestId}
-        data-status-area-rows={rows}
+        data-status-area-rows={effectiveRows}
         data-status-count={sorted.length}
         role="button"
         tabIndex={0}

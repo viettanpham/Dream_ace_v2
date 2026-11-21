@@ -13,7 +13,6 @@ import type {
 } from '../../types/game';
 import {
   COMBAT_LOG_EXPAND_ALL_STORAGE_KEY,
-  COMBAT_LOG_MODE_STORAGE_KEY,
   readCombatLogExpandAll,
 } from '../../utils/combatLogFormat';
 import { AdminPanel } from '../AdminPanel';
@@ -451,7 +450,7 @@ describe('ST1 UI: AdminPanel Starter tab, GearView Starter badge, Destroyed stat
       ) as HTMLButtonElement;
       modeBtn.click();
     });
-    expect(localStorage.getItem(COMBAT_LOG_MODE_STORAGE_KEY)).toBe('popup');
+    expect(localStorage.getItem('dreamAce.logMode.v1')).toBeNull();
     const popup = container!.querySelector(
       '[data-testid="combat-log-popup"]'
     ) as HTMLElement;

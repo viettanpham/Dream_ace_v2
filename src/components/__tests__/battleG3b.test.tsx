@@ -615,15 +615,18 @@ describe('G3b Components — Radar rings, zero "!" badges, TurnQueueBar & Loop b
     const rows = Array.from(
       container!.querySelectorAll('[data-testid="turn-queue-sidebar-chip"]')
     );
-    expect(rows).toHaveLength(5);
+    expect(rows).toHaveLength(4);
     expect(
       rows.map(
         (r) => r.querySelector('[data-testid="turn-queue-order-num"]')?.textContent
       )
-    ).toEqual(['1', '2', '3', '4', '5']);
+    ).toEqual(['1', '2', '3', '4']);
     for (const row of rows) {
       expect(row.querySelector('[data-team-shape]')).not.toBeNull();
     }
+    expect(
+      container!.querySelector('[data-testid="turn-queue-overflow"]')?.textContent
+    ).toContain('+');
 
     // 2) Phone narrow-width strip variant
     act(() => {

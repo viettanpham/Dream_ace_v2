@@ -1,0 +1,16 @@
+STALE GUARD (before anything else): check that src/utils/statusDisplayPrefs.ts, src/engine/cloudSave.ts and the package @material-symbols/font-400 exist. If any is missing, STOP, change nothing and tell me which are missing.
+
+TASK G4a-2b — Right sidebar heights + log modes. Model: Hydrogen. If this prompt looks cut off, STOP and tell me the last words you can see.
+
+STEP A (first): save THIS WHOLE prompt verbatim to docs/tasks/G4a-2b.md and create docs/tasks/G4a-2b.progress.md with a checklist of items 1-4 (unticked); tick each item right after finishing it; at the end write docs/tasks/G4a-2b.report.md and print it. If interrupted or retried: read both files and continue from the first unticked item.
+
+RULES: change ONLY the right sidebar (turn queue, selected-unit panel, combat log). Do NOT touch the main battle column, radar, unit cards, src/utils/battleVfx.ts, src/components/BattleVfxOverlay.tsx; CURRENT_SAVE_VERSION stays 9; do NOT change the log wording; keep ST1 expand/collapse, G4a-1 status chips, the orange SP token; items 1-2 apply to widths above 640px, item 3 to phone only; new strings in vi.ts AND en.ts; never leave empty reserved space.
+
+STEP 0 (read-only, max 10 lines): on desktop the heights of the turn queue, the selected-unit panel (and its empty area) and the combat log, and what limits the log height; every nested scroll container inside these 3 blocks on phone; where "Mở hết", "Thu hết" and "Cửa sổ" are implemented.
+
+1. Right column (desktop/tablet): flex column filling the viewport height, no page scroll caused by it. HARD LIMITS at 1440x900: turn queue = header 32px + current actor + next 4 rows of 26px, "+N" when more; selected-unit panel height = its content, status area max 2 rows ("+N" opens the existing full list), 0 rows and no empty space when the unit has no statuses; combat log is flex-1, min-h 220px, takes ALL remaining height, scrolls inside, and its header shows the title and the count without truncation (smaller icon buttons if needed).
+2. Log modes: segmented control [Dòng | Mở rộng] saved per device in localStorage key dreamAce.logMode.v1 (outside the save and SV1a/SV1b exports), default Mở rộng; plus the existing "Cửa sổ" button (popup, not saved). Dòng = the log block shrinks to header + one line with the latest event and the freed height goes to the turn queue (up to 10 next rows) so no gap remains. "Mở hết / Thu hết" are shown only in Mở rộng.
+3. Phone (<=640px): do NOT move or restructure any block (the queue chip strip and the unit panel stay exactly as they are). Only the combat log: it flows inside the page scroll with no nested scroll box; Dòng = one line, Mở rộng = full list in the page flow, "Cửa sổ" = bottom sheet. Nothing else on phone changes.
+4. Tests (vitest): mode switch persists in dreamAce.logMode.v1 and the key is not in save exports; unit panel shows 0 status rows when none and "+N" above 2 rows; queue shows max 4 next rows in Mở rộng and more in Dòng; log container has flex-1 and min-h 220px; no nested scroll container in the phone sidebar blocks; vi/en parity.
+
+CHECKS: npx vitest run (baseline 228), tsc --noEmit (lint_applet), production build. REPORT: Step 0 facts, files touched, test count, which limits are enforced in code, what you could NOT verify in a real browser.

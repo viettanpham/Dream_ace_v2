@@ -11,7 +11,6 @@ import type {
   CombatUnit,
 } from '../../types/game';
 import {
-  COMBAT_LOG_MODE_STORAGE_KEY,
   DOCKED_LOG_MAX_ENTRIES,
   POPUP_LOG_PAGE_SIZE,
   SHOW_STATUS_LABELS_STORAGE_KEY,
@@ -633,19 +632,19 @@ describe('G3c-1: Structured Combat Log rows, action icons, channels & modes', ()
       root!.render(createElement(BattleScreen));
     });
 
-    // Click mode toggle on desktop docked log header -> switches to popup & persists
+    // Click "Cửa sổ" button on desktop log header -> opens popup (not saved to localStorage)
     const toggleBtn = container!.querySelector(
       '[data-testid="combat-log-mode-toggle"]'
     ) as HTMLButtonElement;
     expect(toggleBtn).not.toBeNull();
-    expect(toggleBtn.getAttribute('data-log-mode')).toBe('docked');
+    expect(toggleBtn.getAttribute('data-popup-open')).toBe('false');
 
     act(() => {
       toggleBtn.click();
     });
 
-    expect(localStorage.getItem(COMBAT_LOG_MODE_STORAGE_KEY)).toBe('popup');
-    expect(readCombatLogMode()).toBe('popup');
+    expect(toggleBtn.getAttribute('data-popup-open')).toBe('true');
+    expect(localStorage.getItem('dreamAce.logMode.v1')).toBeNull();
     expect(
       container!.querySelector('[data-testid="combat-log-popup"]')
     ).not.toBeNull();
@@ -656,7 +655,7 @@ describe('G3c-1: Structured Combat Log rows, action icons, channels & modes', ()
     });
     expect(performAiTurnSpy).toHaveBeenCalled();
 
-    // Switch back to docked from popup header
+    // Close popup via dock button
     const dockBtn = container!.querySelector(
       '[data-testid="combat-log-popup-dock-btn"]'
     ) as HTMLButtonElement;
@@ -664,7 +663,6 @@ describe('G3c-1: Structured Combat Log rows, action icons, channels & modes', ()
     act(() => {
       dockBtn.click();
     });
-    expect(localStorage.getItem(COMBAT_LOG_MODE_STORAGE_KEY)).toBe('docked');
     expect(
       container!.querySelector('[data-testid="combat-log-popup"]')
     ).toBeNull();

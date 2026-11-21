@@ -58,6 +58,8 @@ interface CombatLogListProps {
   expandAll?: boolean;
   /** Monotonic counter incremented when Expand All / Collapse All is clicked to clear manual per-round overrides */
   expandNonce?: number;
+  /** When true (phone Expanded mode), flows inside page scroll with zero nested scroll containers */
+  inlineFlow?: boolean;
   className?: string;
 }
 
@@ -298,6 +300,7 @@ export function CombatLogList({
   onChannelChange,
   expandAll: controlledExpandAll,
   expandNonce = 0,
+  inlineFlow = false,
   className = '',
 }: CombatLogListProps) {
   const { lang, t } = useI18n();
@@ -382,7 +385,7 @@ export function CombatLogList({
 
   // Stick to bottom whenever new entries arrive (or popup opens), ONLY while pinned to bottom
   useLayoutEffect(() => {
-    if (!active || !isAtBottomRef.current) return;
+    if (inlineFlow || !active || !isAtBottomRef.current) return;
     scrollToBottom();
 
     if (
@@ -396,7 +399,14 @@ export function CombatLogList({
       });
       return () => window.cancelAnimationFrame(rafId);
     }
-  }, [active, visibleEntries.length, lastEntryId, activeChannel, scrollToBottom]);
+  }, [
+    inlineFlow,
+    active,
+    visibleEntries.length,
+    lastEntryId,
+    activeChannel,
+    scrollToBottom,
+  ]);
 
   const toggleRound = (roundNum: number, currentlyOpen: boolean) => {
     setRoundOverrides((prev) => ({
@@ -408,7 +418,11 @@ export function CombatLogList({
   const isCompact = density === 'compact';
 
   return (
-    <div className={`relative flex-1 min-h-0 flex flex-col ${className}`}>
+    <div
+      className={`relative ${
+        inlineFlow ? '' : 'flex-1 min-h-0'
+      } flex flex-col ${className}`}
+    >
       {/* Channel Filter Tabs: All / Allies / Enemies / System */}
       <div
         data-testid="combat-log-filters"
@@ -418,7 +432,11 @@ export function CombatLogList({
           isCompact ? 'px-2 py-1' : 'px-3 py-1.5'
         }`}
       >
-        <div className="flex items-center gap-1 min-w-0 overflow-x-auto">
+        <div
+          className={`flex items-center gap-1 min-w-0 ${
+            inlineFlow ? 'flex-wrap' : 'overflow-x-auto'
+          }`}
+        >
           {CHANNELS.map((ch) => {
             const isSelected = activeChannel === ch;
             return (
@@ -459,12 +477,16 @@ export function CombatLogList({
         )}
       </div>
 
-      {/* Scrollable Log Body grouped by Round */}
+      {/* Log Body grouped by Round (inner scroll when docked/popup, page-flow when inlineFlow) */}
       <div
         ref={scrollRef}
         data-testid="combat-log-scroll"
-        onScroll={handleScroll}
-        className={`flex-1 min-h-0 overflow-y-auto overscroll-contain tactical-scroll ${
+        onScroll={inlineFlow ? undefined : handleScroll}
+        className={`${
+          inlineFlow
+            ? ''
+            : 'flex-1 min-h-0 overflow-y-auto overscroll-contain tactical-scroll'
+        } ${
           isCompact
             ? 'px-2.5 py-1.5 space-y-1.5 text-[12px]'
             : 'px-3.5 py-2.5 space-y-2 text-[13px]'
@@ -597,7 +619,7 @@ export function CombatLogList({
         )}
       </div>
 
-      {showJumpToLatest && visibleEntries.length > 0 && (
+      {!inlineFlow && showJumpToLatest && visibleEntries.length > 0 && (
         <button
           type="button"
           data-testid="combat-log-jump-latest"

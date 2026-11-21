@@ -1,0 +1,6 @@
+# TASK G4a-2b Progress
+
+- [x] 1. Right column (desktop/tablet): viewport-height flex column without page scroll; turn queue hard limits (32px header + current actor + max 4 rows of 26px + "+N"); selected-unit panel content height with max 2 status rows ("+N") and 0 rows / no empty space when none; combat log `flex-1` + `min-h-[220px]`, internal scroll, non-truncated title and count.
+- [x] 2. Log modes: segmented control `[Dòng | Mở rộng]` persisted in `dreamAce.logMode.v1` (outside save and SV1a/SV1b exports, default `Mở rộng`), existing `"Cửa sổ"` popup (not saved); `Dòng` shrinks log to header + latest event line and gives freed height to turn queue (up to 10 next rows); `"Mở hết / Thu hết"` shown only in `Mở rộng`.
+- [x] 3. Phone (`<=640px`): preserve all non-log blocks untouched; combat log flows inside page scroll with no nested scroll box (`Dòng` = one line, `Mở rộng` = full list in page flow, `"Cửa sổ"` = bottom sheet).
+- [x] 4. Tests & checks: Vitest coverage for persistence/export exclusion, status rows 0 vs +N >2 rows, queue rows (4 in Mở rộng, more in Dòng), log `flex-1 min-h-[220px]`, no nested scroll container in phone log/sidebar, vi/en parity; `npx vitest run`, `tsc --noEmit` (`lint_applet`), production build, and `docs/tasks/G4a-2b.report.md`.
