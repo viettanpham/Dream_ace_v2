@@ -29,9 +29,6 @@
   --turn-active-text: #fefce8;
   --turn-active-bg: rgba(254, 240, 138, 0.18);
   --turn-active-glow: rgba(254, 240, 138, 0.5);
-
-  /* Single shared SP accent color token (Orange #EF9F27) */
-  --sp-color: #EF9F27;
 }
 
 @layer base {
@@ -1038,9 +1035,3 @@
 .tactical-scroll::-webkit-scrollbar-thumb:hover {
   background: rgba(148, 163, 184, 0.7);
 }
-
-/* Status catalog debuff hexagon frame clip */
-.status-hex-frame {
-  clip-path: polygon(25% 3%, 75% 3%, 98% 50%, 75% 97%, 25% 97%, 2% 50%);
-}
-

@@ -19,15 +19,6 @@ import type {
   TurnQueueEntry,
 } from '../types/game';
 
-export const SP_COLOR_HEX = '#EF9F27' as const;
-
-export const SP_COLOR_TOKENS = {
-  hex: SP_COLOR_HEX,
-  barFillClass: 'bg-[#EF9F27]',
-  textClass: 'text-[#EF9F27]',
-  badgeClass: 'bg-[#EF9F27]/12 border-[#EF9F27]/35 text-[#EF9F27]',
-} as const;
-
 export type BattleLayoutMode = 'phone-portrait' | 'tablet' | 'pc';
 
 export type RowExposureState = 'exposed' | 'protected' | 'empty';
@@ -83,9 +74,9 @@ export const TURN_QUEUE_UPCOMING_MAX = 5;
 
 /**
  * Pure responsive layout classifier for the Battle Screen.
- * - Portrait phone (width <= 640 and NOT landscape phone) -> 'phone-portrait'
+ * - Portrait phone (width < 600 and NOT landscape phone) -> 'phone-portrait'
  * - Landscape phone (width > height && height <= 500) -> 'pc' (per spec: landscape phone uses PC layout)
- * - Tablet (641..1023) -> 'tablet'
+ * - Tablet (600..1023) -> 'tablet'
  * - PC (>= 1024) -> 'pc'
  */
 export function getBattleLayoutMode(
@@ -98,7 +89,7 @@ export function getBattleLayoutMode(
   if (safeW > safeH && safeH <= 500) {
     return 'pc';
   }
-  if (safeW <= 640) {
+  if (safeW < 600) {
     return 'phone-portrait';
   }
   if (safeW < 1024) {

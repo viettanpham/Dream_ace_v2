@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Grid, Info, Play, RotateCcw, Sparkles, Tag } from 'lucide-react';
+import { Info, Play, Sparkles, Tag } from 'lucide-react';
 import { useI18n } from '../i18n';
-import { useGameStore } from '../store/useGameStore';
-import type { StatusBadgeLayout } from '../types/game';
 import { usePrefersReducedMotion } from '../utils/battleDisplay';
 import {
   resolveEffectiveVfxConfig,
@@ -11,8 +9,6 @@ import {
   type BattleEffectsMode,
   type ReducedMotionSetting,
 } from '../utils/battleVfx';
-import { useStatusDisplaySettings } from '../utils/statusDisplayPrefs';
-import { IconCatalogPreviewModal } from './IconCatalogPreviewModal';
 
 interface EffectsSettingsPanelProps {
   /** Compact variant for embedding inside battle "..." sheet or TopHud settings */
@@ -27,18 +23,6 @@ interface EffectsSettingsPanelProps {
 export function EffectsSettingsPanel({ compact = false }: EffectsSettingsPanelProps) {
   const { t } = useI18n();
   const [fxSettings, updateFxSettings] = useFxSettings();
-  const adminStatusDefaults = useGameStore(
-    (s) => s.adminConfig.statusDisplayDefaults
-  );
-  const {
-    settings: statusSettings,
-    hasOverride: hasStatusOverride,
-    isPhoneWidth,
-    updateOverride: updateStatusOverride,
-    resetToDefaults: resetStatusDefaults,
-  } = useStatusDisplaySettings(adminStatusDefaults);
-  const [iconCatalogOpen, setIconCatalogOpen] = useState(false);
-
   const osReducedMotion = usePrefersReducedMotion();
   const resolvedReducedMotion = resolveReducedMotion(
     fxSettings.reducedMotionMode,
@@ -200,158 +184,6 @@ export function EffectsSettingsPanel({ compact = false }: EffectsSettingsPanelPr
             {fxSettings.effectsDebug ? 'ON' : 'OFF'}
           </span>
         </button>
-      </div>
-
-      {/* 3B. Status Display Settings (Badge Layout A/B, Unit Rows 1..5, Player Rows 1..2, Reset, Bảng icon) */}
-      <div
-        data-testid="status-display-settings"
-        className="pt-2 border-t border-slate-800/90 space-y-3"
-      >
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-[12px] font-semibold uppercase tracking-wider text-slate-400">
-            {t('statusUi.sectionTitle')}
-          </span>
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              data-testid="status-reset-defaults-btn"
-              onClick={resetStatusDefaults}
-              disabled={!hasStatusOverride}
-              className="h-7 px-2 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-45 text-[11px] font-semibold text-slate-200 inline-flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
-            >
-              <RotateCcw className="w-3 h-3" />
-              <span>{t('statusUi.resetDefaultsBtn')}</span>
-            </button>
-            <button
-              type="button"
-              data-testid="open-icon-catalog-btn"
-              onClick={() => setIconCatalogOpen(true)}
-              className="h-7 px-2.5 rounded border border-sky-500/50 bg-sky-500/15 hover:bg-sky-500/25 text-[11px] font-bold text-sky-200 inline-flex items-center gap-1 cursor-pointer"
-            >
-              <Grid className="w-3 h-3" />
-              <span>{t('statusUi.openIconCatalogBtn')}</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Badge Layout A | B */}
-        <div className="space-y-1.5">
-          <div className="text-[12px] font-semibold text-slate-300">
-            {t('statusUi.badgeLayoutLabel')}
-          </div>
-          <div className="grid grid-cols-1 gap-1.5">
-            {(['B', 'A'] as StatusBadgeLayout[]).map((layoutOpt) => {
-              const selected = statusSettings.badgeLayout === layoutOpt;
-              return (
-                <button
-                  key={layoutOpt}
-                  type="button"
-                  data-testid={`status-badge-layout-${layoutOpt}`}
-                  aria-pressed={selected}
-                  onClick={() => updateStatusOverride({ badgeLayout: layoutOpt })}
-                  className={`min-h-[36px] px-3 py-1.5 rounded-lg border text-left text-[12px] font-semibold cursor-pointer transition-colors ${
-                    selected
-                      ? 'border-sky-400 bg-sky-500/20 text-sky-100'
-                      : 'border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800'
-                  }`}
-                >
-                  {layoutOpt === 'A'
-                    ? t('statusUi.badgeLayoutA')
-                    : t('statusUi.badgeLayoutB')}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Unit Status Area Rows (1..5), phone & desktop remembered separately */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[12px] font-semibold text-slate-300">
-              {t('statusUi.unitRowsLabel')}
-            </span>
-            <span className="text-[11px] font-mono-nums text-slate-400">
-              {isPhoneWidth
-                ? t('statusUi.devicePhone')
-                : t('statusUi.deviceDesktop')}
-            </span>
-          </div>
-          <div className="grid grid-cols-5 gap-1.5">
-            {[1, 2, 3, 4, 5].map((n) => {
-              const activeVal = isPhoneWidth
-                ? statusSettings.phoneRows
-                : statusSettings.desktopRows;
-              const selected = activeVal === n;
-              return (
-                <button
-                  key={n}
-                  type="button"
-                  data-testid={`status-unit-rows-${n}`}
-                  aria-pressed={selected}
-                  onClick={() =>
-                    updateStatusOverride(
-                      isPhoneWidth ? { phoneRows: n } : { desktopRows: n }
-                    )
-                  }
-                  className={`min-h-[36px] rounded-lg border font-mono-nums text-[12px] font-bold cursor-pointer ${
-                    selected
-                      ? 'border-sky-400 bg-sky-500 text-slate-950'
-                      : 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
-                  }`}
-                >
-                  {n}
-                </button>
-              );
-            })}
-          </div>
-          <p className="text-[11px] text-slate-400 leading-snug">
-            {t('statusUi.phoneRowsNote')}
-          </p>
-        </div>
-
-        {/* Player Status Bar Rows (1..2), phone & desktop remembered separately */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[12px] font-semibold text-slate-300">
-              {t('statusUi.playerRowsLabel')}
-            </span>
-            <span className="text-[11px] font-mono-nums text-slate-400">
-              {isPhoneWidth
-                ? t('statusUi.devicePhone')
-                : t('statusUi.deviceDesktop')}
-            </span>
-          </div>
-          <div className="grid grid-cols-2 gap-1.5">
-            {[1, 2].map((n) => {
-              const activeVal = isPhoneWidth
-                ? statusSettings.playerPhoneRows
-                : statusSettings.playerDesktopRows;
-              const selected = activeVal === n;
-              return (
-                <button
-                  key={n}
-                  type="button"
-                  data-testid={`status-player-rows-${n}`}
-                  aria-pressed={selected}
-                  onClick={() =>
-                    updateStatusOverride(
-                      isPhoneWidth
-                        ? { playerPhoneRows: n }
-                        : { playerDesktopRows: n }
-                    )
-                  }
-                  className={`min-h-[36px] rounded-lg border font-mono-nums text-[12px] font-bold cursor-pointer ${
-                    selected
-                      ? 'border-emerald-400 bg-emerald-500 text-slate-950'
-                      : 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
-                  }`}
-                >
-                  {n}
-                </button>
-              );
-            })}
-          </div>
-        </div>
       </div>
 
       {/* 4. "Test effects" button & compact live preview box */}
@@ -528,12 +360,6 @@ export function EffectsSettingsPanel({ compact = false }: EffectsSettingsPanelPr
           )}
         </div>
       </div>
-
-      <IconCatalogPreviewModal
-        open={iconCatalogOpen}
-        onClose={() => setIconCatalogOpen(false)}
-        badgeLayout={statusSettings.badgeLayout}
-      />
     </div>
   );
 }

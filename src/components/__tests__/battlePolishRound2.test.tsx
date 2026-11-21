@@ -361,8 +361,8 @@ describe('2) Compact Card view rows & collapsed 28px down units', () => {
   });
 });
 
-describe('3) Card view stacked Allies-above-Enemies on phone & side-by-side columns on desktop', () => {
-  it('renders Allies above Enemies without tabs on phone portrait and supports target selection & down unit visibility', () => {
+describe('3) Card view Allies | Enemies switch on phone & side-by-side columns on desktop', () => {
+  it('shows segmented Allies | Enemies switch on phone portrait and supports enemy target selection from Enemies tab', () => {
     setViewport(390, 844);
     const battle = makeBattle();
     useGameStore.setState({
@@ -376,27 +376,22 @@ describe('3) Card view stacked Allies-above-Enemies on phone & side-by-side colu
       root!.render(createElement(BattleScreen));
     });
 
-    expect(container!.querySelector('[data-testid="card-side-tabs"]')).toBeNull();
-    expect(container!.querySelector('[data-testid="card-tab-ally"]')).toBeNull();
-    expect(container!.querySelector('[data-testid="card-tab-enemy"]')).toBeNull();
+    const tabs = container!.querySelector('[data-testid="card-side-tabs"]');
+    expect(tabs).not.toBeNull();
 
-    const allyBlock = container!.querySelector('[data-testid="card-side-ally"]');
-    const enemyBlock = container!.querySelector('[data-testid="card-side-enemy"]');
-    expect(allyBlock).not.toBeNull();
-    expect(enemyBlock).not.toBeNull();
+    const allyTab = container!.querySelector(
+      '[data-testid="card-tab-ally"]'
+    ) as HTMLButtonElement;
+    const enemyTab = container!.querySelector(
+      '[data-testid="card-tab-enemy"]'
+    ) as HTMLButtonElement;
+    expect(allyTab).not.toBeNull();
+    expect(enemyTab).not.toBeNull();
 
-    // Allies block appears above Enemies block in DOM order
-    expect(
-      Boolean(
-        allyBlock!.compareDocumentPosition(enemyBlock!) &
-          Node.DOCUMENT_POSITION_FOLLOWING
-      )
-    ).toBe(true);
-
-    // Down back-row ally unit is already visible without switching tabs
-    expect(
-      container!.querySelector('[data-testid="unit-row-down-ally_back"]')
-    ).not.toBeNull();
+    // Default tab on phone Card view is Enemies so player can target right away
+    expect(enemyTab.getAttribute('aria-selected')).toBe('true');
+    expect(container!.querySelector('[data-testid="card-side-enemy"]')).not.toBeNull();
+    expect(container!.querySelector('[data-testid="card-side-ally"]')).toBeNull();
 
     // Tapping a valid front-row enemy selects it
     const enemy2Row = container!.querySelector(
@@ -419,6 +414,17 @@ describe('3) Card view stacked Allies-above-Enemies on phone & side-by-side colu
       container!.querySelector('[data-testid="card-invalid-target-toast"]')
     ).not.toBeNull();
     expect(useGameStore.getState().battle?.selectedTargetId).toBe('enemy_front_2');
+
+    // Switching to Allies tab shows Allies (including collapsed down back-row unit) and hides Enemies
+    act(() => {
+      allyTab.click();
+    });
+    expect(allyTab.getAttribute('aria-selected')).toBe('true');
+    expect(container!.querySelector('[data-testid="card-side-ally"]')).not.toBeNull();
+    expect(container!.querySelector('[data-testid="card-side-enemy"]')).toBeNull();
+    expect(
+      container!.querySelector('[data-testid="unit-row-down-ally_back"]')
+    ).not.toBeNull();
   });
 
   it('shows Allies and Enemies side by side simultaneously in Card view on desktop (1254x819)', () => {

@@ -6,8 +6,6 @@ import {
   BarChart3,
   Bot,
   ChevronUp,
-  ChevronsDownUp,
-  ChevronsUpDown,
   Crosshair,
   Flag,
   HeartHandshake,
@@ -24,7 +22,6 @@ import {
   Settings,
   Shield,
   ShieldAlert,
-  Sliders,
   Sparkles,
   Square,
   X,
@@ -47,6 +44,7 @@ import { getEffectiveItemStats } from '../engine/equipment';
 import { canUnitUseSkill } from '../engine/skills';
 import {
   formatCombatLogMessage,
+  formatStatusEffectDetail,
   getAutoStopReasonLabel,
   getBattleSkillReason,
   getClassName,
@@ -61,7 +59,7 @@ import {
   getTeamTagLabel,
   useI18n,
 } from '../i18n';
-import { ENABLE_ADMIN_CP, useGameStore } from '../store/useGameStore';
+import { useGameStore } from '../store/useGameStore';
 import type {
   AutoRepeatLimit,
   BattleSpeed,
@@ -73,7 +71,6 @@ import {
   evaluateRadarTargetValidity,
   formatShortUnitName,
   readSpeechBubblesEnabled,
-  SP_COLOR_TOKENS,
   SPEECH_BUBBLE_DURATION_MS,
   useBattleLayoutMode,
   writeSpeechBubblesEnabled,
@@ -85,14 +82,11 @@ import {
   useFxSettings,
 } from '../utils/battleVfx';
 import {
-  readCombatLogExpandAll,
   readCombatLogMode,
-  writeCombatLogExpandAll,
   writeCombatLogMode,
   type CombatLogChannel,
   type CombatLogDisplayMode,
 } from '../utils/combatLogFormat';
-import { useStatusDisplaySettings } from '../utils/statusDisplayPrefs';
 import { BattleRadarView } from './BattleRadarView';
 import { BattleStatsModal } from './BattleStatsModal';
 import { BattleUnitCard } from './BattleUnitCard';
@@ -100,7 +94,6 @@ import { BottomSheet } from './BottomSheet';
 import { CombatLogList } from './CombatLogList';
 import { EffectsSettingsPanel } from './EffectsSettingsPanel';
 import { ErrorBoundary } from './ErrorBoundary';
-import { FixedStatusArea } from './FixedStatusArea';
 import { SkillIcon } from './SkillIcon';
 import { StatBar } from './StatBar';
 import { TurnQueueBar } from './TurnQueueBar';
@@ -160,15 +153,9 @@ export function BattleScreen() {
   const stopAutoRepeat = useGameStore((s) => s.stopAutoRepeat);
   const clearAutoRepeatSummary = useGameStore((s) => s.clearAutoRepeatSummary);
   const clearAutoRepeatToast = useGameStore((s) => s.clearAutoRepeatToast);
-  const toggleAdminPanel = useGameStore((s) => s.toggleAdminPanel);
 
   const layoutMode = useBattleLayoutMode();
   const isPhonePortrait = layoutMode === 'phone-portrait';
-  const {
-    settings: statusSettings,
-    activeUnitRows,
-    activePlayerRows,
-  } = useStatusDisplaySettings(adminConfig.statusDisplayDefaults);
 
   const [inspectedSkillId, setInspectedSkillId] = useState<string | null>(null);
   const [inspectedUnitId, setInspectedUnitId] = useState<string | null>(null);
@@ -183,6 +170,7 @@ export function BattleScreen() {
     useState<AutoRepeatLimit>(autoRepeatLimit);
   const loopAnchorRef = useRef<HTMLDivElement | null>(null);
   const [statsModalOpen, setStatsModalOpen] = useState(false);
+  const [cardSideTab, setCardSideTab] = useState<'ally' | 'enemy'>('enemy');
   const [speechBubblesEnabled, setSpeechBubblesEnabled] = useState<boolean>(
     () => readSpeechBubblesEnabled()
   );
@@ -191,10 +179,6 @@ export function BattleScreen() {
     readCombatLogMode()
   );
   const [logChannel, setLogChannel] = useState<CombatLogChannel>('all');
-  const [logExpandAll, setLogExpandAll] = useState<boolean>(() =>
-    readCombatLogExpandAll()
-  );
-  const [logExpandNonce, setLogExpandNonce] = useState<number>(0);
   const [cardToast, setCardToast] = useState<string | null>(null);
   const popupCleanupTimersRef = useRef<Map<string, number>>(new Map());
   const fxCleanupTimersRef = useRef<Map<string, number>>(new Map());
@@ -275,57 +259,6 @@ export function BattleScreen() {
     writeCombatLogMode('popup');
     setLogSheetOpen(true);
   };
-
-  const handleExpandAllLogs = () => {
-    setLogExpandAll(true);
-    writeCombatLogExpandAll(true);
-    setLogExpandNonce((n) => n + 1);
-  };
-
-  const handleCollapseAllLogs = () => {
-    setLogExpandAll(false);
-    writeCombatLogExpandAll(false);
-    setLogExpandNonce((n) => n + 1);
-  };
-
-  const renderCombatLogExpandButtons = (compact = false) => (
-    <div className="inline-flex items-center gap-1 shrink-0">
-      <button
-        type="button"
-        data-testid="combat-log-expand-all"
-        aria-pressed={logExpandAll}
-        onClick={handleExpandAllLogs}
-        title={t('log.expandAll')}
-        className={`${
-          compact ? 'min-h-[26px] px-1.5 text-[10px]' : 'min-h-[28px] px-2 text-[11px]'
-        } rounded border font-semibold inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap ${
-          logExpandAll
-            ? 'border-sky-400/70 bg-sky-500/20 text-sky-200'
-            : 'border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300'
-        }`}
-      >
-        <ChevronsUpDown className="w-3 h-3 text-sky-400 shrink-0" />
-        <span>{t('log.expandAll')}</span>
-      </button>
-      <button
-        type="button"
-        data-testid="combat-log-collapse-all"
-        aria-pressed={!logExpandAll}
-        onClick={handleCollapseAllLogs}
-        title={t('log.collapseAll')}
-        className={`${
-          compact ? 'min-h-[26px] px-1.5 text-[10px]' : 'min-h-[28px] px-2 text-[11px]'
-        } rounded border font-semibold inline-flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap ${
-          !logExpandAll
-            ? 'border-slate-600 bg-slate-800 text-slate-100'
-            : 'border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300'
-        }`}
-      >
-        <ChevronsDownUp className="w-3 h-3 text-slate-400 shrink-0" />
-        <span>{t('log.collapseAll')}</span>
-      </button>
-    </div>
-  );
 
   const playerWeaponId = useMemo(() => {
     if (!battle) return null;
@@ -716,22 +649,13 @@ export function BattleScreen() {
         <button
           type="button"
           data-testid="battle-loop-active-chip"
-          data-loop-running="true"
-          aria-pressed={true}
           onClick={() => stopAutoRepeat('manual_stop')}
           title={t('battle.loopStopTooltip')}
-          aria-label={`${t('battle.loopRunningTag')} · ${t('battle.loopStopTooltip')} (${progressText})`}
-          className={`rounded-lg border border-emerald-400/70 bg-emerald-500/20 hover:bg-red-500/20 hover:border-red-400/70 text-emerald-100 font-mono-nums font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 transition-colors ${
-            phoneCompact
-              ? 'min-h-[44px] px-2 text-[12px]'
-              : 'h-[34px] min-h-[34px] px-2 text-[12px]'
+          aria-label={`${t('battle.loopStopTooltip')} (${progressText})`}
+          className={`min-h-[44px] rounded-lg border border-emerald-400/70 bg-emerald-500/20 hover:bg-red-500/20 hover:border-red-400/70 text-emerald-100 font-mono-nums font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 transition-colors ${
+            phoneCompact ? 'px-2 text-[12px]' : 'px-2.5 text-[13px]'
           }`}
         >
-          <span
-            data-testid="battle-loop-running-dot"
-            className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0"
-            aria-hidden="true"
-          />
           <Repeat className="w-3.5 h-3.5 text-emerald-300 shrink-0" aria-hidden="true" />
           <span data-testid="battle-loop-progress">{progressText}</span>
           <span
@@ -749,7 +673,6 @@ export function BattleScreen() {
         <button
           type="button"
           data-testid="battle-loop-btn"
-          data-loop-running="false"
           aria-expanded={loopPopoverOpen}
           aria-haspopup="dialog"
           aria-label={t('battle.loopTitle')}
@@ -758,14 +681,14 @@ export function BattleScreen() {
             setSelectedLoopCount(autoRepeatLimit);
             setLoopPopoverOpen((v) => !v);
           }}
-          className={`rounded-lg border transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
+          className={`min-h-[44px] rounded-lg border transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
             loopPopoverOpen
               ? 'border-emerald-400 bg-emerald-500/20 text-emerald-100'
               : 'border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200'
           } ${
             phoneCompact
-              ? 'min-h-[44px] min-w-[44px] px-2 text-[12px] font-mono-nums font-bold'
-              : 'h-[34px] min-h-[34px] px-2 text-[12px] font-semibold'
+              ? 'min-w-[44px] px-2 text-[12px] font-mono-nums font-bold'
+              : 'px-2.5 text-[13px] font-semibold'
           }`}
         >
           <Repeat className="w-4 h-4 text-emerald-400 shrink-0" aria-hidden="true" />
@@ -1011,7 +934,7 @@ export function BattleScreen() {
               key={`${side}-${row}`}
               data-card-row={`${side}-${row}`}
               data-row-state={exposure}
-              className={`min-w-0 overflow-hidden rounded-lg border p-1.5 space-y-1 ${
+              className={`rounded-lg border p-1.5 space-y-1 ${
                 isExposed
                   ? side === 'enemy'
                     ? 'border-red-500/45 bg-red-950/15'
@@ -1021,7 +944,7 @@ export function BattleScreen() {
                   : 'border-dashed border-slate-800/70 bg-slate-950/25'
               }`}
             >
-              <div className="flex items-center justify-between gap-2 px-1 text-[12px] font-mono-nums font-bold min-w-0">
+              <div className="flex items-center justify-between gap-2 px-1 text-[12px] font-mono-nums font-bold">
                 <span
                   className={
                     isExposed
@@ -1034,7 +957,7 @@ export function BattleScreen() {
                   {getRowTitle(row)}
                 </span>
                 <span
-                  className={`px-1.5 py-0.2 rounded text-[12px] shrink-0 ${
+                  className={`px-1.5 py-0.2 rounded text-[12px] ${
                     isExposed
                       ? side === 'enemy'
                         ? 'bg-red-500/20 text-red-200'
@@ -1049,7 +972,7 @@ export function BattleScreen() {
               </div>
 
               {rowUnits.length > 0 && (
-                <div className="space-y-1 min-w-0">
+                <div className="space-y-1">
                   {rowUnits.map((u) => renderCardUnit(u, compact))}
                 </div>
               )}
@@ -1096,21 +1019,67 @@ export function BattleScreen() {
       return (
         <div
           data-testid="battle-card-view"
-          className="flex flex-col gap-2"
+          className="flex-1 min-h-0 flex flex-col overflow-hidden"
         >
+          {/* Phone Segmented Switch: Allies | Enemies */}
+          <div
+            data-testid="card-side-tabs"
+            role="tablist"
+            className="shrink-0 grid grid-cols-2 gap-1.5 pb-1.5"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={cardSideTab === 'ally'}
+              data-testid="card-tab-ally"
+              onClick={() => setCardSideTab('ally')}
+              className={`min-h-[44px] px-3 rounded-lg border text-[13px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors ${
+                cardSideTab === 'ally'
+                  ? 'border-sky-400 bg-sky-500/20 text-sky-100'
+                  : 'border-slate-800 bg-slate-950 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <span>{t('battle.tabAllies')}</span>
+              <span className="font-mono-nums text-[12px] opacity-85">
+                {aliveAlliesCount}/{allies.length}
+              </span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={cardSideTab === 'enemy'}
+              data-testid="card-tab-enemy"
+              onClick={() => setCardSideTab('enemy')}
+              className={`min-h-[44px] px-3 rounded-lg border text-[13px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors ${
+                cardSideTab === 'enemy'
+                  ? 'border-red-400 bg-red-500/20 text-red-100'
+                  : 'border-slate-800 bg-slate-950 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <span>{t('battle.tabEnemies')}</span>
+              <span className="font-mono-nums text-[12px] opacity-85">
+                {aliveEnemiesCount}/{enemies.length}
+              </span>
+            </button>
+          </div>
+
           {cardToast && (
             <div
               role="status"
               data-testid="card-invalid-target-toast"
-              className="shrink-0 rounded-md border border-amber-400/70 bg-amber-950/85 px-2.5 py-1 text-[12px] font-semibold text-amber-100 text-center truncate"
+              className="shrink-0 mb-1.5 rounded-md border border-amber-400/70 bg-amber-950/85 px-2.5 py-1 text-[12px] font-semibold text-amber-100 text-center truncate"
             >
               {cardToast}
             </div>
           )}
 
-          <div className="flex flex-col gap-2.5">
-            {renderThreeRowCardSide('ally', allies, true)}
-            {renderThreeRowCardSide('enemy', enemies, true)}
+          <div
+            style={{ touchAction: 'pan-y' }}
+            className="flex-1 min-h-0 overflow-y-auto tactical-scroll touch-pan-y pb-1"
+          >
+            {cardSideTab === 'ally'
+              ? renderThreeRowCardSide('ally', allies, true)
+              : renderThreeRowCardSide('enemy', enemies, true)}
           </div>
         </div>
       );
@@ -1119,7 +1088,7 @@ export function BattleScreen() {
     return (
       <div
         data-testid="battle-card-view"
-        className="flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden"
+        className="flex-1 min-h-0 flex flex-col overflow-hidden"
       >
         {cardToast && (
           <div
@@ -1132,9 +1101,9 @@ export function BattleScreen() {
         )}
         <div
           style={{ touchAction: 'pan-y' }}
-          className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden tactical-scroll touch-pan-y p-1"
+          className="flex-1 min-h-0 overflow-y-auto tactical-scroll touch-pan-y p-1"
         >
-          <div className="min-w-0 w-full grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2 items-start">
+          <div className="grid grid-cols-2 gap-2 items-start">
             {renderThreeRowCardSide('ally', allies, false)}
             {renderThreeRowCardSide('enemy', enemies, false)}
           </div>
@@ -1233,12 +1202,12 @@ export function BattleScreen() {
               />
               <StatBar
                 label="SP"
-                labelClassName={SP_COLOR_TOKENS.textClass}
-                valueClassName={SP_COLOR_TOKENS.textClass}
+                labelClassName="text-purple-300"
+                valueClassName="text-purple-200"
                 value={sidebarUnit.sp}
                 max={Math.max(1, sidebarUnit.derived.maxSp)}
                 valueText={`${sidebarUnit.sp}/${sidebarUnit.derived.maxSp}`}
-                fillClassName={SP_COLOR_TOKENS.barFillClass}
+                fillClassName="bg-purple-400"
                 heightClassName="h-1.5"
                 instant={bypassFx}
                 compactHeader
@@ -1287,19 +1256,26 @@ export function BattleScreen() {
             </div>
           )}
 
-          <FixedStatusArea
-            statuses={sidebarUnit.statuses}
-            rows={activeUnitRows}
-            unit={sidebarUnit}
-            unitTitle={sidebarUnit.name}
-            badgeLayout={statusSettings.badgeLayout}
-            iconMods={adminConfig.iconCatalogMods}
-            showLabels={fxSettings.showStatusLabels}
-            fallbackWidthPx={290}
-            rootTestId="sidebar-status-area"
-            chipTestIdPrefix="sidebar-status-chip"
-            overflowTestId="sidebar-status-overflow"
-          />
+          {sidebarUnit.statuses.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {sidebarUnit.statuses.slice(0, 4).map((st) => {
+                const detail = formatStatusEffectDetail(lang, st, sidebarUnit);
+                return (
+                  <span
+                    key={st.type}
+                    data-testid={`sidebar-status-chip-${st.type}`}
+                    className={`px-1.5 py-0.5 rounded border text-[11px] font-mono-nums ${
+                      st.isDebuff
+                        ? 'border-red-500/45 bg-red-500/12 text-red-200'
+                        : 'border-sky-500/45 bg-sky-500/12 text-sky-200'
+                    }`}
+                  >
+                    {detail.fullText}
+                  </span>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         <div className="shrink-0 min-h-[36px] flex items-end">
@@ -1360,258 +1336,195 @@ export function BattleScreen() {
           data-testid="battle-player-status-bar"
           data-collapsed="true"
           data-destroyed={isDestroyed ? 'true' : 'false'}
-          className={`shrink-0 mx-1.5 mt-1 rounded border px-2 py-1 space-y-1 text-[11px] font-mono-nums ${
+          className={`shrink-0 mx-1.5 mt-1 rounded border px-2 py-1 flex items-center justify-between gap-2 text-[11px] font-mono-nums ${
             isDestroyed
               ? 'border-slate-700 bg-slate-900/85 text-slate-400 grayscale'
               : 'border-emerald-500/35 bg-[#09121D] text-slate-100'
           }`}
         >
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 min-w-0 shrink">
+          <div className="flex items-center gap-1.5 min-w-0 shrink">
+            <span
+              className={`font-semibold truncate max-w-[92px] ${
+                isDestroyed ? 'text-slate-400 line-through' : 'text-emerald-300'
+              }`}
+            >
+              {ownUnit.name}
+            </span>
+            {isDestroyed && (
               <span
-                className={`font-semibold truncate ${
-                  isDestroyed
-                    ? 'text-slate-400 line-through max-w-[160px]'
-                    : 'text-emerald-300 max-w-[92px]'
-                }`}
+                data-testid="battle-player-destroyed-badge"
+                className="px-1 py-0.2 rounded bg-slate-800 border border-slate-600 text-slate-300 text-[10px] font-bold shrink-0"
               >
-                {ownUnit.name}
+                {t('battle.playerDestroyed')}
               </span>
-              {isDestroyed && (
-                <span
-                  data-testid="battle-player-destroyed-badge"
-                  className="px-1.5 py-0.2 rounded bg-slate-800 border border-slate-600 text-slate-300 text-[10px] font-bold shrink-0"
-                >
-                  {t('battle.playerDestroyed')}
-                </span>
-              )}
-            </div>
-
-            {!isDestroyed && (
-              <>
-                <div className="flex-1 min-w-[90px] flex flex-col gap-0.5">
-                  <div
-                    data-testid="battle-player-hp-shield-bar"
-                    className="relative h-2 w-full rounded-full bg-slate-900 border border-slate-800 overflow-hidden"
-                  >
-                    <div
-                      data-testid="battle-player-hp-fill"
-                      style={{ width: `${hpPct}%` }}
-                      className={`h-full transition-all duration-200 ${hpFillClass}`}
-                    />
-                    {shieldOverlayPct > 0 && (
-                      <div
-                        data-testid="battle-player-shield-overlay"
-                        style={{ width: `${shieldOverlayPct}%` }}
-                        className="absolute inset-y-0 left-0 bg-sky-400/70 border-r border-cyan-200 transition-all duration-200"
-                      />
-                    )}
-                  </div>
-                  <div
-                    data-testid="battle-player-sp-bar"
-                    className="h-1 w-full rounded-full bg-slate-900 overflow-hidden"
-                  >
-                    <div
-                      data-testid="battle-player-sp-fill"
-                      style={{ width: `${spPct}%` }}
-                      className={`h-full transition-all duration-200 ${SP_COLOR_TOKENS.barFillClass}`}
-                    />
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1.5 shrink-0 text-[10px]">
-                  <span data-testid="battle-player-hp-numbers" className="text-slate-200">
-                    {ownUnit.hp}/{ownUnit.derived.maxHp}
-                  </span>
-                  {ownUnit.shield > 0 && (
-                    <span data-testid="battle-player-shield-numbers" className="text-sky-300">
-                      +{ownUnit.shield}
-                    </span>
-                  )}
-                  <span
-                    data-testid="battle-player-sp-numbers"
-                    className={SP_COLOR_TOKENS.textClass}
-                  >
-                    SP {ownUnit.sp}
-                  </span>
-                </div>
-              </>
             )}
           </div>
 
-          <FixedStatusArea
-            statuses={isDestroyed ? [] : ownUnit.statuses}
-            rows={activePlayerRows}
-            unit={ownUnit}
-            unitTitle={ownUnit.name}
-            badgeLayout={statusSettings.badgeLayout}
-            iconMods={adminConfig.iconCatalogMods}
-            showLabels={fxSettings.showStatusLabels}
-            fallbackWidthPx={320}
-            compact
-            rootTestId="battle-player-status-effects"
-            chipTestIdPrefix="player-status-chip"
-            overflowTestId="player-status-overflow"
-          />
+          <div className="flex-1 min-w-[90px] flex flex-col gap-0.5">
+            <div
+              data-testid="battle-player-hp-shield-bar"
+              className="relative h-2 w-full rounded-full bg-slate-900 border border-slate-800 overflow-hidden"
+            >
+              <div
+                data-testid="battle-player-hp-fill"
+                style={{ width: `${hpPct}%` }}
+                className={`h-full transition-all duration-200 ${hpFillClass}`}
+              />
+              {shieldOverlayPct > 0 && (
+                <div
+                  data-testid="battle-player-shield-overlay"
+                  style={{ width: `${shieldOverlayPct}%` }}
+                  className="absolute inset-y-0 left-0 bg-sky-400/70 border-r border-cyan-200 transition-all duration-200"
+                />
+              )}
+            </div>
+            <div
+              data-testid="battle-player-sp-bar"
+              className="h-1 w-full rounded-full bg-slate-900 overflow-hidden"
+            >
+              <div
+                style={{ width: `${spPct}%` }}
+                className={`h-full transition-all duration-200 ${
+                  isDestroyed ? 'bg-slate-600' : 'bg-purple-400'
+                }`}
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0 text-[10px]">
+            <span data-testid="battle-player-hp-numbers" className="text-slate-200">
+              {ownUnit.hp}/{ownUnit.derived.maxHp}
+            </span>
+            {ownUnit.shield > 0 && !isDestroyed && (
+              <span data-testid="battle-player-shield-numbers" className="text-sky-300">
+                +{ownUnit.shield}
+              </span>
+            )}
+            <span data-testid="battle-player-sp-numbers" className="text-purple-300">
+              SP {ownUnit.sp}
+            </span>
+            {ownUnit.statuses.length > 0 && !isDestroyed && (
+              <span className="px-1 rounded bg-slate-800 text-amber-200 text-[10px]">
+                {formatStatusEffectDetail(lang, ownUnit.statuses[0], ownUnit).shortText}
+              </span>
+            )}
+          </div>
         </div>
       );
     }
-
-    if (isDestroyed) {
-      return (
-        <div
-          data-testid="battle-player-status-bar"
-          data-collapsed="false"
-          data-destroyed="true"
-          className="shrink-0 h-[28px] max-h-[28px] min-w-0 rounded-md border border-slate-700 bg-slate-900/85 px-2.5 flex items-center gap-2 text-[12px] text-slate-400 grayscale overflow-hidden"
-        >
-          <span className="px-1.5 py-0.2 rounded bg-slate-800 border border-slate-600 text-slate-300 font-mono-nums text-[10px] font-bold shrink-0">
-            {getTeamTagLabel(lang, 'me')}
-          </span>
-          <span
-            className="font-bold truncate text-slate-400 line-through min-w-0"
-            title={t('battle.playerShipLabel')}
-          >
-            {ownUnit.name}
-          </span>
-          <span
-            data-testid="battle-player-destroyed-badge"
-            className="px-1.5 py-0.2 rounded bg-slate-800 border border-slate-600 text-slate-200 text-[10px] font-bold shrink-0"
-          >
-            {t('battle.playerDestroyed')}
-          </span>
-        </div>
-      );
-    }
-
-    const shieldBarPct = Math.max(
-      0,
-      Math.min(100, Math.round((ownUnit.shield / maxShield) * 100))
-    );
 
     return (
       <div
         data-testid="battle-player-status-bar"
         data-collapsed="false"
-        data-destroyed="false"
-        className={`shrink-0 min-w-0 rounded-lg border border-emerald-500/35 bg-[#09121D] text-slate-100 px-2 py-0.5 space-y-0.5 overflow-hidden ${
-          activePlayerRows <= 1 ? 'max-h-[64px]' : ''
+        data-destroyed={isDestroyed ? 'true' : 'false'}
+        className={`shrink-0 rounded-lg border px-2.5 py-1.5 space-y-1 ${
+          isDestroyed
+            ? 'border-slate-700 bg-slate-900/85 text-slate-400 grayscale'
+            : 'border-emerald-500/35 bg-[#09121D] text-slate-100'
         }`}
       >
-        <div className="h-[22px] flex items-center gap-2 min-w-0 text-[11px]">
-          <div className="flex items-center gap-1.5 min-w-0 shrink-0 max-w-[175px]">
-            <span className="px-1.5 py-0.2 rounded bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-mono-nums text-[10px] font-bold shrink-0">
+        <div className="flex items-center justify-between gap-2 text-[12px]">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-mono-nums text-[10px] font-bold shrink-0">
               {getTeamTagLabel(lang, 'me')}
             </span>
             <span
-              className="font-bold truncate text-emerald-200 text-[12px]"
+              className={`font-bold truncate ${
+                isDestroyed ? 'text-slate-400 line-through' : 'text-emerald-200'
+              }`}
               title={t('battle.playerShipLabel')}
             >
               {ownUnit.name}
             </span>
+            {isDestroyed && (
+              <span
+                data-testid="battle-player-destroyed-badge"
+                className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 text-slate-200 text-[11px] font-bold shrink-0"
+              >
+                {t('battle.playerDestroyed')}
+              </span>
+            )}
           </div>
 
-          <div className="flex-1 min-w-0 grid grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_minmax(0,0.9fr)] gap-2 items-center font-mono-nums text-[11px]">
-            {/* HP thin bar */}
-            <div className="flex items-center gap-1 min-w-0">
-              <span className="text-emerald-300 font-bold shrink-0">HP</span>
-              <div
-                data-testid="battle-player-hp-shield-bar"
-                className="relative flex-1 min-w-0 h-1.5 rounded-full bg-slate-900 border border-slate-800 overflow-hidden"
-              >
-                <div
-                  data-testid="battle-player-hp-fill"
-                  style={{ width: `${hpPct}%` }}
-                  className={`h-full transition-all duration-200 ${hpFillClass}`}
-                />
-              </div>
-              <span
-                data-testid="battle-player-hp-numbers"
-                className="text-emerald-200 shrink-0 tabular-nums"
-              >
-                {ownUnit.hp}/{ownUnit.derived.maxHp}
-              </span>
-            </div>
-
-            {/* SHD thin bar */}
-            <div className="flex items-center gap-1 min-w-0">
-              <span className="text-sky-300 font-bold shrink-0">SHD</span>
-              <div
-                data-testid="battle-player-shield-bar"
-                className="relative flex-1 min-w-0 h-1.5 rounded-full bg-slate-900 border border-slate-800 overflow-hidden"
-              >
-                {shieldBarPct > 0 && (
-                  <div
-                    data-testid="battle-player-shield-overlay"
-                    style={{ width: `${shieldBarPct}%` }}
-                    className="h-full bg-sky-400 transition-all duration-200"
-                  />
-                )}
-              </div>
-              <span
-                data-testid="battle-player-shield-numbers"
-                className="text-sky-200 shrink-0 tabular-nums"
-              >
-                {ownUnit.shield}/{maxShield}
-              </span>
-            </div>
-
-            {/* SP thin bar (orange token #EF9F27) */}
-            <div className="flex items-center gap-1 min-w-0">
-              <span className={`${SP_COLOR_TOKENS.textClass} font-bold shrink-0`}>
-                SP
-              </span>
-              <div
-                data-testid="battle-player-sp-bar"
-                className="relative flex-1 min-w-0 h-1.5 rounded-full bg-slate-900 border border-slate-800 overflow-hidden"
-              >
-                <div
-                  data-testid="battle-player-sp-fill"
-                  style={{ width: `${spPct}%` }}
-                  className={`h-full transition-all duration-200 ${SP_COLOR_TOKENS.barFillClass}`}
-                />
-              </div>
-              <span
-                data-testid="battle-player-sp-numbers"
-                className={`${SP_COLOR_TOKENS.textClass} shrink-0 tabular-nums`}
-              >
-                {ownUnit.sp}/{ownUnit.derived.maxSp}
-              </span>
-            </div>
+          <div className="flex items-center gap-2.5 font-mono-nums text-[11px] shrink-0">
+            <span data-testid="battle-player-hp-numbers" className="text-emerald-300">
+              HP {ownUnit.hp}/{ownUnit.derived.maxHp}
+            </span>
+            <span data-testid="battle-player-shield-numbers" className="text-sky-300">
+              SHD {ownUnit.shield}/{maxShield}
+            </span>
+            <span data-testid="battle-player-sp-numbers" className="text-purple-300">
+              SP {ownUnit.sp}/{ownUnit.derived.maxSp}
+            </span>
           </div>
         </div>
 
-        <FixedStatusArea
-          statuses={ownUnit.statuses}
-          rows={activePlayerRows}
-          unit={ownUnit}
-          unitTitle={ownUnit.name}
-          badgeLayout={statusSettings.badgeLayout}
-          iconMods={adminConfig.iconCatalogMods}
-          showLabels={fxSettings.showStatusLabels}
-          fallbackWidthPx={440}
-          compact
-          rootTestId="battle-player-status-effects"
-          chipTestIdPrefix="player-status-chip"
-          overflowTestId="player-status-overflow"
-        />
+        {/* Combined HP bar with overlaid Shield layer + thin SP bar below */}
+        <div className="space-y-1">
+          <div
+            data-testid="battle-player-hp-shield-bar"
+            className="relative h-2.5 w-full rounded-full bg-slate-900 border border-slate-800 overflow-hidden"
+          >
+            <div
+              data-testid="battle-player-hp-fill"
+              style={{ width: `${hpPct}%` }}
+              className={`h-full transition-all duration-200 ${hpFillClass}`}
+            />
+            {shieldOverlayPct > 0 && (
+              <div
+                data-testid="battle-player-shield-overlay"
+                style={{ width: `${shieldOverlayPct}%` }}
+                className="absolute inset-y-0 left-0 bg-sky-400/70 border-r border-cyan-200 transition-all duration-200"
+              />
+            )}
+          </div>
+          <div
+            data-testid="battle-player-sp-bar"
+            className="h-1.5 w-full rounded-full bg-slate-900 border border-slate-800/80 overflow-hidden"
+          >
+            <div
+              style={{ width: `${spPct}%` }}
+              className={`h-full transition-all duration-200 ${
+                isDestroyed ? 'bg-slate-600' : 'bg-purple-400'
+              }`}
+            />
+          </div>
+        </div>
+
+        {ownUnit.statuses.length > 0 && !isDestroyed && (
+          <div
+            data-testid="battle-player-status-effects"
+            className="flex flex-wrap gap-1 pt-0.5"
+          >
+            {ownUnit.statuses.map((st) => {
+              const detail = formatStatusEffectDetail(lang, st, ownUnit);
+              return (
+                <span
+                  key={st.type}
+                  className={`px-1.5 py-0.5 rounded border text-[11px] font-mono-nums ${
+                    st.isDebuff
+                      ? 'border-red-500/45 bg-red-500/12 text-red-200'
+                      : 'border-sky-500/45 bg-sky-500/12 text-sky-200'
+                  }`}
+                >
+                  {detail.fullText}
+                </span>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   };
 
   return (
-    <div
-      className={
-        isPhonePortrait
-          ? 'relative flex-1 flex flex-col bg-tactical-grid'
-          : 'relative flex-1 min-h-0 flex flex-col bg-tactical-grid overflow-y-auto overflow-x-hidden'
-      }
-    >
+    <div className="relative flex-1 min-h-0 flex flex-col bg-tactical-grid overflow-hidden">
       {isPhonePortrait ? (
-        /* ==================== PHONE PORTRAIT LAYOUT (<= 640px portrait) ==================== */
+        /* ==================== PHONE PORTRAIT LAYOUT (< 600px portrait) ==================== */
         <div
           data-testid="battle-phone-layout"
-          className="flex-1 flex flex-col"
+          className="flex-1 min-h-0 flex flex-col overflow-hidden"
         >
           {/* 2) One-line turn queue strip (max 44px) */}
           <TurnQueueBar
@@ -1627,10 +1540,10 @@ export function BattleScreen() {
             }}
           />
 
-          {/* 3) Sticky compact control row (max 48px): Auto, Speed Cycle, View Switch, Loop (icon+num), "..." More */}
+          {/* 3) One compact control row (max 48px): Auto, Speed Cycle, View Switch, Loop (icon+num), "..." More */}
           <div
             data-testid="battle-phone-controls"
-            className="sticky top-0 z-30 h-12 max-h-[48px] shrink-0 border-b border-slate-800/80 bg-[#080D16]/95 backdrop-blur-sm px-1.5 flex items-center justify-between gap-1.5"
+            className="h-12 max-h-[48px] shrink-0 border-b border-slate-800/80 bg-[#080D16] px-1.5 flex items-center justify-between gap-1.5"
           >
             <button
               type="button"
@@ -1742,8 +1655,8 @@ export function BattleScreen() {
             </div>
           )}
 
-          {/* 4) Battlefield — natural page flow, zero inner scroll & zero clipping */}
-          <div className="flex flex-col p-2">
+          {/* 4) Battlefield — takes ALL remaining height with no inner scroll & no clipping */}
+          <div className="flex-1 min-h-0 flex flex-col p-2 overflow-hidden">
             {renderFieldContent()}
           </div>
 
@@ -1755,27 +1668,24 @@ export function BattleScreen() {
                 data-fixed-height="true"
                 className="rounded-lg border border-slate-800 bg-[#070A10] flex flex-col overflow-hidden h-[144px]"
               >
-                <div className="shrink-0 px-2 py-1 border-b border-slate-800/90 flex items-center justify-between gap-1.5 text-[11px] text-slate-400">
-                  <span className="font-semibold text-slate-200 inline-flex items-center gap-1 min-w-0 truncate">
+                <div className="shrink-0 px-2.5 py-1 border-b border-slate-800/90 flex items-center justify-between gap-2 text-[11px] text-slate-400">
+                  <span className="font-semibold text-slate-200 inline-flex items-center gap-1.5 truncate">
                     <ScrollText className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                     <span className="truncate">{t('battle.combatLog')}</span>
-                    <span className="font-mono-nums text-slate-400 shrink-0">
+                    <span className="font-mono-nums text-slate-400">
                       ({battle.log.length})
                     </span>
                   </span>
-                  <div className="flex items-center gap-1 shrink-0">
-                    {renderCombatLogExpandButtons(true)}
-                    <button
-                      type="button"
-                      data-testid="combat-log-mode-toggle"
-                      data-log-mode={combatLogMode}
-                      onClick={handleToggleCombatLogMode}
-                      className="min-h-[26px] px-1.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-[10px] font-semibold inline-flex items-center gap-1 cursor-pointer shrink-0"
-                    >
-                      <Maximize2 className="w-3 h-3 text-sky-400" />
-                      <span>{t('log.modePopup')}</span>
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    data-testid="combat-log-mode-toggle"
+                    data-log-mode={combatLogMode}
+                    onClick={handleToggleCombatLogMode}
+                    className="min-h-[28px] px-2 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer shrink-0"
+                  >
+                    <Maximize2 className="w-3 h-3 text-sky-400" />
+                    <span>{t('log.modePopup')}</span>
+                  </button>
                 </div>
                 <CombatLogList
                   entries={battle.log}
@@ -1785,8 +1695,6 @@ export function BattleScreen() {
                   mode="docked"
                   channel={logChannel}
                   onChannelChange={setLogChannel}
-                  expandAll={logExpandAll}
-                  expandNonce={logExpandNonce}
                 />
               </div>
             ) : (
@@ -1825,9 +1733,27 @@ export function BattleScreen() {
             )}
           </div>
 
-          {/* 6) Single-row bottom action dock (hidden in Auto mode — no separate AUTO bar) */}
-          {!autoBattleEnabled && (
-            <div className="shrink-0 border-t border-slate-800/90 bg-[#0A0F18]/98 px-2 py-1.5 pb-safe">
+          {/* 6) Single-row bottom action dock — collapses to slim <=40px bar in Auto mode */}
+          <div className="shrink-0 border-t border-slate-800/90 bg-[#0A0F18]/98 px-2 py-1.5 pb-safe">
+            {autoBattleEnabled ? (
+              <div
+                data-testid="battle-auto-collapsed-dock"
+                className="h-10 max-h-[40px] px-2.5 rounded-lg border border-emerald-500/40 bg-emerald-500/12 flex items-center justify-between gap-2"
+              >
+                <div className="flex items-center gap-1.5 min-w-0 text-[13px] font-semibold text-emerald-200">
+                  <Bot className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span className="truncate">{t('battle.autoCollapsedBar')}</span>
+                </div>
+                <button
+                  type="button"
+                  data-testid="battle-auto-resume-manual"
+                  onClick={() => setAutoBattleEnabled(false)}
+                  className="h-8 px-2.5 rounded-md border border-slate-600 bg-slate-900 hover:bg-slate-800 text-slate-100 text-[12px] font-semibold shrink-0 cursor-pointer"
+                >
+                  {t('battle.switchManual')}
+                </button>
+              </div>
+            ) : (
               <div
                 data-testid="battle-manual-dock"
                 className="grid grid-cols-4 gap-2"
@@ -1874,185 +1800,174 @@ export function BattleScreen() {
                   <span className="truncate">{t('battle.actionItem')}</span>
                 </button>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       ) : (
         /* ==================== TABLET (600-1023) & PC (>= 1024) & LANDSCAPE PHONE LAYOUT ==================== */
         <div
           data-testid="battle-desktop-layout"
-          className="flex-1 min-h-full w-full max-w-full grid grid-cols-[minmax(0,65fr)_minmax(260px,35fr)] gap-2 px-2.5 py-2 overflow-x-hidden"
+          className="flex-1 min-h-0 grid grid-cols-[minmax(0,65fr)_minmax(260px,35fr)] gap-2 p-2 overflow-hidden"
         >
-          {/* LEFT COLUMN (~65%): Controls + Balance Bar + Player Status + Field + Action Bar under field */}
-          <div
-            data-testid="battle-main-column"
-            className="min-w-0 max-w-full flex flex-col gap-1.5 overflow-x-hidden"
-          >
-            {/* Header stack: control row + force bar + player block (hard cap 150px alive with 1 status row) */}
+          {/* LEFT COLUMN (~65%): Controls + Balance Bar + Field + Action Bar under field */}
+          <div className="min-w-0 min-h-0 flex flex-col gap-2 overflow-hidden">
+            {/* Single-Row Unified Control Bar (Manual/Auto + Speed + Radar/Card + "..." overflow menu) */}
             <div
-              data-testid="battle-main-header"
-              className={`shrink-0 min-w-0 max-w-full flex flex-col gap-1.5 ${
-                activePlayerRows <= 1 ? 'max-h-[150px]' : ''
-              }`}
+              data-testid="battle-desktop-controls"
+              className="shrink-0 rounded-lg border border-slate-800/90 bg-[#0A0F18]/95 px-2 py-1 flex items-center justify-between gap-2 flex-nowrap"
             >
-              {/* Single-Row Unified Control Bar (Manual/Auto + Speed + Radar/Card + Loop + "..." overflow menu) */}
-              <div
-                data-testid="battle-desktop-controls"
-                className="shrink-0 min-w-0 max-w-full max-h-[48px] overflow-x-hidden rounded-lg border border-slate-800/90 bg-[#0A0F18]/95 px-2 py-1 flex items-center justify-between gap-1.5 flex-nowrap"
-              >
-                <div className="flex items-center gap-1.5 min-w-0 flex-nowrap overflow-hidden">
-                  {/* Manual | Auto */}
-                  <div
-                    className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-950 p-0.5 shrink-0"
-                    role="group"
-                    title={t('auto.hotkeyHint')}
-                  >
-                    <button
-                      type="button"
-                      data-testid="battle-manual-toggle"
-                      aria-pressed={!autoBattleEnabled}
-                      onClick={() => setAutoBattleEnabled(false)}
-                      className={`h-[34px] min-h-[34px] px-2 rounded-md text-[12px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                        !autoBattleEnabled
-                          ? 'bg-slate-200 text-slate-950'
-                          : 'text-slate-400 hover:text-slate-100'
-                      }`}
-                    >
-                      {t('auto.manual')}
-                    </button>
-                    <button
-                      type="button"
-                      data-testid="battle-auto-toggle"
-                      aria-pressed={autoBattleEnabled}
-                      onClick={() => setAutoBattleEnabled(true)}
-                      className={`h-[34px] min-h-[34px] px-2 rounded-md text-[12px] font-bold transition-colors cursor-pointer inline-flex items-center gap-1 whitespace-nowrap ${
-                        autoBattleEnabled
-                          ? 'bg-emerald-500 text-slate-950 shadow-[0_0_10px_rgba(16,185,129,0.45)]'
-                          : 'text-slate-400 hover:text-slate-100'
-                      }`}
-                    >
-                      <Bot className="w-3.5 h-3.5 shrink-0" />
-                      <span>{t('auto.auto')}</span>
-                      <kbd className="font-mono-nums text-[11px] px-1 rounded bg-black/20">
-                        A
-                      </kbd>
-                    </button>
-                  </div>
-
-                  {/* Speeds 1x 2x 3x 5x 10x */}
-                  <div
-                    data-testid="battle-speed-selector"
-                    className="inline-flex items-center rounded-lg border border-slate-800 bg-slate-950 p-0.5 shrink-0"
-                    role="group"
-                    aria-label={t('battle.speedLabel')}
-                  >
-                    {BATTLE_SPEEDS.map((spd) => (
-                      <button
-                        key={spd}
-                        type="button"
-                        onClick={() => setBattleSpeed(spd)}
-                        title={`${spd}x`}
-                        className={`h-[34px] min-h-[34px] px-1.5 rounded-md text-[12px] font-mono-nums font-bold transition-colors cursor-pointer whitespace-nowrap ${
-                          spd >= 5 ? 'hidden lg:inline-flex items-center justify-center' : 'inline-flex items-center justify-center'
-                        } ${
-                          battleSpeed === spd
-                            ? 'bg-sky-500 text-slate-950'
-                            : 'text-slate-400 hover:text-slate-100'
-                        }`}
-                      >
-                        {spd}x
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Radar | Card View Switch */}
-                  <div
-                    data-testid="battle-view-switch"
-                    className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-950 p-0.5 shrink-0"
-                    role="group"
-                    aria-label={t('battle.viewModeLabel')}
-                  >
-                    <button
-                      type="button"
-                      data-testid="battle-view-radar"
-                      aria-pressed={effectiveViewMode === 'radar'}
-                      onClick={() => setBattleViewMode('radar')}
-                      title={t('battle.viewRadar')}
-                      className={`h-[34px] min-h-[34px] px-2 rounded-md text-[12px] font-semibold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap ${
-                        effectiveViewMode === 'radar'
-                          ? 'bg-sky-500 text-slate-950'
-                          : 'text-slate-400 hover:text-slate-100'
-                      }`}
-                    >
-                      <Radar className="w-3.5 h-3.5 shrink-0" />
-                      <span>{t('battle.viewRadar')}</span>
-                    </button>
-                    <button
-                      type="button"
-                      data-testid="battle-view-card"
-                      aria-pressed={effectiveViewMode === 'card'}
-                      onClick={() => setBattleViewMode('card')}
-                      title={t('battle.viewCard')}
-                      className={`h-[34px] min-h-[34px] px-2 rounded-md text-[12px] font-semibold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap ${
-                        effectiveViewMode === 'card'
-                          ? 'bg-sky-500 text-slate-950'
-                          : 'text-slate-400 hover:text-slate-100'
-                      }`}
-                    >
-                      <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
-                      <span>{t('battle.viewCard')}</span>
-                    </button>
-                  </div>
-                  {/* Loop Button / Active Progress Chip directly next to Radar/Card */}
-                  {renderLoopControl(false)}
-                </div>
-
-                <div className="flex items-center gap-1 shrink-0">
+              <div className="flex items-center gap-2 min-w-0 flex-nowrap">
+                {/* Manual | Auto */}
+                <div
+                  className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-950 p-0.5 shrink-0"
+                  role="group"
+                  title={t('auto.hotkeyHint')}
+                >
                   <button
                     type="button"
-                    data-testid="battle-more-btn"
-                    onClick={() => setMoreActionsOpen(true)}
-                    aria-label={t('battle.moreActions')}
-                    title={t('battle.moreActions')}
-                    className="h-[34px] min-h-[34px] min-w-[36px] px-2 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 inline-flex items-center justify-center gap-1 cursor-pointer shrink-0"
+                    data-testid="battle-manual-toggle"
+                    aria-pressed={!autoBattleEnabled}
+                    onClick={() => setAutoBattleEnabled(false)}
+                    className={`min-h-[44px] px-2.5 rounded-md text-[13px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                      !autoBattleEnabled
+                        ? 'bg-slate-200 text-slate-950'
+                        : 'text-slate-400 hover:text-slate-100'
+                    }`}
                   >
-                    <MoreHorizontal className="w-4 h-4" />
+                    {t('auto.manual')}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="battle-auto-toggle"
+                    aria-pressed={autoBattleEnabled}
+                    onClick={() => setAutoBattleEnabled(true)}
+                    className={`min-h-[44px] px-2.5 rounded-md text-[13px] font-bold transition-colors cursor-pointer inline-flex items-center gap-1 whitespace-nowrap ${
+                      autoBattleEnabled
+                        ? 'bg-emerald-500 text-slate-950 shadow-[0_0_10px_rgba(16,185,129,0.45)]'
+                        : 'text-slate-400 hover:text-slate-100'
+                    }`}
+                  >
+                    <Bot className="w-4 h-4 shrink-0" />
+                    <span>{t('auto.auto')}</span>
+                    <kbd className="font-mono-nums text-[12px] px-1 rounded bg-black/20">
+                      A
+                    </kbd>
                   </button>
                 </div>
-              </div>
 
-              {/* Compact Balance of Power Meter */}
-              <div
-                data-testid="battle-force-ratio-bar"
-                className="shrink-0 min-w-0 h-[20px] max-h-[22px] px-1 flex items-center gap-2 text-[11px] font-mono-nums"
-              >
-                <span className="font-bold text-sky-300 w-9 text-left shrink-0">
-                  {aliveAlliesCount}/{allies.length}
-                </span>
-                <div className="flex-1 min-w-0 h-2 rounded-full bg-slate-900 border border-slate-800 overflow-hidden flex">
-                  <div
-                    style={{ width: `${allySharePct}%` }}
-                    className="h-full bg-gradient-to-r from-emerald-500 to-sky-400 transition-all duration-300"
-                  />
-                  <div
-                    style={{ width: `${enemySharePct}%` }}
-                    className="h-full bg-gradient-to-r from-orange-500 to-red-500 transition-all duration-300"
-                  />
+                {/* Speeds 1x 2x 3x 5x 10x */}
+                <div
+                  data-testid="battle-speed-selector"
+                  className="inline-flex items-center rounded-lg border border-slate-800 bg-slate-950 p-0.5 shrink-0"
+                  role="group"
+                  aria-label={t('battle.speedLabel')}
+                >
+                  {BATTLE_SPEEDS.map((spd) => (
+                    <button
+                      key={spd}
+                      type="button"
+                      onClick={() => setBattleSpeed(spd)}
+                      title={`${spd}x`}
+                      className={`min-h-[44px] px-2 rounded-md text-[13px] font-mono-nums font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                        spd >= 5 ? 'hidden lg:inline-flex items-center justify-center' : 'inline-flex items-center justify-center'
+                      } ${
+                        battleSpeed === spd
+                          ? 'bg-sky-500 text-slate-950'
+                          : 'text-slate-400 hover:text-slate-100'
+                      }`}
+                    >
+                      {spd}x
+                    </button>
+                  ))}
                 </div>
-                <span className="px-1.5 py-0.2 rounded bg-slate-900 border border-slate-700 font-bold text-amber-300 shrink-0">
-                  {battle.squadSize}v{battle.squadSize}
-                </span>
-                <span className="font-bold text-red-400 w-9 text-right shrink-0">
-                  {aliveEnemiesCount}/{enemies.length}
-                </span>
+
+                {/* Radar | Card View Switch */}
+                <div
+                  data-testid="battle-view-switch"
+                  className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-950 p-0.5 shrink-0"
+                  role="group"
+                  aria-label={t('battle.viewModeLabel')}
+                >
+                  <button
+                    type="button"
+                    data-testid="battle-view-radar"
+                    aria-pressed={effectiveViewMode === 'radar'}
+                    onClick={() => setBattleViewMode('radar')}
+                    title={t('battle.viewRadar')}
+                    className={`min-h-[44px] px-2.5 rounded-md text-[13px] font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                      effectiveViewMode === 'radar'
+                        ? 'bg-sky-500 text-slate-950'
+                        : 'text-slate-400 hover:text-slate-100'
+                    }`}
+                  >
+                    <Radar className="w-4 h-4 shrink-0" />
+                    <span>{t('battle.viewRadar')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="battle-view-card"
+                    aria-pressed={effectiveViewMode === 'card'}
+                    onClick={() => setBattleViewMode('card')}
+                    title={t('battle.viewCard')}
+                    className={`min-h-[44px] px-2.5 rounded-md text-[13px] font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                      effectiveViewMode === 'card'
+                        ? 'bg-sky-500 text-slate-950'
+                        : 'text-slate-400 hover:text-slate-100'
+                    }`}
+                  >
+                    <LayoutGrid className="w-4 h-4 shrink-0" />
+                    <span>{t('battle.viewCard')}</span>
+                  </button>
+                </div>
+                {/* Loop Button / Active Progress Chip directly next to Radar/Card */}
+                {renderLoopControl(false)}
               </div>
 
-              {/* Player Own Ship Status Bar (directly under Balance of Power) */}
-              {renderPlayerStatusBar(false)}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  data-testid="battle-more-btn"
+                  onClick={() => setMoreActionsOpen(true)}
+                  aria-label={t('battle.moreActions')}
+                  title={t('battle.moreActions')}
+                  className="min-h-[44px] min-w-[44px] px-2.5 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 inline-flex items-center justify-center gap-1 cursor-pointer shrink-0"
+                >
+                  <MoreHorizontal className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
+            {/* Compact Balance of Power Meter */}
+            <div
+              data-testid="battle-force-ratio-bar"
+              className="shrink-0 px-1 flex items-center gap-2 text-[12px] font-mono-nums"
+            >
+              <span className="font-bold text-sky-300 w-10 text-left">
+                {aliveAlliesCount}/{allies.length}
+              </span>
+              <div className="flex-1 h-2 rounded-full bg-slate-900 border border-slate-800 overflow-hidden flex">
+                <div
+                  style={{ width: `${allySharePct}%` }}
+                  className="h-full bg-gradient-to-r from-emerald-500 to-sky-400 transition-all duration-300"
+                />
+                <div
+                  style={{ width: `${enemySharePct}%` }}
+                  className="h-full bg-gradient-to-r from-orange-500 to-red-500 transition-all duration-300"
+                />
+              </div>
+              <span className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 font-bold text-amber-300 shrink-0">
+                {battle.squadSize}v{battle.squadSize}
+              </span>
+              <span className="font-bold text-red-400 w-10 text-right">
+                {aliveEnemiesCount}/{enemies.length}
+              </span>
+            </div>
+
+            {/* Player Own Ship Status Bar (directly under Balance of Power) */}
+            {renderPlayerStatusBar(false)}
+
             {battle.autoStopNotice && !battle.summary && (
-              <div className="shrink-0 min-w-0 rounded-lg border border-orange-500/40 bg-orange-500/12 px-3 py-1.5 flex items-center justify-between gap-2 text-[13px] text-orange-200">
+              <div className="shrink-0 rounded-lg border border-orange-500/40 bg-orange-500/12 px-3 py-1.5 flex items-center justify-between gap-2 text-[13px] text-orange-200">
                 <div className="flex items-center gap-2 min-w-0">
                   <AlertTriangle className="w-4 h-4 text-orange-400 shrink-0" />
                   <span className="truncate">
@@ -2064,7 +1979,7 @@ export function BattleScreen() {
                 <button
                   type="button"
                   onClick={() => setAutoBattleEnabled(true)}
-                  className="min-h-[32px] px-3 rounded border border-emerald-400/60 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 text-[12px] font-semibold cursor-pointer shrink-0"
+                  className="min-h-[36px] px-3 rounded border border-emerald-400/60 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 text-[12px] font-semibold cursor-pointer shrink-0"
                 >
                   {t('auto.auto')}
                 </button>
@@ -2072,10 +1987,7 @@ export function BattleScreen() {
             )}
 
             {/* Main Field */}
-            <div
-              data-testid="battle-main-field"
-              className="flex-1 min-w-0 min-h-[420px] flex flex-col overflow-hidden"
-            >
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
               {renderFieldContent()}
             </div>
 
@@ -2135,7 +2047,7 @@ export function BattleScreen() {
                   {/* Single-Row Core + Skill Controls */}
                   <div
                     data-testid="battle-manual-dock"
-                    className="flex items-stretch gap-2 min-w-0"
+                    className="flex items-stretch gap-2"
                   >
                     {/* Basic Attack / Defend / Item */}
                     <div className="flex items-stretch gap-1.5 shrink-0">
@@ -2229,22 +2141,22 @@ export function BattleScreen() {
                                 lang,
                                 skill.id
                               )}${reasonText ? ` [${reasonText}]` : ''}`}
-                              className={`min-w-0 min-h-[44px] px-2 py-1 rounded-lg border text-left transition-colors flex flex-col justify-between gap-0.5 overflow-hidden ${borderClass} ${
+                              className={`min-h-[44px] px-2 py-1 rounded-lg border text-left transition-colors flex flex-col justify-between gap-0.5 ${borderClass} ${
                                 clickable
                                   ? 'cursor-pointer'
                                   : 'cursor-not-allowed'
                               }`}
                             >
-                              <div className="flex items-center justify-between gap-1 min-w-0">
+                              <div className="flex items-center justify-between gap-1">
                                 <SkillIcon
                                   icon={skill.icon}
                                   className="w-3.5 h-3.5 shrink-0"
                                 />
                                 <span
-                                  className={`font-mono-nums text-[12px] font-bold truncate ${
+                                  className={`font-mono-nums text-[12px] font-bold ${
                                     usability.cooldownRemaining > 0
                                       ? 'text-red-300'
-                                      : SP_COLOR_TOKENS.textClass
+                                      : 'text-amber-300'
                                   }`}
                                 >
                                   {isToggleOn
@@ -2318,7 +2230,6 @@ export function BattleScreen() {
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  {combatLogMode === 'docked' && renderCombatLogExpandButtons(false)}
                   {combatLogMode === 'popup' && !logSheetOpen && (
                     <button
                       type="button"
@@ -2360,8 +2271,6 @@ export function BattleScreen() {
                   mode="docked"
                   channel={logChannel}
                   onChannelChange={setLogChannel}
-                  expandAll={logExpandAll}
-                  expandNonce={logExpandNonce}
                 />
               ) : (
                 <div className="flex-1 min-h-0 flex flex-col items-center justify-center p-4 text-center gap-2 text-[12px] text-slate-400">
@@ -2532,23 +2441,6 @@ export function BattleScreen() {
                   <span>{t('battle.retreat')}</span>
                 </button>
               ))}
-
-            {ENABLE_ADMIN_CP && (
-              <div className="pt-2 border-t border-slate-800/70">
-                <button
-                  type="button"
-                  data-testid="battle-more-admin-btn"
-                  onClick={() => {
-                    closeMoreActions();
-                    toggleAdminPanel();
-                  }}
-                  className="w-full min-h-[38px] px-3 rounded-lg border border-slate-800/80 bg-slate-950/60 hover:bg-slate-900 text-slate-400 hover:text-slate-200 text-[12px] font-medium flex items-center justify-center gap-2 cursor-pointer transition-colors"
-                >
-                  <Sliders className="w-3.5 h-3.5 text-slate-500" />
-                  <span>{t('statusUi.adminBtnMuted')}</span>
-                </button>
-              </div>
-            )}
           </div>
         </div>
       </BottomSheet>
@@ -2626,7 +2518,7 @@ export function BattleScreen() {
                     className={`text-right font-mono-nums text-[12px] font-bold shrink-0 ${
                       usability.cooldownRemaining > 0
                         ? 'text-red-300'
-                        : SP_COLOR_TOKENS.textClass
+                        : 'text-amber-300'
                     }`}
                   >
                     {isToggleOn
@@ -3164,8 +3056,7 @@ export function BattleScreen() {
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
-                  {renderCombatLogExpandButtons(false)}
+                <div className="flex items-center gap-1.5 shrink-0">
                   <button
                     type="button"
                     data-testid="combat-log-popup-dock-btn"
@@ -3196,8 +3087,6 @@ export function BattleScreen() {
                   mode="popup"
                   channel={logChannel}
                   onChannelChange={setLogChannel}
-                  expandAll={logExpandAll}
-                  expandNonce={logExpandNonce}
                 />
               </div>
             </div>

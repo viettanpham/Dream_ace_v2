@@ -7,12 +7,6 @@ import {
   useState,
 } from 'react';
 import { HelpCircle, Radio, X } from 'lucide-react';
-import { getCatalogRow } from '../data/iconCatalog';
-import {
-  getCatalogRowForStatus,
-  getStatusVisualKind,
-  sortStatusEffects,
-} from '../data/statusIconMap';
 import { getTeamColorRole, hasStatus } from '../engine/combat';
 import {
   formatStatusEffectDetail,
@@ -21,7 +15,6 @@ import {
   translate,
   useI18n,
 } from '../i18n';
-import { useGameStore } from '../store/useGameStore';
 import type {
   ActiveStatusEffect,
   BattleSpeed,
@@ -29,10 +22,7 @@ import type {
   CombatRow,
   CombatUnit,
   FloatingPopup,
-  IconCatalogModRow,
-  Language,
   MechClassId,
-  StatusBadgeLayout,
   TeamColorRole,
 } from '../types/game';
 import {
@@ -44,6 +34,7 @@ import {
   formatShortUnitName,
   formatSpeechBubbleText,
   getRadarHitAreaSize,
+  getStatusIconMeta,
   isCompactPopupTone,
   layoutStaggeredPopups,
   layoutUnitStatusIcons,
@@ -66,14 +57,11 @@ import {
   type BattleEffectsMode,
   type ReducedMotionSetting,
 } from '../utils/battleVfx';
-import { useStatusDisplaySettings } from '../utils/statusDisplayPrefs';
 import {
   BattleVfxOverlay,
   type ManualAimLineSpec,
   type RowSlideEffect,
 } from './BattleVfxOverlay';
-import { CatalogIcon } from './CatalogIcon';
-import { StatusChip } from './StatusChip';
 
 interface BattleRadarViewProps {
   battle: BattleState;
@@ -489,9 +477,6 @@ export function computeUnitPositions(
 
 interface RadarUnitMarkerProps {
   unit: CombatUnit;
-  lang: Language;
-  badgeLayout: StatusBadgeLayout;
-  iconMods?: readonly IconCatalogModRow[];
   x: number;
   y: number;
   tokenRadius: number;
@@ -519,9 +504,6 @@ interface RadarUnitMarkerProps {
 
 const RadarUnitMarker = memo(function RadarUnitMarker({
   unit,
-  lang,
-  badgeLayout,
-  iconMods,
   x,
   y,
   tokenRadius,
@@ -564,11 +546,8 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
   const shapeRadius = unit.alive ? ringResult.innerShapeRadius : visualRadius;
   const ringOuterRadius = unit.alive ? ringResult.outerRadius : visualRadius;
 
-  const sortedStatuses = unit.alive
-    ? sortStatusEffects(unit.statuses, iconMods)
-    : [];
   const statusLayout = unit.alive
-    ? layoutUnitStatusIcons(sortedStatuses, RADAR_STATUS_MAX_VISIBLE)
+    ? layoutUnitStatusIcons(unit.statuses, RADAR_STATUS_MAX_VISIBLE)
     : { visible: [] as ActiveStatusEffect[], overflowCount: 0 };
 
   const markerOpacity = !unit.alive
@@ -588,7 +567,7 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
   const fortressInner = getFortressPoints(Math.max(5, shapeRadius - 2.8));
 
   // Status row horizontal centering under the name plate
-  const statusStep = 21;
+  const statusStep = 13.5;
   const statusTotalCount =
     statusLayout.visible.length + (statusLayout.overflowCount > 0 ? 1 : 0);
   const statusStartX =
@@ -909,15 +888,14 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
               {shortName}
             </text>
 
-            {/* Up to 3 compact StatusChips (+N when more) with buff/debuff/normal frames & Material Symbols */}
+            {/* Up to 3 Status Icons (+N when more) with green buff / red debuff outline & distinct symbols */}
             {statusLayout.visible.length > 0 && (
               <g
                 data-testid={`radar-status-${unit.id}`}
-                transform="translate(0, 22)"
+                transform="translate(0, 20)"
               >
                 {statusLayout.visible.map((st, sIdx) => {
-                  const row = getCatalogRowForStatus(st.type, iconMods);
-                  const visualKind = getStatusVisualKind(st, row);
+                  const meta = getStatusIconMeta(st);
                   const stTip = formatStatusTooltip(st, unit);
                   const cxIcon = statusStartX + sIdx * statusStep;
                   return (
@@ -925,8 +903,8 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
                       key={`${st.type}-${sIdx}`}
                       data-testid={`radar-status-icon-${unit.id}-${sIdx}`}
                       data-status-type={st.type}
-                      data-status-kind={visualKind}
-                      data-status-symbol={row?.symbol ?? st.type}
+                      data-status-kind={meta.isDebuff ? 'debuff' : 'buff'}
+                      data-status-symbol={meta.symbol}
                       transform={`translate(${cxIcon}, 0)`}
                       role="button"
                       tabIndex={-1}
@@ -946,28 +924,25 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
                       className="cursor-pointer"
                     >
                       <title>{stTip}</title>
-                      <foreignObject
-                        x="-14"
-                        y="-13"
-                        width="28"
-                        height="26"
-                        overflow="visible"
+                      <circle
+                        cx="0"
+                        cy="0"
+                        r="5.8"
+                        fill={meta.bgColor}
+                        stroke={meta.outlineColor}
+                        strokeWidth="1.5"
+                      />
+                      <text
+                        x="0"
+                        y="2.7"
+                        textAnchor="middle"
+                        fontSize="7.4"
+                        fontFamily="monospace"
+                        fontWeight="800"
+                        fill={meta.textColor}
                       >
-                        <div className="w-full h-full flex items-center justify-center pointer-events-none">
-                          <StatusChip
-                            status={st}
-                            lang={lang}
-                            unit={unit}
-                            badgeLayout={badgeLayout}
-                            iconMods={iconMods}
-                            size="xs"
-                            showLabel={false}
-                            allowStack={false}
-                            stacks={1}
-                            className="!p-0 !border-0 !bg-transparent"
-                          />
-                        </div>
-                      </foreignObject>
+                        {meta.symbol}
+                      </text>
                     </g>
                   );
                 })}
@@ -978,10 +953,10 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
                     }, 0)`}
                   >
                     <rect
-                      x="-8"
-                      y="-7"
-                      width="16"
-                      height="14"
+                      x="-6.5"
+                      y="-5.5"
+                      width="13"
+                      height="11"
                       rx="3"
                       fill="#0f172a"
                       stroke="#64748b"
@@ -990,9 +965,9 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
                     <text
                       data-testid={`radar-status-overflow-${unit.id}`}
                       x="0"
-                      y="3"
+                      y="2.7"
                       textAnchor="middle"
-                      fontSize="8"
+                      fontSize="7.2"
                       fontFamily="monospace"
                       fontWeight="800"
                       fill="#e2e8f0"
@@ -1004,7 +979,7 @@ const RadarUnitMarker = memo(function RadarUnitMarker({
                 {showStatusLabels && (
                   <g
                     data-testid={`radar-status-labels-${unit.id}`}
-                    transform="translate(0, 15)"
+                    transform="translate(0, 12.5)"
                   >
                     <rect
                       x={-Math.max(24, barW / 2 + 6)}
@@ -1111,12 +1086,6 @@ export function BattleRadarView({
   onInspectUnit,
 }: BattleRadarViewProps) {
   const { lang, t } = useI18n();
-  const adminStatusDefaults = useGameStore(
-    (s) => s.adminConfig.statusDisplayDefaults
-  );
-  const iconMods = useGameStore((s) => s.adminConfig.iconCatalogMods);
-  const { settings: statusSettings } =
-    useStatusDisplaySettings(adminStatusDefaults);
   const detectedMode = useBattleLayoutMode();
   const [fxSettings] = useFxSettings();
   const osReducedMotion = usePrefersReducedMotion();
@@ -1168,8 +1137,6 @@ export function BattleRadarView({
   );
   const [invalidToast, setInvalidToast] = useState<string | null>(null);
   const [inspectedStatusInfo, setInspectedStatusInfo] = useState<{
-    unit: CombatUnit;
-    status: ActiveStatusEffect;
     unitName: string;
     detailText: string;
     isDebuff: boolean;
@@ -1245,14 +1212,11 @@ export function BattleRadarView({
 
   const handleInspectStatus = useCallback(
     (unit: CombatUnit, st: ActiveStatusEffect) => {
-      const row = getCatalogRowForStatus(st.type, iconMods);
-      const isDebuff = getStatusVisualKind(st, row) === 'debuff';
+      const meta = getStatusIconMeta(st);
       setInspectedStatusInfo({
-        unit,
-        status: st,
         unitName: formatShortUnitName(unit.name, 10),
         detailText: formatStatusTooltip(st, unit),
-        isDebuff,
+        isDebuff: meta.isDebuff,
         source: 'tap',
       });
       if (statusTooltipTimerRef.current !== null) {
@@ -1263,7 +1227,7 @@ export function BattleRadarView({
         statusTooltipTimerRef.current = null;
       }, 3200);
     },
-    [formatStatusTooltip, iconMods]
+    [formatStatusTooltip]
   );
 
   const handleHoverStatus = useCallback(
@@ -1278,18 +1242,15 @@ export function BattleRadarView({
         window.clearTimeout(statusTooltipTimerRef.current);
         statusTooltipTimerRef.current = null;
       }
-      const row = getCatalogRowForStatus(st.type, iconMods);
-      const isDebuff = getStatusVisualKind(st, row) === 'debuff';
+      const meta = getStatusIconMeta(st);
       setInspectedStatusInfo({
-        unit,
-        status: st,
         unitName: formatShortUnitName(unit.name, 10),
         detailText: formatStatusTooltip(st, unit),
-        isDebuff,
+        isDebuff: meta.isDebuff,
         source: 'hover',
       });
     },
-    [formatStatusTooltip, iconMods]
+    [formatStatusTooltip]
   );
 
   // Auto-hide speech bubble after 1.5s cleanly even when rendered standalone
@@ -1789,11 +1750,7 @@ export function BattleRadarView({
       data-animations-skipped={animationsSkipped ? 'true' : 'false'}
       data-reduced-motion={resolvedReducedMotion ? 'true' : 'false'}
       style={{ touchAction: 'pan-y' }}
-      className={
-        layoutMode === 'phone-portrait'
-          ? 'relative w-full aspect-[380/500] flex items-center justify-center rounded-lg border border-slate-800/90 bg-[#050A12] select-none touch-pan-y'
-          : 'relative flex-1 min-w-0 w-full min-h-[420px] aspect-[12/7] flex items-center justify-center overflow-hidden rounded-lg border border-slate-800/90 bg-[#050A12] select-none touch-pan-y'
-      }
+      className="relative flex-1 min-h-0 w-full h-full flex items-center justify-center overflow-hidden rounded-lg border border-slate-800/90 bg-[#050A12] select-none touch-pan-y"
     >
       {/* Main Tactical 3-Row Radar SVG — static geometry only (zero animated SVG transforms) */}
       <svg
@@ -1995,9 +1952,6 @@ export function BattleRadarView({
             <RadarUnitMarker
               key={unit.id}
               unit={unit}
-              lang={lang}
-              badgeLayout={statusSettings.badgeLayout}
-              iconMods={iconMods}
               x={pos.x}
               y={pos.y}
               tokenRadius={tokenRadius}
@@ -2132,47 +2086,14 @@ export function BattleRadarView({
                 <span>{t('radar.legendLowHp')}</span>
               </div>
 
-              <div className="space-y-1.5 pt-0.5 border-t border-slate-800/90">
-                <div className="flex items-center gap-2">
-                  <CatalogIcon
-                    row={getCatalogRow('BF02', iconMods) ?? null}
-                    size="sm"
-                    badgeLayout={statusSettings.badgeLayout}
-                    showBadges={false}
-                  />
-                  <span>{t('radar.legendBuff')}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CatalogIcon
-                    row={getCatalogRow('DB05', iconMods) ?? null}
-                    size="sm"
-                    badgeLayout={statusSettings.badgeLayout}
-                    showBadges={false}
-                  />
-                  <span>{t('radar.legendDebuff')}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CatalogIcon
-                    row={getCatalogRow('BF09', iconMods) ?? null}
-                    size="sm"
-                    badgeLayout={statusSettings.badgeLayout}
-                    stacks={2}
-                    allowStack={true}
-                    turnsLeft={null}
-                    showArrowBadge={false}
-                  />
-                  <span>{t('radar.legendStack')}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CatalogIcon
-                    row={getCatalogRow('DT01', iconMods) ?? null}
-                    size="sm"
-                    badgeLayout={statusSettings.badgeLayout}
-                    turnsLeft={2}
-                    showArrowBadge={false}
-                  />
-                  <span>{t('radar.legendTurns')}</span>
-                </div>
+              <div className="flex items-center gap-2">
+                <svg width="20" height="18" viewBox="0 0 20 18" className="shrink-0">
+                  <circle cx="5.5" cy="9" r="4.5" fill="#052615" stroke="#22c55e" strokeWidth="1.3" />
+                  <text x="5.5" y="11.2" textAnchor="middle" fontSize="6.5" fontWeight="800" fill="#86efac">↑</text>
+                  <circle cx="14.5" cy="9" r="4.5" fill="#26090d" stroke="#ef4444" strokeWidth="1.3" />
+                  <text x="14.5" y="11.2" textAnchor="middle" fontSize="6.5" fontWeight="800" fill="#fca5a5">↓</text>
+                </svg>
+                <span>{t('radar.legendStatusIcons')}</span>
               </div>
 
               <div className="flex items-center gap-2 pt-0.5 border-t border-slate-800/90">
@@ -2204,33 +2125,21 @@ export function BattleRadarView({
         )}
       </div>
 
-      {/* Status Icon Tap & Hover Tooltip (uses shared StatusChip + unit name + exact effect detail) */}
+      {/* Status Icon Tap & Hover Tooltip (shows unit name + exact effect value & duration) */}
       {inspectedStatusInfo && (
         <div
           role="status"
           aria-live="polite"
           data-testid="radar-status-tooltip"
           onClick={() => setInspectedStatusInfo(null)}
-          className={`absolute bottom-2.5 left-1/2 -translate-x-1/2 z-30 max-w-[92%] rounded-lg border px-2.5 py-1.5 text-[12px] font-semibold font-mono-nums shadow-lg inline-flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+          className={`absolute bottom-2.5 left-1/2 -translate-x-1/2 z-30 max-w-[92%] rounded-lg border px-3 py-1.5 text-[12px] font-semibold font-mono-nums shadow-lg whitespace-nowrap truncate cursor-pointer ${
             inspectedStatusInfo.isDebuff
               ? 'border-red-500/70 bg-[#1a0a0d]/95 text-red-100'
               : 'border-emerald-500/70 bg-[#071a10]/95 text-emerald-100'
           }`}
         >
-          <StatusChip
-            status={inspectedStatusInfo.status}
-            lang={lang}
-            unit={inspectedStatusInfo.unit}
-            badgeLayout={statusSettings.badgeLayout}
-            iconMods={iconMods}
-            size="sm"
-            showLabel={true}
-            allowStack={false}
-            stacks={1}
-          />
-          <span className="truncate">
-            {inspectedStatusInfo.unitName}: {inspectedStatusInfo.detailText}
-          </span>
+          <span>{inspectedStatusInfo.unitName}: </span>
+          <span>{inspectedStatusInfo.detailText}</span>
         </div>
       )}
 

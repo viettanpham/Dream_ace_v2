@@ -207,10 +207,6 @@ export function filterAndSortInventory(
   const dir = filter.sortDir === 'asc' ? 1 : -1;
 
   enriched.sort((a, b) => {
-    if (a.usableBySelected !== b.usableBySelected) {
-      return a.usableBySelected ? -1 : 1;
-    }
-
     if (filter.pinEquippedFirst) {
       const pinA = a.equippedOnSelected ? 2 : a.equippedBy ? 1 : 0;
       const pinB = b.equippedOnSelected ? 2 : b.equippedBy ? 1 : 0;

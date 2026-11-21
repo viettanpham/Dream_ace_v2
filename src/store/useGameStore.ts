@@ -1,13 +1,11 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { BALANCE_CONFIG, getGarageUnlockCost } from '../data/balance';
-import { sanitizeAutoEquipConfig } from '../data/autoEquipConfig';
 import { EMPTY_STAT_BLOCK, MECH_CLASS_LIST } from '../data/classes';
 import { EQUIPMENT_SLOTS } from '../data/items';
 import { getNextSectorId, SECTORS_CATALOG } from '../data/maps';
 import { WINGMAN_CHAT_KEYS } from '../data/pilots';
 import { SHOP_STOCK_CONFIG } from '../data/shopConfig';
-import { sanitizeStarterSetConfig } from '../data/starterConfig';
 import { getSkillById, OPENING_CARDS_LIST } from '../data/skills';
 import {
   calculateBattleRewards,
@@ -19,11 +17,6 @@ import {
   resolveUnitAction,
   sortTurnOrder,
 } from '../engine/combat';
-import {
-  applyAutoEquipPlan,
-  buildAutoEquipPlan,
-  undoAutoEquipSnapshot,
-} from '../engine/autoEquip';
 import {
   equipItemOnGear,
   generateItemInstance,
@@ -61,13 +54,7 @@ import {
   createFreshCampaignState,
   CURRENT_SAVE_VERSION,
   migrateSaveData,
-  type PersistedCampaignState,
 } from '../engine/migration';
-import {
-  isValidSavePayloadShape,
-  SAVE_IMPORT_BACKUP_STORAGE_KEY,
-  validateImportSaveVersion,
-} from '../engine/saveExport';
 import { DEFAULT_QUICK_SELL_CONFIG } from '../engine/quickSell';
 import {
   buildShopOptionsFromState,
@@ -82,11 +69,6 @@ import {
   learnOrUpgradeSkillOnGear,
   unequipSkillFromGearBar,
 } from '../engine/skills';
-import { sanitizeStatusDisplayDefaults } from '../utils/statusDisplayPrefs';
-import {
-  fillEmptyStarterSlotsForPilot,
-  grantStarterSetToGear,
-} from '../engine/starter';
 import {
   allocateGearStats,
   applyExpToGear,
@@ -108,8 +90,6 @@ import {
 import type {
   ActionType,
   AdminConfig,
-  AutoEquipPlan,
-  AutoEquipUndoSnapshot,
   AutoRepeatLimit,
   AutoRepeatRunToast,
   AutoRepeatSession,
@@ -177,87 +157,6 @@ function writePersistedAdminUnlock(enabled: boolean): void {
   }
 }
 
-let inMemoryImportBackupJson: string | null = null;
-
-function getSafeLocalStorage(): Storage | null {
-  try {
-    if (typeof globalThis !== 'undefined' && 'localStorage' in globalThis && globalThis.localStorage) {
-      return globalThis.localStorage;
-    }
-    if (typeof window !== 'undefined' && window.localStorage) {
-      return window.localStorage;
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-
-function readImportBackupRaw(): string | null {
-  const storage = getSafeLocalStorage();
-  if (storage) {
-    try {
-      return storage.getItem(SAVE_IMPORT_BACKUP_STORAGE_KEY);
-    } catch {
-      return inMemoryImportBackupJson;
-    }
-  }
-  return inMemoryImportBackupJson;
-}
-
-function writeImportBackupRaw(raw: string): void {
-  inMemoryImportBackupJson = raw;
-  const storage = getSafeLocalStorage();
-  if (storage) {
-    try {
-      storage.setItem(SAVE_IMPORT_BACKUP_STORAGE_KEY, raw);
-    } catch {
-      // Fall back to in-memory backup if storage quota/availability fails
-    }
-  }
-}
-
-function clearImportBackupRaw(): void {
-  inMemoryImportBackupJson = null;
-  const storage = getSafeLocalStorage();
-  if (storage) {
-    try {
-      storage.removeItem(SAVE_IMPORT_BACKUP_STORAGE_KEY);
-    } catch {
-      // Ignore storage failures
-    }
-  }
-}
-
-function hasPersistedImportBackup(): boolean {
-  const raw = readImportBackupRaw();
-  return typeof raw === 'string' && raw.length > 0;
-}
-
-export type SaveSnapshotPayload = PersistedCampaignState & {
-  autoRepeatStopOnDefeat: boolean;
-};
-
-function buildSaveSnapshotFromState(state: GameStoreState): SaveSnapshotPayload {
-  return {
-    pilot: state.pilot,
-    shopStock: state.shopStock,
-    wpMarketOffers: state.wpMarketOffers,
-    battlesUntilRestock: state.battlesUntilRestock,
-    inventoryFilterState: state.inventoryFilterState,
-    quickSellConfig: state.quickSellConfig,
-    selectedSectorId: state.selectedSectorId,
-    hasSaveData: state.hasSaveData,
-    muted: state.muted,
-    battleSpeed: state.battleSpeed,
-    skipAnimations: state.skipAnimations,
-    battleViewMode: state.battleViewMode,
-    language: state.language,
-    autoRepeatStopOnDefeat: state.autoRepeatStopOnDefeat,
-    adminConfig: state.adminConfig,
-  };
-}
-
 export type ShopSubTab = 'buy' | 'sell' | 'warpoints';
 
 interface GameStoreState {
@@ -291,8 +190,6 @@ interface GameStoreState {
   autoRepeatSession: AutoRepeatSession | null;
   autoRepeatToast: AutoRepeatRunToast | null;
   quickSellUndo: QuickSellUndoState | null;
-  autoEquipUndo: AutoEquipUndoSnapshot | null;
-  hasImportBackup: boolean;
 
   // Language
   setLanguage: (lang: Language) => void;
@@ -384,15 +281,6 @@ interface GameStoreState {
   };
   undoQuickSell: () => { ok: boolean; restoredCount: number };
   clearQuickSellUndo: () => void;
-  previewAutoEquip: (
-    mode: 'single' | 'all',
-    targetGearId?: MechClassId
-  ) => AutoEquipPlan;
-  applyAutoEquip: (
-    plan: AutoEquipPlan
-  ) => { ok: boolean; changedSlotsCount: number };
-  undoAutoEquip: () => { ok: boolean; restoredGearsCount: number };
-  clearAutoEquipUndo: () => void;
   equipItem: (instanceId: string) => EquipValidationResult;
   unequipSlot: (slot: EquipmentSlot) => void;
   unequipInstanceEverywhere: (instanceId: string) => void;
@@ -473,24 +361,9 @@ interface GameStoreState {
   adminTriggerEnemyAttack: (sectorId: string) => void;
   adminUnlockAllGears: () => void;
   adminUnlockAllSectors: () => void;
-  adminApplyStarterToEmptySlots: () => number;
   adminUpdateConfig: (patch: Partial<AdminConfig>) => void;
   adminExportSaveJson: () => string;
   adminImportSaveJson: (rawJson: string) => { ok: boolean; error?: string };
-
-  // Portable Save Export / Import with One-Time Backup Undo (SV1a)
-  exportSaveStateSnapshot: () => SaveSnapshotPayload;
-  importSaveFromEnvelope: (
-    rawState: unknown,
-    saveVersion: number
-  ) =>
-    | { ok: true; migratedVersion: number }
-    | {
-        ok: false;
-        code: 'BATTLE_ACTIVE' | 'VERSION_TOO_NEW' | 'CORRUPT';
-        error: string;
-      };
-  undoSaveImport: () => { ok: boolean; error?: string };
 }
 
 function findNextAliveTurnIndex(
@@ -791,15 +664,6 @@ function finalizeBattleOutcome(
 
 const initialFresh = createFreshCampaignState('Vance', 'striker');
 
-export function isBattleActive(
-  state?: Pick<GameStoreState, 'screen' | 'battle'>
-): boolean {
-  const target = state ?? useGameStore.getState();
-  return (
-    target.screen === 'BATTLE' && Boolean(target.battle && !target.battle.summary)
-  );
-}
-
 export const useGameStore = create<GameStoreState>()(
   persist(
     (set, get) => ({
@@ -817,8 +681,6 @@ export const useGameStore = create<GameStoreState>()(
       autoRepeatSession: null,
       autoRepeatToast: null,
       quickSellUndo: null,
-      autoEquipUndo: null,
-      hasImportBackup: hasPersistedImportBackup(),
 
       setLanguage: (language) => {
         soundFx.playClick();
@@ -857,12 +719,7 @@ export const useGameStore = create<GameStoreState>()(
             (pilotName ?? state.pilot.name).trim().slice(0, 18) || 'Vance';
           const chosenClass =
             starterClassId ?? state.pilot.activeGearId ?? 'striker';
-          const fresh = createFreshCampaignState(
-            cleanName,
-            chosenClass,
-            Math.random,
-            state.adminConfig.starterSet
-          );
+          const fresh = createFreshCampaignState(cleanName, chosenClass);
           set({
             ...fresh,
             language: state.language,
@@ -889,7 +746,6 @@ export const useGameStore = create<GameStoreState>()(
       resetCampaign: () => {
         const state = get();
         soundFx.playClick();
-        clearImportBackupRaw();
         const fresh = createFreshCampaignState('Vance', 'striker');
         set({
           ...fresh,
@@ -907,9 +763,6 @@ export const useGameStore = create<GameStoreState>()(
           autoRepeatSession: null,
           autoRepeatToast: null,
           autoRepeatStopOnDefeat: true,
-          quickSellUndo: null,
-          autoEquipUndo: null,
-          hasImportBackup: false,
         });
       },
 
@@ -988,27 +841,20 @@ export const useGameStore = create<GameStoreState>()(
           ? enforceFormationCapacities(baseFormation, state.adminConfig.formation)
           : autoPlaceFormation(baseFormation, state.adminConfig.formation);
 
-        const unlockedPilot: PilotAccount = {
-          ...state.pilot,
-          credits: state.pilot.credits - cost,
-          activeGearId: classId,
-          squadFormation: nextFormation,
-          gears: {
-            ...state.pilot.gears,
-            [classId]: {
-              ...targetGear,
-              owned: true,
+        set({
+          pilot: {
+            ...state.pilot,
+            credits: state.pilot.credits - cost,
+            activeGearId: classId,
+            squadFormation: nextFormation,
+            gears: {
+              ...state.pilot.gears,
+              [classId]: {
+                ...targetGear,
+                owned: true,
+              },
             },
           },
-        };
-        const withStarter = grantStarterSetToGear(
-          unlockedPilot,
-          classId,
-          state.adminConfig.starterSet
-        ).pilot;
-
-        set({
-          pilot: withStarter,
           hasSaveData: true,
         });
         return { ok: true, cost };
@@ -1706,55 +1552,6 @@ export const useGameStore = create<GameStoreState>()(
       },
 
       clearQuickSellUndo: () => set({ quickSellUndo: null }),
-
-      previewAutoEquip: (mode, targetGearId) => {
-        const state = get();
-        const config = sanitizeAutoEquipConfig(state.adminConfig.autoEquip);
-        return buildAutoEquipPlan(state.pilot, {
-          mode,
-          targetGearId: targetGearId ?? state.pilot.activeGearId,
-          config,
-        });
-      },
-
-      applyAutoEquip: (plan) => {
-        const state = get();
-        if (!plan || plan.totalChangedSlots <= 0) {
-          return { ok: false, changedSlotsCount: 0 };
-        }
-        const { pilot: nextPilot, undoSnapshot } = applyAutoEquipPlan(
-          state.pilot,
-          plan
-        );
-        soundFx.playConfirm();
-        set({
-          pilot: nextPilot,
-          autoEquipUndo: undoSnapshot,
-          hasSaveData: true,
-        });
-        return { ok: true, changedSlotsCount: undoSnapshot.changedSlotsCount };
-      },
-
-      undoAutoEquip: () => {
-        const state = get();
-        const snapshot = state.autoEquipUndo;
-        if (!snapshot) {
-          return { ok: false, restoredGearsCount: 0 };
-        }
-        const nextPilot = undoAutoEquipSnapshot(state.pilot, snapshot);
-        soundFx.playClick();
-        set({
-          pilot: nextPilot,
-          autoEquipUndo: null,
-          hasSaveData: true,
-        });
-        return {
-          ok: true,
-          restoredGearsCount: Object.keys(snapshot.previousEquippedByGear).length,
-        };
-      },
-
-      clearAutoEquipUndo: () => set({ autoEquipUndo: null }),
 
       equipItem: (instanceId) => {
         const state = get();
@@ -3339,26 +3136,11 @@ export const useGameStore = create<GameStoreState>()(
       adminUnlockAllGears: () => {
         set((state) => {
           const nextGears = { ...state.pilot.gears };
-          const newlyUnlocked: MechClassId[] = [];
           for (const cls of MECH_CLASS_LIST) {
-            if (!nextGears[cls.id].owned) {
-              newlyUnlocked.push(cls.id);
-            }
             nextGears[cls.id] = { ...nextGears[cls.id], owned: true };
           }
-          let nextPilot: PilotAccount = {
-            ...state.pilot,
-            gears: nextGears,
-          };
-          for (const clsId of newlyUnlocked) {
-            nextPilot = grantStarterSetToGear(
-              nextPilot,
-              clsId,
-              state.adminConfig.starterSet
-            ).pilot;
-          }
           return {
-            pilot: nextPilot,
+            pilot: { ...state.pilot, gears: nextGears },
             hasSaveData: true,
           };
         });
@@ -3374,50 +3156,17 @@ export const useGameStore = create<GameStoreState>()(
         }));
       },
 
-      adminApplyStarterToEmptySlots: () => {
-        let filledCount = 0;
-        set((state) => {
-          const starterCfg = sanitizeStarterSetConfig(state.adminConfig.starterSet);
-          if (!starterCfg.enabled) {
-            return {};
-          }
-          const res = fillEmptyStarterSlotsForPilot(state.pilot, starterCfg);
-          filledCount = res.filledCount;
-          if (res.filledCount === 0) return {};
-          return {
-            pilot: res.pilot,
-            hasSaveData: true,
-          };
-        });
-        return filledCount;
-      },
-
       adminUpdateConfig: (patch) => {
         set((state) => {
           const nextFormation = patch.formation
             ? sanitizeFormationConfig(patch.formation)
             : state.adminConfig.formation;
-          const nextAutoEquip = patch.autoEquip
-            ? sanitizeAutoEquipConfig(patch.autoEquip)
-            : sanitizeAutoEquipConfig(state.adminConfig.autoEquip);
-          const nextStarterSet = patch.starterSet
-            ? sanitizeStarterSetConfig(patch.starterSet)
-            : sanitizeStarterSetConfig(state.adminConfig.starterSet);
-          const nextStatusDefaults =
-            patch.statusDisplayDefaults !== undefined
-              ? sanitizeStatusDisplayDefaults(patch.statusDisplayDefaults)
-              : sanitizeStatusDisplayDefaults(
-                  state.adminConfig.statusDisplayDefaults
-                );
           const nextAdminConfig: AdminConfig = {
             ...state.adminConfig,
             ...patch,
             formation: nextFormation,
-            autoEquip: nextAutoEquip,
-            starterSet: nextStarterSet,
-            statusDisplayDefaults: nextStatusDefaults,
           };
-          let updatedPilot =
+          const updatedPilot =
             patch.formation &&
             state.pilot.squadFormation &&
             state.pilot.squadFormation.length > 0
@@ -3429,16 +3178,6 @@ export const useGameStore = create<GameStoreState>()(
                   ),
                 }
               : state.pilot;
-          if (
-            patch.starterSet &&
-            nextStarterSet.enabled &&
-            nextStarterSet.boostScope === 'fill_empty_slots'
-          ) {
-            updatedPilot = fillEmptyStarterSlotsForPilot(
-              updatedPilot,
-              nextStarterSet
-            ).pilot;
-          }
           return {
             adminConfig: nextAdminConfig,
             pilot: updatedPilot,
@@ -3491,143 +3230,6 @@ export const useGameStore = create<GameStoreState>()(
           });
           return { ok: true };
         } catch (err) {
-          return {
-            ok: false,
-            error: err instanceof Error ? err.message : String(err),
-          };
-        }
-      },
-
-      exportSaveStateSnapshot: () => {
-        return buildSaveSnapshotFromState(get());
-      },
-
-      importSaveFromEnvelope: (rawState, saveVersion) => {
-        const state = get();
-        if (isBattleActive(state)) {
-          return {
-            ok: false,
-            code: 'BATTLE_ACTIVE',
-            error: 'Cannot import save while a battle is active.',
-          };
-        }
-
-        const verCheck = validateImportSaveVersion(
-          saveVersion,
-          CURRENT_SAVE_VERSION
-        );
-        if (!verCheck.ok) {
-          return {
-            ok: false,
-            code: 'VERSION_TOO_NEW',
-            error: verCheck.error.message,
-          };
-        }
-
-        if (!isValidSavePayloadShape(rawState, saveVersion)) {
-          return {
-            ok: false,
-            code: 'CORRUPT',
-            error: 'Imported save payload is missing pilot data.',
-          };
-        }
-
-        const migrated = migrateSaveData(rawState, saveVersion);
-        const rawObj = rawState as Record<string, unknown>;
-        const importedAutoRepeatStopOnDefeat =
-          typeof rawObj.autoRepeatStopOnDefeat === 'boolean'
-            ? rawObj.autoRepeatStopOnDefeat
-            : state.autoRepeatStopOnDefeat;
-
-        // Store a one-time backup of the current save under a separate localStorage key before overwriting
-        const currentBackup = {
-          version: CURRENT_SAVE_VERSION,
-          backedUpAt: new Date().toISOString(),
-          state: buildSaveSnapshotFromState(state),
-        };
-        writeImportBackupRaw(JSON.stringify(currentBackup));
-
-        soundFx.setMuted(migrated.muted);
-        set({
-          ...migrated,
-          autoRepeatStopOnDefeat: importedAutoRepeatStopOnDefeat,
-          battle: null,
-          screen: migrated.hasSaveData ? 'HANGAR' : 'TITLE',
-          activeTab: 'gear',
-          shopSubTab: 'buy',
-          autoBattleEnabled: false,
-          autoRepeatSession: null,
-          autoRepeatToast: null,
-          quickSellUndo: null,
-          autoEquipUndo: null,
-          tacticsModalOpen: false,
-          adminPanelOpen: false,
-          hasImportBackup: true,
-        });
-
-        return { ok: true, migratedVersion: saveVersion };
-      },
-
-      undoSaveImport: () => {
-        const state = get();
-        if (isBattleActive(state)) {
-          return {
-            ok: false,
-            error: 'Cannot undo import while a battle is active.',
-          };
-        }
-
-        const rawBackup = readImportBackupRaw();
-        if (!rawBackup) {
-          set({ hasImportBackup: false });
-          return { ok: false, error: 'No import backup available.' };
-        }
-
-        try {
-          const parsed = JSON.parse(rawBackup) as {
-            version?: number;
-            state?: unknown;
-          };
-          const backupVersion =
-            typeof parsed.version === 'number'
-              ? parsed.version
-              : CURRENT_SAVE_VERSION;
-          const backupPayload = parsed.state ?? parsed;
-          if (!isValidSavePayloadShape(backupPayload, backupVersion)) {
-            clearImportBackupRaw();
-            set({ hasImportBackup: false });
-            return { ok: false, error: 'Backup data is invalid.' };
-          }
-
-          const restored = migrateSaveData(backupPayload, backupVersion);
-          const rawObj = backupPayload as Record<string, unknown>;
-          const restoredAutoRepeatStopOnDefeat =
-            typeof rawObj.autoRepeatStopOnDefeat === 'boolean'
-              ? rawObj.autoRepeatStopOnDefeat
-              : state.autoRepeatStopOnDefeat;
-
-          clearImportBackupRaw();
-          soundFx.setMuted(restored.muted);
-          set({
-            ...restored,
-            autoRepeatStopOnDefeat: restoredAutoRepeatStopOnDefeat,
-            battle: null,
-            screen: restored.hasSaveData ? 'HANGAR' : 'TITLE',
-            activeTab: 'gear',
-            shopSubTab: 'buy',
-            autoBattleEnabled: false,
-            autoRepeatSession: null,
-            autoRepeatToast: null,
-            quickSellUndo: null,
-            autoEquipUndo: null,
-            tacticsModalOpen: false,
-            adminPanelOpen: false,
-            hasImportBackup: false,
-          });
-          return { ok: true };
-        } catch (err) {
-          clearImportBackupRaw();
-          set({ hasImportBackup: false });
           return {
             ok: false,
             error: err instanceof Error ? err.message : String(err),
@@ -3697,11 +3299,6 @@ export const useGameStore = create<GameStoreState>()(
               ...createDefaultAdminConfig(),
               ...state.adminConfig,
               formation: sanitizedFormation,
-              autoEquip: sanitizeAutoEquipConfig(rawAdmin.autoEquip),
-              starterSet: sanitizeStarterSetConfig(rawAdmin.starterSet),
-              statusDisplayDefaults: sanitizeStatusDisplayDefaults(
-                rawAdmin.statusDisplayDefaults
-              ),
               rewardMultiplier:
                 typeof state.adminConfig.rewardMultiplier === 'number' &&
                 Number.isFinite(state.adminConfig.rewardMultiplier) &&
@@ -3777,10 +3374,8 @@ export const useGameStore = create<GameStoreState>()(
           state.adminPanelOpen = false;
           state.tacticsModalOpen = false;
           state.quickSellUndo = null;
-          state.autoEquipUndo = null;
-          state.hasImportBackup = hasPersistedImportBackup();
           state.adminUnlocked = readPersistedAdminUnlock();
-          state.muted = typeof state.muted === 'boolean' ? state.muted : true;
+          state.muted = Boolean(state.muted);
           state.skipAnimations = Boolean(state.skipAnimations);
           if (typeof state.autoRepeatStopOnDefeat !== 'boolean') {
             state.autoRepeatStopOnDefeat = true;

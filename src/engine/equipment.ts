@@ -2,7 +2,6 @@ import { BALANCE_CONFIG } from '../data/balance';
 import { EMPTY_STAT_BLOCK, MECH_CLASS_LIST, STAT_KEYS } from '../data/classes';
 import {
   AFFIX_SUFFIX_BY_STAT,
-  BUILTIN_ITEM_REGISTRY_TAG,
   DROP_CONFIG,
   EMPTY_EQUIPPED_SLOT_IDS,
   ENCHANT_CONFIG,
@@ -51,11 +50,6 @@ export interface GenerateItemOptions {
   classRestriction?: MechClassId | null;
   enchantLevel?: number;
   rollQuality?: number; // optional fixed 1..100% quality roll
-  statScale?: number; // optional stat multiplier (e.g. lower stats for Starter items)
-  statPowerLevel?: number; // optional level used for stat scaling independent of requiredLevel
-  priceOverride?: number; // optional explicit price (bypasses min 60 CR floor)
-  isStarter?: boolean;
-  registryTag?: string;
   isNew?: boolean;
   obtainedAt?: number;
 }
@@ -109,12 +103,8 @@ export function generateItemInstance(
     options.requiredLevel ??
       Math.max(template.requiredLevel, (tier - 1) * 3 + 1)
   );
-  const scalingLevel = Math.max(1, options.statPowerLevel ?? requiredLevel);
-  const levelFactor =
-    1 + Math.max(0, scalingLevel - template.requiredLevel) * 0.045;
-  const statScale = Math.max(0.1, options.statScale ?? 1);
-  const totalBaseMult =
-    relativeTierFactor * rarityStatMult * levelFactor * statScale;
+  const levelFactor = 1 + Math.max(0, requiredLevel - template.requiredLevel) * 0.045;
+  const totalBaseMult = relativeTierFactor * rarityStatMult * levelFactor;
 
   const qualitySamples: number[] = [];
   const rolledBaseStats: Partial<StatBlock> = {};
@@ -196,18 +186,12 @@ export function generateItemInstance(
     (BALANCE_CONFIG.tierPriceScale[template.tier - 1] ?? 1);
   const rarityPriceMult = BALANCE_CONFIG.rarityPriceMultiplier[rarity];
   const qualityPriceMult = 0.88 + (rollQuality / 100) * 0.28;
-  const price =
-    options.priceOverride !== undefined
-      ? Math.max(1, Math.round(options.priceOverride))
-      : Math.max(
-          60,
-          Math.round(
-            template.basePrice *
-              tierPriceMult *
-              rarityPriceMult *
-              qualityPriceMult
-          )
-        );
+  const price = Math.max(
+    60,
+    Math.round(
+      template.basePrice * tierPriceMult * rarityPriceMult * qualityPriceMult
+    )
+  );
 
   itemUidSeq += 1;
   return {
@@ -229,12 +213,7 @@ export function generateItemInstance(
       0,
       Math.min(ENCHANT_CONFIG.maxLevel, options.enchantLevel ?? 0)
     ),
-    specialTraits: template.specialTraits
-      ? { ...template.specialTraits }
-      : undefined,
-    registryTag:
-      options.registryTag ?? template.registryTag ?? BUILTIN_ITEM_REGISTRY_TAG,
-    ...(options.isStarter ? { isStarter: true } : {}),
+    specialTraits: template.specialTraits ? { ...template.specialTraits } : undefined,
     isNew: options.isNew ?? false,
     obtainedAt: options.obtainedAt ?? Date.now(),
   };

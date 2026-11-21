@@ -1,7 +1,6 @@
 import { BALANCE_CONFIG } from '../data/balance';
 import { EMPTY_STAT_BLOCK, MECH_CLASS_LIST } from '../data/classes';
 import {
-  BUILTIN_ITEM_REGISTRY_TAG,
   EMPTY_EQUIPPED_SLOT_IDS,
   EQUIPMENT_SLOTS,
   getItemTemplate,
@@ -34,20 +33,9 @@ import type {
   PilotAccount,
   QuickSellFilterConfig,
   ShopItemListing,
-  StarterSetConfig,
   WpMarketOffer,
 } from '../types/game';
-import {
-  cloneAutoEquipConfig,
-  DEFAULT_AUTO_EQUIP_CONFIG,
-  sanitizeAutoEquipConfig,
-} from '../data/autoEquipConfig';
 import { cloneFormationConfig, DEFAULT_FORMATION_CONFIG } from '../data/formationConfig';
-import {
-  cloneStarterSetConfig,
-  DEFAULT_STARTER_SET_CONFIG,
-  sanitizeStarterSetConfig,
-} from '../data/starterConfig';
 import { generateItemInstance } from './equipment';
 import {
   createDefaultSquadFormation,
@@ -63,15 +51,10 @@ import {
   hasOperationalShipyard,
 } from './shop';
 import { isSkillAllowedForClass, MAX_ACTIVE_SKILL_BAR } from './skills';
-import {
-  fillEmptyStarterSlotsForPilot,
-  grantStarterSetToGear,
-} from './starter';
 import { createDefaultGearUnit, createDefaultPilotAccount } from './stats';
 import { createDefaultTacticsForClass, sanitizeGearTactics } from './tactics';
-import { sanitizeStatusDisplayDefaults } from '../utils/statusDisplayPrefs';
 
-export const CURRENT_SAVE_VERSION = 9;
+export const CURRENT_SAVE_VERSION = 8;
 
 export interface PersistedCampaignState {
   pilot: PilotAccount;
@@ -117,9 +100,6 @@ export function createDefaultAdminConfig(): AdminConfig {
     shopRarityWeights: { ...DEFAULT_ADMIN_SHOP_RARITY_WEIGHTS },
     shopPriceMultiplier: 1.0,
     formation: cloneFormationConfig(DEFAULT_FORMATION_CONFIG),
-    autoEquip: cloneAutoEquipConfig(DEFAULT_AUTO_EQUIP_CONFIG),
-    starterSet: cloneStarterSetConfig(DEFAULT_STARTER_SET_CONFIG),
-    iconCatalogMods: [],
     showRawI18nKeys: false,
   };
 }
@@ -127,25 +107,24 @@ export function createDefaultAdminConfig(): AdminConfig {
 export function createFreshCampaignState(
   name = 'Vance',
   starterClassId: MechClassId = 'striker',
-  rng: () => number = Math.random,
-  starterConfig?: StarterSetConfig
+  rng: () => number = Math.random
 ): PersistedCampaignState {
-  const adminConfig = createDefaultAdminConfig();
-  if (starterConfig) {
-    adminConfig.starterSet = sanitizeStarterSetConfig(starterConfig);
-  }
-  const basePilot: PilotAccount = {
-    ...createDefaultPilotAccount(name, starterClassId, []),
+  const starterWeapon = generateItemInstance(
+    {
+      templateId: 'tpl_mw_pulse_cannon',
+      tier: 1,
+      rarity: 'common',
+      requiredLevel: 1,
+    },
+    rng
+  );
+  const pilot: PilotAccount = {
+    ...createDefaultPilotAccount(name, starterClassId, [starterWeapon]),
     consumables: [],
     activeExpBoostBattles: 0,
     activeEnchantBonusPct: 0,
   };
-  const { pilot } = grantStarterSetToGear(
-    basePilot,
-    starterClassId,
-    adminConfig.starterSet ?? DEFAULT_STARTER_SET_CONFIG,
-    rng
-  );
+  const adminConfig = createDefaultAdminConfig();
   return {
     pilot,
     shopStock: generateCategorizedShopStock(
@@ -162,7 +141,7 @@ export function createFreshCampaignState(
     quickSellConfig: { ...DEFAULT_QUICK_SELL_CONFIG },
     selectedSectorId: SECTORS_CATALOG[0].id,
     hasSaveData: false,
-    muted: true,
+    muted: false,
     battleSpeed: 1,
     skipAnimations: false,
     battleViewMode: null,
@@ -248,7 +227,6 @@ function convertLegacyItemInstance(
     typeof obj.rolledBaseStats === 'object'
   ) {
     const tpl = getItemTemplate(obj.templateId)!;
-    const isStarter = Boolean(obj.isStarter);
     return {
       instanceId: obj.instanceId,
       templateId: tpl.id,
@@ -267,19 +245,12 @@ function convertLegacyItemInstance(
       affixes: Array.isArray(obj.affixes) ? obj.affixes : [],
       suffixId: typeof obj.suffixId === 'string' ? obj.suffixId : null,
       rollQuality: Math.max(1, Math.min(100, Number(obj.rollQuality) || 50)),
-      price: isStarter
-        ? Math.max(1, Number(obj.price) || 12)
-        : Math.max(60, Number(obj.price) || tpl.basePrice),
+      price: Math.max(60, Number(obj.price) || tpl.basePrice),
       enchantLevel: Math.max(
         0,
         Math.min(BALANCE_CONFIG.enchantMaxLevel, Number(obj.enchantLevel) || 0)
       ),
       specialTraits: tpl.specialTraits ? { ...tpl.specialTraits } : undefined,
-      isStarter,
-      registryTag:
-        typeof obj.registryTag === 'string' && obj.registryTag.trim().length > 0
-          ? obj.registryTag
-          : (tpl.registryTag ?? BUILTIN_ITEM_REGISTRY_TAG),
       locked: Boolean(obj.locked),
       favorited: Boolean(obj.favorited),
       isNew: Boolean(obj.isNew),
@@ -337,7 +308,7 @@ export function migrateSaveData(
     raw.battleViewMode === 'card' || raw.battleViewMode === 'radar'
       ? raw.battleViewMode
       : null;
-  const muted = typeof raw.muted === 'boolean' ? raw.muted : true;
+  const muted = Boolean(raw.muted);
   const hasSaveData = Boolean(raw.hasSaveData);
   const selectedSectorId =
     typeof raw.selectedSectorId === 'string' &&
@@ -404,14 +375,6 @@ export function migrateSaveData(
         ? rawAdmin.shopPriceMultiplier
         : 1.0,
     formation: sanitizeFormationConfig(rawAdmin as Record<string, unknown>),
-    autoEquip: sanitizeAutoEquipConfig(rawAdmin.autoEquip),
-    starterSet: sanitizeStarterSetConfig(rawAdmin.starterSet),
-    iconCatalogMods: Array.isArray(rawAdmin.iconCatalogMods)
-      ? rawAdmin.iconCatalogMods
-      : [],
-    statusDisplayDefaults: sanitizeStatusDisplayDefaults(
-      rawAdmin.statusDisplayDefaults
-    ),
     showRawI18nKeys: Boolean(rawAdmin.showRawI18nKeys),
   };
 
@@ -650,15 +613,6 @@ export function migrateSaveData(
       formationCustomized,
     };
 
-    const finalMigratedPilot =
-      version < CURRENT_SAVE_VERSION && adminConfig.starterSet?.enabled
-        ? fillEmptyStarterSlotsForPilot(
-            migratedPilot,
-            adminConfig.starterSet,
-            rng
-          ).pilot
-        : migratedPilot;
-
     const rawWpOffers: WpMarketOffer[] = Array.isArray(raw.wpMarketOffers)
       ? (raw.wpMarketOffers as WpMarketOffer[]).filter(
           (o) => Boolean(o && typeof o === 'object' && typeof o.id === 'string')
@@ -668,20 +622,20 @@ export function migrateSaveData(
     const hasAvailableShopStock = rawShop.some((it) => !it.soldOut);
 
     return {
-      pilot: finalMigratedPilot,
+      pilot: migratedPilot,
       shopStock:
         rawShop.length > 0 && hasAvailableShopStock
           ? rawShop
           : generateCategorizedShopStock(
               activeGearLevel,
-              buildShopOptionsFromState(finalMigratedPilot, adminConfig),
+              buildShopOptionsFromState(migratedPilot, adminConfig),
               rng
             ),
       wpMarketOffers:
         rawWpOffers.length > 0
           ? rawWpOffers
           : generateWpMarketOffers(
-              { shipyardBonus: hasOperationalShipyard(finalMigratedPilot) },
+              { shipyardBonus: hasOperationalShipyard(migratedPilot) },
               rng
             ),
       battlesUntilRestock,
@@ -819,24 +773,15 @@ export function migrateSaveData(
     formationCustomized: false,
   };
 
-  const finalLegacyPilot =
-    version < CURRENT_SAVE_VERSION && adminConfig.starterSet?.enabled
-      ? fillEmptyStarterSlotsForPilot(
-          legacyPilot,
-          adminConfig.starterSet,
-          rng
-        ).pilot
-      : legacyPilot;
-
   return {
-    pilot: finalLegacyPilot,
+    pilot: legacyPilot,
     shopStock: generateCategorizedShopStock(
       migratedLevel,
-      buildShopOptionsFromState(finalLegacyPilot, adminConfig),
+      buildShopOptionsFromState(legacyPilot, adminConfig),
       rng
     ),
     wpMarketOffers: generateWpMarketOffers(
-      { shipyardBonus: hasOperationalShipyard(finalLegacyPilot) },
+      { shipyardBonus: hasOperationalShipyard(legacyPilot) },
       rng
     ),
     battlesUntilRestock,

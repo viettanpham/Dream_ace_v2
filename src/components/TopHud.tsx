@@ -22,10 +22,8 @@ import {
   useBattleLayoutMode,
 } from '../utils/battleDisplay';
 import { BottomSheet } from './BottomSheet';
-import { CloudSaveSection } from './CloudSaveSection';
 import { EffectsSettingsPanel } from './EffectsSettingsPanel';
 import { LanguageToggle } from './LanguageToggle';
-import { SaveTransferSection } from './SaveTransferSection';
 import { StatBar } from './StatBar';
 
 type LeaveDestination = 'TITLE' | 'HANGAR';
@@ -441,12 +439,6 @@ export function TopHud() {
           {/* Effects Settings (Full/Compact/Off, Reduced Motion, Status Labels, Debug & Test Preview) */}
           <EffectsSettingsPanel />
 
-          {/* Cloud Save (PIN-encrypted cross-device sync) */}
-          <CloudSaveSection />
-
-          {/* Portable Save Export / Import with Optional PIN */}
-          <SaveTransferSection />
-
           {/* Utility Buttons */}
           <div className="grid grid-cols-1 gap-2">
             <button
@@ -465,6 +457,21 @@ export function TopHud() {
                 </span>
               </span>
             </button>
+
+            {ENABLE_ADMIN_CP && (
+              <button
+                type="button"
+                data-testid="tophud-settings-admin-btn"
+                onClick={() => {
+                  setSettingsOpen(false);
+                  toggleAdminPanel();
+                }}
+                className="min-h-[44px] px-3.5 rounded-lg border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-200 text-[13px] font-semibold flex items-center gap-2.5 cursor-pointer"
+              >
+                <Sliders className="w-4 h-4 text-amber-400" />
+                <span>{t('admin.title')}</span>
+              </button>
+            )}
 
             {screen === 'BATTLE' && (
               <button
@@ -491,23 +498,6 @@ export function TopHud() {
               <Home className="w-4 h-4 text-slate-400" />
               <span>{t('app.title')}</span>
             </button>
-
-            {ENABLE_ADMIN_CP && (
-              <div className="pt-2 border-t border-slate-800/70">
-                <button
-                  type="button"
-                  data-testid="tophud-settings-admin-btn"
-                  onClick={() => {
-                    setSettingsOpen(false);
-                    toggleAdminPanel();
-                  }}
-                  className="w-full min-h-[38px] px-3 rounded-lg border border-slate-800/80 bg-slate-950/60 hover:bg-slate-900 text-slate-400 hover:text-slate-200 text-[12px] font-medium flex items-center justify-center gap-2 cursor-pointer transition-colors"
-                >
-                  <Sliders className="w-3.5 h-3.5 text-slate-500" />
-                  <span>{t('statusUi.adminBtnMuted')}</span>
-                </button>
-              </div>
-            )}
           </div>
         </div>
       </BottomSheet>

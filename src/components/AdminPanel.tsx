@@ -5,7 +5,6 @@ import {
   Copy,
   Download,
   Flag,
-  Layers,
   LayoutGrid,
   Package,
   RefreshCw,
@@ -31,10 +30,6 @@ import {
 import { EQUIPMENT_SLOTS, ITEM_TEMPLATES } from '../data/items';
 import { SECTORS_CATALOG } from '../data/maps';
 import {
-  cloneStarterSetConfig,
-  DEFAULT_STARTER_SET_CONFIG,
-} from '../data/starterConfig';
-import {
   getClassName,
   getRarityLabel,
   getSectorName,
@@ -56,17 +51,10 @@ import {
   type AppErrorLogEntry,
 } from '../utils/errorLog';
 import { ClassIcon, SlotIcon } from './GameIcons';
-import {
-  BUILTIN_STATUS_DISPLAY_DEFAULTS,
-  clampPlayerStatusRows,
-  clampStatusAreaRows,
-} from '../utils/statusDisplayPrefs';
-import type { StatusBadgeLayout, StatusDisplayDefaults } from '../types/game';
 
 type AdminTab =
   | 'pilot'
   | 'items'
-  | 'starter'
   | 'shop'
   | 'skills'
   | 'battle'
@@ -123,9 +111,6 @@ export function AdminPanel() {
   );
   const adminUnlockAllGears = useGameStore((s) => s.adminUnlockAllGears);
   const adminUnlockAllSectors = useGameStore((s) => s.adminUnlockAllSectors);
-  const adminApplyStarterToEmptySlots = useGameStore(
-    (s) => s.adminApplyStarterToEmptySlots
-  );
   const adminUpdateConfig = useGameStore((s) => s.adminUpdateConfig);
   const adminExportSaveJson = useGameStore((s) => s.adminExportSaveJson);
   const adminImportSaveJson = useGameStore((s) => s.adminImportSaveJson);
@@ -202,7 +187,6 @@ export function AdminPanel() {
   const tabs: Array<{ id: AdminTab; label: string; icon: typeof User }> = [
     { id: 'pilot', label: t('admin.tab.pilot'), icon: User },
     { id: 'items', label: t('admin.tab.items'), icon: Package },
-    { id: 'starter', label: t('admin.tab.starter'), icon: Layers },
     { id: 'shop', label: t('admin.tab.shop'), icon: ShoppingBag },
     { id: 'skills', label: t('admin.tab.skills'), icon: Sparkles },
     { id: 'battle', label: t('admin.tab.battle'), icon: Swords },
@@ -210,8 +194,6 @@ export function AdminPanel() {
     { id: 'formation', label: t('admin.tab.formation'), icon: LayoutGrid },
     { id: 'system', label: t('admin.tab.system'), icon: Wrench },
   ];
-
-  const starterCfg = adminConfig.starterSet ?? DEFAULT_STARTER_SET_CONFIG;
 
   const handleCopyExport = async () => {
     const json = adminExportSaveJson();
@@ -789,284 +771,6 @@ export function AdminPanel() {
             </div>
           )}
 
-          {/* 2B. STARTER SET TAB */}
-          {tab === 'starter' && (
-            <div className="space-y-4" data-testid="admin-starter-panel">
-              {/* Header + Global Enable + Reset */}
-              <div className="p-3.5 rounded-lg border border-slate-800 bg-[#0D1422] space-y-3">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold uppercase tracking-wider text-amber-300">
-                      {t('admin.starter.title')}
-                    </div>
-                    <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
-                      {t('admin.starter.subtitle')}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    data-testid="admin-starter-reset"
-                    onClick={() => {
-                      adminUpdateConfig({
-                        starterSet: cloneStarterSetConfig(
-                          DEFAULT_STARTER_SET_CONFIG
-                        ),
-                      });
-                      flash(t('admin.starter.resetBtn'));
-                    }}
-                    className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-xs font-semibold cursor-pointer shrink-0"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>{t('admin.starter.resetBtn')}</span>
-                  </button>
-                </div>
-
-                <label className="p-2.5 rounded border border-slate-800/90 bg-[#080C14] flex items-center justify-between gap-2 cursor-pointer">
-                  <span className="text-xs font-semibold text-slate-200">
-                    {t('admin.starter.enabledLabel')}
-                  </span>
-                  <input
-                    type="checkbox"
-                    data-testid="admin-starter-enabled"
-                    checked={starterCfg.enabled}
-                    onChange={(e) => {
-                      const next = cloneStarterSetConfig(starterCfg);
-                      next.enabled = e.target.checked;
-                      adminUpdateConfig({ starterSet: next });
-                    }}
-                    className="w-4 h-4 accent-amber-400"
-                  />
-                </label>
-              </div>
-
-              {/* Rookie Boost ("Hỗ trợ tân thủ") + Scope */}
-              <div className="p-3.5 rounded-lg border border-slate-800 bg-[#0D1422] space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <label className="space-y-1 block">
-                    <span className="text-xs font-semibold text-slate-200 block">
-                      {t('admin.starter.rookieBoostLabel')} (+
-                      {starterCfg.rookieBoostPct}%)
-                    </span>
-                    <input
-                      type="number"
-                      data-testid="admin-starter-boost-input"
-                      min={0}
-                      max={300}
-                      step={5}
-                      value={starterCfg.rookieBoostPct}
-                      onChange={(e) => {
-                        const val = Math.max(
-                          0,
-                          Math.min(300, Math.round(Number(e.target.value) || 0))
-                        );
-                        const next = cloneStarterSetConfig(starterCfg);
-                        next.rookieBoostPct = val;
-                        adminUpdateConfig({ starterSet: next });
-                      }}
-                      className="w-full h-9 px-2.5 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
-                    />
-                    <span className="text-[11px] text-slate-400 block leading-snug">
-                      {t('admin.starter.rookieBoostHint')}
-                    </span>
-                  </label>
-
-                  <div className="space-y-1.5">
-                    <div className="text-xs font-semibold text-slate-200">
-                      {t('admin.starter.boostScopeLabel')}
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="flex items-center gap-2 p-2 rounded border border-slate-800 bg-[#080C14] text-xs text-slate-200 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="starter-boost-scope"
-                          data-testid="admin-starter-scope-new"
-                          checked={starterCfg.boostScope === 'new_gears_only'}
-                          onChange={() => {
-                            const next = cloneStarterSetConfig(starterCfg);
-                            next.boostScope = 'new_gears_only';
-                            adminUpdateConfig({ starterSet: next });
-                          }}
-                          className="accent-amber-400"
-                        />
-                        <span>{t('admin.starter.scopeNewOnly')}</span>
-                      </label>
-                      <label className="flex items-center gap-2 p-2 rounded border border-slate-800 bg-[#080C14] text-xs text-slate-200 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="starter-boost-scope"
-                          data-testid="admin-starter-scope-fill"
-                          checked={starterCfg.boostScope === 'fill_empty_slots'}
-                          onChange={() => {
-                            const next = cloneStarterSetConfig(starterCfg);
-                            next.boostScope = 'fill_empty_slots';
-                            adminUpdateConfig({ starterSet: next });
-                          }}
-                          className="accent-amber-400"
-                        />
-                        <span>{t('admin.starter.scopeFillEmpty')}</span>
-                      </label>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                  <div className="flex items-center gap-1.5">
-                    {[0, 50, 100].map((pct) => (
-                      <button
-                        key={pct}
-                        type="button"
-                        data-testid={`admin-starter-boost-preset-${pct}`}
-                        onClick={() => {
-                          const next = cloneStarterSetConfig(starterCfg);
-                          next.rookieBoostPct = pct;
-                          adminUpdateConfig({ starterSet: next });
-                        }}
-                        className={`h-8 px-2.5 rounded border text-xs font-mono-nums font-semibold cursor-pointer ${
-                          starterCfg.rookieBoostPct === pct
-                            ? 'border-amber-400 bg-amber-500/20 text-amber-200'
-                            : 'border-slate-700 bg-slate-900 text-slate-300 hover:text-slate-100'
-                        }`}
-                      >
-                        +{pct}%
-                      </button>
-                    ))}
-                  </div>
-
-                  <button
-                    type="button"
-                    data-testid="admin-starter-apply-empty"
-                    disabled={!starterCfg.enabled}
-                    onClick={() => {
-                      const count = adminApplyStarterToEmptySlots();
-                      flash(
-                        count > 0
-                          ? t('admin.starter.appliedEmptyFeedback', { count })
-                          : t('admin.starter.noneEmptyFeedback')
-                      );
-                    }}
-                    className="h-9 px-3.5 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-40 text-slate-950 font-bold text-xs cursor-pointer disabled:cursor-not-allowed"
-                  >
-                    {t('admin.starter.applyEmptyBtn')}
-                  </button>
-                </div>
-              </div>
-
-              {/* Per-Slot 6 Fixed Slots Configuration */}
-              <div className="p-3.5 rounded-lg border border-slate-800 bg-[#0D1422] space-y-2.5">
-                <div className="text-xs font-bold text-amber-300">
-                  {t('admin.starter.slotsTitle')}
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                  {EQUIPMENT_SLOTS.map((slot) => {
-                    const slotCfg = starterCfg.slots[slot];
-                    const slotTemplates = ITEM_TEMPLATES.filter(
-                      (tpl) => tpl.slot === slot
-                    );
-                    return (
-                      <div
-                        key={slot}
-                        data-testid={`admin-starter-slot-${slot}`}
-                        className="p-2.5 rounded border border-slate-800 bg-[#080C14] space-y-2"
-                      >
-                        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-200">
-                          <SlotIcon slot={slot} className="w-3.5 h-3.5 text-sky-400" />
-                          <span>{getSlotLabel(lang, slot)}</span>
-                        </div>
-                        <label className="space-y-1 block">
-                          <span className="text-[11px] text-slate-400 block">
-                            {t('admin.starter.templateLabel')}
-                          </span>
-                          <select
-                            data-testid={`admin-starter-slot-${slot}-template`}
-                            value={slotCfg.templateId}
-                            onChange={(e) => {
-                              const next = cloneStarterSetConfig(starterCfg);
-                              next.slots[slot] = {
-                                ...next.slots[slot],
-                                templateId: e.target.value,
-                              };
-                              adminUpdateConfig({ starterSet: next });
-                            }}
-                            className="w-full h-8 px-2 rounded border border-slate-700 bg-slate-900 text-xs"
-                          >
-                            {slotTemplates.map((tpl) => (
-                              <option key={tpl.id} value={tpl.id}>
-                                {lang === 'vi' ? tpl.nameVi : tpl.nameEn} (T
-                                {tpl.tier}
-                                {tpl.classRestriction
-                                  ? ` · ${getClassName(lang, tpl.classRestriction)}`
-                                  : ''}
-                                )
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <div className="grid grid-cols-2 gap-2">
-                          <label className="space-y-1 block">
-                            <span className="text-[11px] text-slate-400 block">
-                              {t('admin.starter.levelLabel')}
-                            </span>
-                            <input
-                              type="number"
-                              data-testid={`admin-starter-slot-${slot}-level`}
-                              min={1}
-                              max={BALANCE_CONFIG.maxLevel}
-                              value={slotCfg.level}
-                              onChange={(e) => {
-                                const lv = Math.max(
-                                  1,
-                                  Math.min(
-                                    BALANCE_CONFIG.maxLevel,
-                                    Math.floor(Number(e.target.value) || 1)
-                                  )
-                                );
-                                const next = cloneStarterSetConfig(starterCfg);
-                                next.slots[slot] = {
-                                  ...next.slots[slot],
-                                  level: lv,
-                                };
-                                adminUpdateConfig({ starterSet: next });
-                              }}
-                              className="w-full h-8 px-2 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
-                            />
-                          </label>
-                          <label className="space-y-1 block">
-                            <span className="text-[11px] text-slate-400 block">
-                              {t('admin.starter.qualityLabel')}
-                            </span>
-                            <input
-                              type="number"
-                              data-testid={`admin-starter-slot-${slot}-quality`}
-                              min={1}
-                              max={100}
-                              value={slotCfg.quality}
-                              onChange={(e) => {
-                                const q = Math.max(
-                                  1,
-                                  Math.min(
-                                    100,
-                                    Math.round(Number(e.target.value) || 1)
-                                  )
-                                );
-                                const next = cloneStarterSetConfig(starterCfg);
-                                next.slots[slot] = {
-                                  ...next.slots[slot],
-                                  quality: q,
-                                };
-                                adminUpdateConfig({ starterSet: next });
-                              }}
-                              className="w-full h-8 px-2 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
-                            />
-                          </label>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* 3. SHOP TAB */}
           {tab === 'shop' && (
             <div className="space-y-4">
@@ -1483,166 +1187,6 @@ export function AdminPanel() {
                   ))}
                 </div>
               </div>
-
-              {/* Status Display Defaults ("Mặc định trạng thái") */}
-              {(() => {
-                const effDefaults: Required<StatusDisplayDefaults> = {
-                  ...BUILTIN_STATUS_DISPLAY_DEFAULTS,
-                  ...(adminConfig.statusDisplayDefaults ?? {}),
-                };
-                const patchStatusDefaults = (
-                  patch: Partial<StatusDisplayDefaults>
-                ) => {
-                  adminUpdateConfig({
-                    statusDisplayDefaults: {
-                      ...effDefaults,
-                      ...patch,
-                    },
-                  });
-                };
-                return (
-                  <div
-                    data-testid="admin-status-defaults-section"
-                    className="p-3.5 rounded-lg border border-slate-800 bg-[#0D1422] space-y-3"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="text-xs font-bold uppercase tracking-wider text-amber-300">
-                          {t('admin.statusDefaultsTitle')}
-                        </div>
-                        <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                          {t('admin.statusDefaultsSubtitle')}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        data-testid="admin-status-defaults-reset"
-                        onClick={() => {
-                          adminUpdateConfig({
-                            statusDisplayDefaults: {
-                              ...BUILTIN_STATUS_DISPLAY_DEFAULTS,
-                            },
-                          });
-                          flash(t('admin.statusDefaultsReset'));
-                        }}
-                        className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-xs font-semibold cursor-pointer shrink-0"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        <span>{t('admin.statusDefaultsReset')}</span>
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-                      <label className="space-y-1 block">
-                        <span className="text-[11px] text-slate-400 block">
-                          {t('admin.statusDefaultsBadgeLayout')}
-                        </span>
-                        <select
-                          data-testid="admin-status-default-layout"
-                          value={effDefaults.badgeLayout}
-                          onChange={(e) =>
-                            patchStatusDefaults({
-                              badgeLayout: e.target.value as StatusBadgeLayout,
-                            })
-                          }
-                          className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs"
-                        >
-                          <option value="B">B (Default)</option>
-                          <option value="A">A</option>
-                        </select>
-                      </label>
-
-                      <label className="space-y-1 block">
-                        <span className="text-[11px] text-slate-400 block">
-                          {t('admin.statusDefaultsPhoneRows')}
-                        </span>
-                        <input
-                          type="number"
-                          data-testid="admin-status-default-phone-rows"
-                          min={1}
-                          max={5}
-                          value={effDefaults.phoneRows}
-                          onChange={(e) =>
-                            patchStatusDefaults({
-                              phoneRows: clampStatusAreaRows(
-                                e.target.value,
-                                effDefaults.phoneRows
-                              ),
-                            })
-                          }
-                          className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
-                        />
-                      </label>
-
-                      <label className="space-y-1 block">
-                        <span className="text-[11px] text-slate-400 block">
-                          {t('admin.statusDefaultsDesktopRows')}
-                        </span>
-                        <input
-                          type="number"
-                          data-testid="admin-status-default-desktop-rows"
-                          min={1}
-                          max={5}
-                          value={effDefaults.desktopRows}
-                          onChange={(e) =>
-                            patchStatusDefaults({
-                              desktopRows: clampStatusAreaRows(
-                                e.target.value,
-                                effDefaults.desktopRows
-                              ),
-                            })
-                          }
-                          className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
-                        />
-                      </label>
-
-                      <label className="space-y-1 block">
-                        <span className="text-[11px] text-slate-400 block">
-                          {t('admin.statusDefaultsPlayerPhoneRows')}
-                        </span>
-                        <input
-                          type="number"
-                          data-testid="admin-status-default-player-phone-rows"
-                          min={1}
-                          max={2}
-                          value={effDefaults.playerPhoneRows}
-                          onChange={(e) =>
-                            patchStatusDefaults({
-                              playerPhoneRows: clampPlayerStatusRows(
-                                e.target.value,
-                                effDefaults.playerPhoneRows
-                              ),
-                            })
-                          }
-                          className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
-                        />
-                      </label>
-
-                      <label className="space-y-1 block">
-                        <span className="text-[11px] text-slate-400 block">
-                          {t('admin.statusDefaultsPlayerDesktopRows')}
-                        </span>
-                        <input
-                          type="number"
-                          data-testid="admin-status-default-player-desktop-rows"
-                          min={1}
-                          max={2}
-                          value={effDefaults.playerDesktopRows}
-                          onChange={(e) =>
-                            patchStatusDefaults({
-                              playerDesktopRows: clampPlayerStatusRows(
-                                e.target.value,
-                                effDefaults.playerDesktopRows
-                              ),
-                            })
-                          }
-                          className="w-full h-9 px-2 rounded border border-slate-700 bg-slate-900 text-xs font-mono-nums"
-                        />
-                      </label>
-                    </div>
-                  </div>
-                );
-              })()}
 
               {/* Active Battle Live Controls */}
               <div className="p-3.5 rounded-lg border border-amber-500/30 bg-[#0D1422] flex flex-wrap items-center justify-between gap-3">

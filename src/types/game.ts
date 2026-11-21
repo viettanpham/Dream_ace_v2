@@ -351,8 +351,6 @@ export interface ItemSpecialTraits {
   longRange?: boolean;
 }
 
-export type ItemRegistryTag = 'sys' | (string & {});
-
 export interface ItemTemplate {
   id: string;
   nameEn: string;
@@ -370,7 +368,6 @@ export interface ItemTemplate {
   secondaryRange?: [number, number];
   affixPool: StatKey[];
   specialTraits?: ItemSpecialTraits;
-  registryTag?: ItemRegistryTag;
 }
 
 export interface ItemAffix {
@@ -394,8 +391,6 @@ export interface ItemInstance {
   price: number;
   enchantLevel: number; // 0 to 10
   specialTraits?: ItemSpecialTraits;
-  registryTag?: ItemRegistryTag;
-  isStarter?: boolean;
   locked?: boolean;
   favorited?: boolean;
   isNew?: boolean;
@@ -1073,143 +1068,6 @@ export interface BattleState {
 
 export type BattleSpeed = 1 | 2 | 3 | 5 | 10;
 
-export interface AutoEquipClassWeights {
-  attack: number;
-  defense: number;
-  fuel: number;
-  spirit: number;
-  shield: number;
-  evasion: number;
-  critBonusPct: number;
-  armorPiercePct: number;
-  splashPct: number;
-  spRegenPerTurn: number;
-  evasionMod: number;
-  longRangeBonus: number;
-  tierBonus: number;
-  qualityWeight: number;
-}
-
-export interface AutoEquipConfig {
-  replaceMarginPct: number;
-  classWeights: Record<MechClassId, AutoEquipClassWeights>;
-}
-
-export interface AutoEquipTraitDeltas {
-  critBonusPct: number;
-  armorPiercePct: number;
-  splashPct: number;
-  spRegenPerTurn: number;
-  evasionMod: number;
-  longRangeDelta: -1 | 0 | 1;
-}
-
-export interface AutoEquipSlotPlan {
-  slot: EquipmentSlot;
-  currentItem: ItemInstance | null;
-  nextItem: ItemInstance | null;
-  currentScore: number;
-  nextScore: number;
-  scoreDelta: number;
-  changed: boolean;
-  statDeltas: StatBlock;
-  traitDeltas: AutoEquipTraitDeltas;
-  reassignedFromGear: MechClassId | null;
-}
-
-export interface AutoEquipGearPlan {
-  gearId: MechClassId;
-  slots: AutoEquipSlotPlan[];
-  changedCount: number;
-  totalCurrentScore: number;
-  totalNextScore: number;
-  totalStatDeltas: StatBlock;
-}
-
-export interface AutoEquipPlan {
-  mode: 'single' | 'all';
-  targetGearId: MechClassId;
-  gearPlans: AutoEquipGearPlan[];
-  totalChangedSlots: number;
-}
-
-export interface AutoEquipUndoSnapshot {
-  mode: 'single' | 'all';
-  targetGearId: MechClassId;
-  previousEquippedByGear: Partial<Record<MechClassId, EquippedSlotIds>>;
-  changedSlotsCount: number;
-  appliedAt: number;
-}
-
-export type StarterBoostScope = 'new_gears_only' | 'fill_empty_slots';
-
-export interface StarterSlotConfig {
-  templateId: string;
-  level: number;
-  quality: number;
-}
-
-export interface StarterSetConfig {
-  enabled: boolean;
-  slots: Record<EquipmentSlot, StarterSlotConfig>;
-  rookieBoostPct: number;
-  boostScope: StarterBoostScope;
-}
-
-export type IconCatalogKind = 'normal' | 'buff' | 'debuff';
-
-export type IconCatalogGroupId =
-  | 'BS'
-  | 'SS'
-  | 'BF'
-  | 'DB'
-  | 'DT'
-  | 'CC'
-  | 'EV'
-  | 'RW';
-
-export type IconCatalogTag = 'sys' | 'mods';
-
-export interface IconCatalogLayer {
-  symbol: string;
-  color: string;
-  opacity: number;
-}
-
-export interface IconCatalogRow {
-  id: string;
-  nameVi: string;
-  group: IconCatalogGroupId;
-  symbol?: string;
-  layers?: IconCatalogLayer[];
-  color: string;
-  kind: IconCatalogKind;
-  tag: IconCatalogTag;
-}
-
-export interface IconCatalogModRow {
-  id: string;
-  nameVi?: string;
-  group?: IconCatalogGroupId;
-  symbol?: string;
-  layers?: IconCatalogLayer[];
-  color?: string;
-  kind?: IconCatalogKind;
-  tag?: 'mods';
-}
-
-export type StatusBadgeLayout = 'A' | 'B';
-
-export interface StatusDisplaySettings {
-  badgeLayout: StatusBadgeLayout;
-  phoneRows: number;
-  desktopRows: number;
-  playerPhoneRows: number;
-  playerDesktopRows: number;
-}
-
-export type StatusDisplayDefaults = Partial<StatusDisplaySettings>;
-
 export interface AdminConfig {
   godMode: boolean;
   oneHitKills: boolean;
@@ -1226,10 +1084,6 @@ export interface AdminConfig {
   shopRarityWeights: Record<ItemRarity, number>;
   shopPriceMultiplier: number;
   formation: FormationConfig;
-  autoEquip?: AutoEquipConfig;
-  starterSet?: StarterSetConfig;
-  iconCatalogMods?: IconCatalogModRow[];
-  statusDisplayDefaults?: StatusDisplayDefaults;
   showRawI18nKeys: boolean;
 }
 
