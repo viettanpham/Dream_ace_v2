@@ -1537,7 +1537,6 @@ export const EN_TRANSLATIONS = {
   'radar.legendDebuff': 'Debuff: red hexagon frame + down arrow',
   'radar.legendStack': 'Stack: yellow x2 badge at top-right',
   'radar.legendTurns': 'Turns left: clock + number at bottom corner',
-  'battle.actionCamera': 'Action Camera',
   'battle.loopRunningTag': 'Looping',
 
   // Cloud Save (SV1b-2)

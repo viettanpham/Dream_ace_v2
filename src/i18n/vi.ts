@@ -1540,7 +1540,6 @@ export const VI_TRANSLATIONS: Record<TranslationKey, string> = {
   'radar.legendDebuff': 'Debuff: khung lục giác đỏ + mũi tên xuống',
   'radar.legendStack': 'Cộng dồn: huy hiệu vàng x2 ở góc trên phải',
   'radar.legendTurns': 'Lượt còn lại: đồng hồ + số ở góc dưới',
-  'battle.actionCamera': 'Camera hành động',
   'battle.loopRunningTag': 'Đang lặp',
 
   // Save Cloud (SV1b-2)

@@ -14,7 +14,7 @@ export const BUILTIN_STATUS_DISPLAY_DEFAULTS: StatusDisplaySettings = {
   phoneRows: 2,
   desktopRows: 3,
   playerPhoneRows: 1,
-  playerDesktopRows: 2,
+  playerDesktopRows: 1,
 };
 
 export interface StatusDisplayOverride {

@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { useI18n } from '../i18n';
 import type { CombatLogEntry, CombatUnit, MechClassId } from '../types/game';
+import { SP_COLOR_TOKENS } from '../utils/battleDisplay';
 import {
   DOCKED_LOG_MAX_ENTRIES,
   filterCombatLogEntries,
@@ -581,7 +582,7 @@ export function CombatLogList({
                         {row.spCost !== null && row.spCost > 0 && (
                           <span
                             data-testid="combat-log-sp-cost"
-                            className="font-mono-nums text-[10px] px-1 py-0.5 rounded bg-purple-500/10 border border-purple-500/25 text-purple-300/75 shrink-0 whitespace-nowrap"
+                            className={`font-mono-nums text-[10px] px-1 py-0.5 rounded border shrink-0 whitespace-nowrap ${SP_COLOR_TOKENS.badgeClass}`}
                           >
                             {t('log.spCostTag', { cost: row.spCost })}
                           </span>

@@ -16,6 +16,7 @@ import type {
 import {
   formatShortUnitName,
   isCompactPopupTone,
+  SP_COLOR_TOKENS,
   usePrefersReducedMotion,
 } from '../utils/battleDisplay';
 import { resolveReducedMotion, useFxSettings } from '../utils/battleVfx';
@@ -418,7 +419,7 @@ export const BattleUnitCard = memo(function BattleUnitCard({
         </div>
 
         {/* 2. Short Name + Class & Level */}
-        <div className="w-[108px] sm:w-[132px] shrink-0 min-w-0">
+        <div className="w-[96px] xl:w-[116px] shrink-0 min-w-0">
           <div className="flex items-center gap-1 min-w-0">
             {unit.isBoss && (
               <Skull
@@ -456,10 +457,10 @@ export const BattleUnitCard = memo(function BattleUnitCard({
         </div>
 
         {/* 3. Fixed-Width Tabular HP Bar + Shield & SP Bars (zero layout shift via scaleX) */}
-        <div className="flex-1 min-w-[92px] space-y-1">
+        <div className="flex-1 min-w-0 space-y-1">
           {/* HP line */}
-          <div className="flex items-center gap-1.5">
-            <div className="flex-1 h-2 rounded-full bg-slate-900 border border-slate-800/90 overflow-hidden">
+          <div className="flex items-center gap-1 min-w-0">
+            <div className="flex-1 min-w-[20px] h-2 rounded-full bg-slate-900 border border-slate-800/90 overflow-hidden">
               <div
                 className={`h-full w-full ${hpBarColor}`}
                 style={{
@@ -468,15 +469,15 @@ export const BattleUnitCard = memo(function BattleUnitCard({
                 }}
               />
             </div>
-            <span className="w-[66px] text-right font-mono-nums text-[12px] font-semibold text-slate-200 shrink-0">
+            <span className="w-[58px] text-right font-mono-nums text-[12px] font-semibold text-slate-200 shrink-0">
               {unit.hp}/{unit.derived.maxHp}
             </span>
           </div>
 
           {/* Shield + SP compact dual bars */}
-          <div className="grid grid-cols-2 gap-1.5 items-center">
+          <div className="grid grid-cols-2 gap-1 items-center min-w-0">
             <div className="flex items-center gap-1 min-w-0">
-              <div className="flex-1 h-1.5 rounded-full bg-slate-900 overflow-hidden">
+              <div className="flex-1 min-w-[14px] h-1.5 rounded-full bg-slate-900 overflow-hidden">
                 <div
                   className={`h-full w-full ${
                     shieldBroken ? 'bg-red-500/60' : 'bg-sky-400'
@@ -490,7 +491,7 @@ export const BattleUnitCard = memo(function BattleUnitCard({
                 />
               </div>
               <span
-                className={`w-[30px] text-right font-mono-nums text-[12px] shrink-0 ${
+                className={`w-[28px] text-right font-mono-nums text-[12px] shrink-0 ${
                   shieldBroken ? 'text-red-300 line-through' : 'text-sky-300'
                 }`}
               >
@@ -499,16 +500,20 @@ export const BattleUnitCard = memo(function BattleUnitCard({
             </div>
 
             <div className="flex items-center gap-1 min-w-0">
-              <div className="flex-1 h-1.5 rounded-full bg-slate-900 overflow-hidden">
+              <div className="flex-1 min-w-[14px] h-1.5 rounded-full bg-slate-900 overflow-hidden">
                 <div
-                  className="h-full w-full bg-purple-400"
+                  data-testid={`unit-row-sp-fill-${unit.id}`}
+                  className={`h-full w-full ${SP_COLOR_TOKENS.barFillClass}`}
                   style={{
                     transform: `scaleX(${unit.derived.maxSp > 0 ? spRatio : 0})`,
                     transformOrigin: 'left center',
                   }}
                 />
               </div>
-              <span className="w-[26px] text-right font-mono-nums text-[12px] text-purple-300 shrink-0">
+              <span
+                data-testid={`unit-row-sp-value-${unit.id}`}
+                className={`w-[24px] text-right font-mono-nums text-[12px] shrink-0 ${SP_COLOR_TOKENS.textClass}`}
+              >
                 {unit.sp}
               </span>
             </div>

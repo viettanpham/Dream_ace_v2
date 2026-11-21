@@ -32,6 +32,7 @@ import {
   sortStatusEffects,
 } from '../data/statusIconMap';
 import { useGameStore } from '../store/useGameStore';
+import { SP_COLOR_TOKENS } from '../utils/battleDisplay';
 import { useStatusDisplaySettings } from '../utils/statusDisplayPrefs';
 import { BottomSheet } from './BottomSheet';
 import { CatalogIcon } from './CatalogIcon';
@@ -245,12 +246,12 @@ export function UnitDetailSheet({
             />
             <StatBar
               label="SP"
-              labelClassName="text-purple-300"
-              valueClassName="text-purple-200"
+              labelClassName={SP_COLOR_TOKENS.textClass}
+              valueClassName={SP_COLOR_TOKENS.textClass}
               value={unit.sp}
               max={Math.max(1, unit.derived.maxSp)}
               valueText={`${unit.sp}/${unit.derived.maxSp}`}
-              fillClassName="bg-purple-400"
+              fillClassName={SP_COLOR_TOKENS.barFillClass}
               heightClassName="h-2"
               compactHeader
             />

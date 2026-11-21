@@ -73,6 +73,7 @@ import {
   evaluateRadarTargetValidity,
   formatShortUnitName,
   readSpeechBubblesEnabled,
+  SP_COLOR_TOKENS,
   SPEECH_BUBBLE_DURATION_MS,
   useBattleLayoutMode,
   writeSpeechBubblesEnabled,
@@ -83,7 +84,6 @@ import {
   POPUP_CLEANUP_DELAY_MS,
   useFxSettings,
 } from '../utils/battleVfx';
-import { useBattleLayoutPrefs } from '../utils/battleLayoutPrefs';
 import {
   readCombatLogExpandAll,
   readCombatLogMode,
@@ -187,7 +187,6 @@ export function BattleScreen() {
     () => readSpeechBubblesEnabled()
   );
   const [fxSettings] = useFxSettings();
-  const [layoutPrefs] = useBattleLayoutPrefs();
   const [combatLogMode, setCombatLogMode] = useState<CombatLogDisplayMode>(() =>
     readCombatLogMode()
   );
@@ -722,8 +721,10 @@ export function BattleScreen() {
           onClick={() => stopAutoRepeat('manual_stop')}
           title={t('battle.loopStopTooltip')}
           aria-label={`${t('battle.loopRunningTag')} · ${t('battle.loopStopTooltip')} (${progressText})`}
-          className={`min-h-[44px] rounded-lg border border-emerald-400/70 bg-emerald-500/20 hover:bg-red-500/20 hover:border-red-400/70 text-emerald-100 font-mono-nums font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 transition-colors ${
-            phoneCompact ? 'px-2 text-[12px]' : 'px-2.5 text-[13px]'
+          className={`rounded-lg border border-emerald-400/70 bg-emerald-500/20 hover:bg-red-500/20 hover:border-red-400/70 text-emerald-100 font-mono-nums font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 transition-colors ${
+            phoneCompact
+              ? 'min-h-[44px] px-2 text-[12px]'
+              : 'h-[34px] min-h-[34px] px-2 text-[12px]'
           }`}
         >
           <span
@@ -757,14 +758,14 @@ export function BattleScreen() {
             setSelectedLoopCount(autoRepeatLimit);
             setLoopPopoverOpen((v) => !v);
           }}
-          className={`min-h-[44px] rounded-lg border transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
+          className={`rounded-lg border transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
             loopPopoverOpen
               ? 'border-emerald-400 bg-emerald-500/20 text-emerald-100'
               : 'border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200'
           } ${
             phoneCompact
-              ? 'min-w-[44px] px-2 text-[12px] font-mono-nums font-bold'
-              : 'px-2.5 text-[13px] font-semibold'
+              ? 'min-h-[44px] min-w-[44px] px-2 text-[12px] font-mono-nums font-bold'
+              : 'h-[34px] min-h-[34px] px-2 text-[12px] font-semibold'
           }`}
         >
           <Repeat className="w-4 h-4 text-emerald-400 shrink-0" aria-hidden="true" />
@@ -1010,7 +1011,7 @@ export function BattleScreen() {
               key={`${side}-${row}`}
               data-card-row={`${side}-${row}`}
               data-row-state={exposure}
-              className={`rounded-lg border p-1.5 space-y-1 ${
+              className={`min-w-0 overflow-hidden rounded-lg border p-1.5 space-y-1 ${
                 isExposed
                   ? side === 'enemy'
                     ? 'border-red-500/45 bg-red-950/15'
@@ -1020,7 +1021,7 @@ export function BattleScreen() {
                   : 'border-dashed border-slate-800/70 bg-slate-950/25'
               }`}
             >
-              <div className="flex items-center justify-between gap-2 px-1 text-[12px] font-mono-nums font-bold">
+              <div className="flex items-center justify-between gap-2 px-1 text-[12px] font-mono-nums font-bold min-w-0">
                 <span
                   className={
                     isExposed
@@ -1033,7 +1034,7 @@ export function BattleScreen() {
                   {getRowTitle(row)}
                 </span>
                 <span
-                  className={`px-1.5 py-0.2 rounded text-[12px] ${
+                  className={`px-1.5 py-0.2 rounded text-[12px] shrink-0 ${
                     isExposed
                       ? side === 'enemy'
                         ? 'bg-red-500/20 text-red-200'
@@ -1048,7 +1049,7 @@ export function BattleScreen() {
               </div>
 
               {rowUnits.length > 0 && (
-                <div className="space-y-1">
+                <div className="space-y-1 min-w-0">
                   {rowUnits.map((u) => renderCardUnit(u, compact))}
                 </div>
               )}
@@ -1118,7 +1119,7 @@ export function BattleScreen() {
     return (
       <div
         data-testid="battle-card-view"
-        className="flex-1 min-h-0 flex flex-col overflow-hidden"
+        className="flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden"
       >
         {cardToast && (
           <div
@@ -1131,9 +1132,9 @@ export function BattleScreen() {
         )}
         <div
           style={{ touchAction: 'pan-y' }}
-          className="flex-1 min-h-0 overflow-y-auto tactical-scroll touch-pan-y p-1"
+          className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden tactical-scroll touch-pan-y p-1"
         >
-          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2 items-start">
+          <div className="min-w-0 w-full grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2 items-start">
             {renderThreeRowCardSide('ally', allies, false)}
             {renderThreeRowCardSide('enemy', enemies, false)}
           </div>
@@ -1232,12 +1233,12 @@ export function BattleScreen() {
               />
               <StatBar
                 label="SP"
-                labelClassName="text-purple-300"
-                valueClassName="text-purple-200"
+                labelClassName={SP_COLOR_TOKENS.textClass}
+                valueClassName={SP_COLOR_TOKENS.textClass}
                 value={sidebarUnit.sp}
                 max={Math.max(1, sidebarUnit.derived.maxSp)}
                 valueText={`${sidebarUnit.sp}/${sidebarUnit.derived.maxSp}`}
-                fillClassName="bg-purple-400"
+                fillClassName={SP_COLOR_TOKENS.barFillClass}
                 heightClassName="h-1.5"
                 instant={bypassFx}
                 compactHeader
@@ -1411,8 +1412,9 @@ export function BattleScreen() {
                     className="h-1 w-full rounded-full bg-slate-900 overflow-hidden"
                   >
                     <div
+                      data-testid="battle-player-sp-fill"
                       style={{ width: `${spPct}%` }}
-                      className="h-full transition-all duration-200 bg-purple-400"
+                      className={`h-full transition-all duration-200 ${SP_COLOR_TOKENS.barFillClass}`}
                     />
                   </div>
                 </div>
@@ -1426,7 +1428,10 @@ export function BattleScreen() {
                       +{ownUnit.shield}
                     </span>
                   )}
-                  <span data-testid="battle-player-sp-numbers" className="text-purple-300">
+                  <span
+                    data-testid="battle-player-sp-numbers"
+                    className={SP_COLOR_TOKENS.textClass}
+                  >
                     SP {ownUnit.sp}
                   </span>
                 </div>
@@ -1452,89 +1457,132 @@ export function BattleScreen() {
       );
     }
 
+    if (isDestroyed) {
+      return (
+        <div
+          data-testid="battle-player-status-bar"
+          data-collapsed="false"
+          data-destroyed="true"
+          className="shrink-0 h-[28px] max-h-[28px] min-w-0 rounded-md border border-slate-700 bg-slate-900/85 px-2.5 flex items-center gap-2 text-[12px] text-slate-400 grayscale overflow-hidden"
+        >
+          <span className="px-1.5 py-0.2 rounded bg-slate-800 border border-slate-600 text-slate-300 font-mono-nums text-[10px] font-bold shrink-0">
+            {getTeamTagLabel(lang, 'me')}
+          </span>
+          <span
+            className="font-bold truncate text-slate-400 line-through min-w-0"
+            title={t('battle.playerShipLabel')}
+          >
+            {ownUnit.name}
+          </span>
+          <span
+            data-testid="battle-player-destroyed-badge"
+            className="px-1.5 py-0.2 rounded bg-slate-800 border border-slate-600 text-slate-200 text-[10px] font-bold shrink-0"
+          >
+            {t('battle.playerDestroyed')}
+          </span>
+        </div>
+      );
+    }
+
+    const shieldBarPct = Math.max(
+      0,
+      Math.min(100, Math.round((ownUnit.shield / maxShield) * 100))
+    );
+
     return (
       <div
         data-testid="battle-player-status-bar"
         data-collapsed="false"
-        data-destroyed={isDestroyed ? 'true' : 'false'}
-        className={`shrink-0 rounded-lg border px-2.5 py-1.5 space-y-1 ${
-          isDestroyed
-            ? 'border-slate-700 bg-slate-900/85 text-slate-400 grayscale'
-            : 'border-emerald-500/35 bg-[#09121D] text-slate-100'
+        data-destroyed="false"
+        className={`shrink-0 min-w-0 rounded-lg border border-emerald-500/35 bg-[#09121D] text-slate-100 px-2 py-0.5 space-y-0.5 overflow-hidden ${
+          activePlayerRows <= 1 ? 'max-h-[64px]' : ''
         }`}
       >
-        <div className="flex items-center justify-between gap-2 text-[12px]">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-mono-nums text-[10px] font-bold shrink-0">
+        <div className="h-[22px] flex items-center gap-2 min-w-0 text-[11px]">
+          <div className="flex items-center gap-1.5 min-w-0 shrink-0 max-w-[175px]">
+            <span className="px-1.5 py-0.2 rounded bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-mono-nums text-[10px] font-bold shrink-0">
               {getTeamTagLabel(lang, 'me')}
             </span>
             <span
-              className={`font-bold truncate ${
-                isDestroyed ? 'text-slate-400 line-through' : 'text-emerald-200'
-              }`}
+              className="font-bold truncate text-emerald-200 text-[12px]"
               title={t('battle.playerShipLabel')}
             >
               {ownUnit.name}
             </span>
-            {isDestroyed && (
-              <span
-                data-testid="battle-player-destroyed-badge"
-                className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 text-slate-200 text-[11px] font-bold shrink-0"
-              >
-                {t('battle.playerDestroyed')}
-              </span>
-            )}
           </div>
 
-          {!isDestroyed && (
-            <div className="flex items-center gap-2.5 font-mono-nums text-[11px] shrink-0">
-              <span data-testid="battle-player-hp-numbers" className="text-emerald-300">
-                HP {ownUnit.hp}/{ownUnit.derived.maxHp}
-              </span>
-              <span data-testid="battle-player-shield-numbers" className="text-sky-300">
-                SHD {ownUnit.shield}/{maxShield}
-              </span>
-              <span data-testid="battle-player-sp-numbers" className="text-purple-300">
-                SP {ownUnit.sp}/{ownUnit.derived.maxSp}
+          <div className="flex-1 min-w-0 grid grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_minmax(0,0.9fr)] gap-2 items-center font-mono-nums text-[11px]">
+            {/* HP thin bar */}
+            <div className="flex items-center gap-1 min-w-0">
+              <span className="text-emerald-300 font-bold shrink-0">HP</span>
+              <div
+                data-testid="battle-player-hp-shield-bar"
+                className="relative flex-1 min-w-0 h-1.5 rounded-full bg-slate-900 border border-slate-800 overflow-hidden"
+              >
+                <div
+                  data-testid="battle-player-hp-fill"
+                  style={{ width: `${hpPct}%` }}
+                  className={`h-full transition-all duration-200 ${hpFillClass}`}
+                />
+              </div>
+              <span
+                data-testid="battle-player-hp-numbers"
+                className="text-emerald-200 shrink-0 tabular-nums"
+              >
+                {ownUnit.hp}/{ownUnit.derived.maxHp}
               </span>
             </div>
-          )}
+
+            {/* SHD thin bar */}
+            <div className="flex items-center gap-1 min-w-0">
+              <span className="text-sky-300 font-bold shrink-0">SHD</span>
+              <div
+                data-testid="battle-player-shield-bar"
+                className="relative flex-1 min-w-0 h-1.5 rounded-full bg-slate-900 border border-slate-800 overflow-hidden"
+              >
+                {shieldBarPct > 0 && (
+                  <div
+                    data-testid="battle-player-shield-overlay"
+                    style={{ width: `${shieldBarPct}%` }}
+                    className="h-full bg-sky-400 transition-all duration-200"
+                  />
+                )}
+              </div>
+              <span
+                data-testid="battle-player-shield-numbers"
+                className="text-sky-200 shrink-0 tabular-nums"
+              >
+                {ownUnit.shield}/{maxShield}
+              </span>
+            </div>
+
+            {/* SP thin bar (orange token #EF9F27) */}
+            <div className="flex items-center gap-1 min-w-0">
+              <span className={`${SP_COLOR_TOKENS.textClass} font-bold shrink-0`}>
+                SP
+              </span>
+              <div
+                data-testid="battle-player-sp-bar"
+                className="relative flex-1 min-w-0 h-1.5 rounded-full bg-slate-900 border border-slate-800 overflow-hidden"
+              >
+                <div
+                  data-testid="battle-player-sp-fill"
+                  style={{ width: `${spPct}%` }}
+                  className={`h-full transition-all duration-200 ${SP_COLOR_TOKENS.barFillClass}`}
+                />
+              </div>
+              <span
+                data-testid="battle-player-sp-numbers"
+                className={`${SP_COLOR_TOKENS.textClass} shrink-0 tabular-nums`}
+              >
+                {ownUnit.sp}/{ownUnit.derived.maxSp}
+              </span>
+            </div>
+          </div>
         </div>
 
-        {/* Combined HP bar with overlaid Shield layer + thin SP bar below (hidden when destroyed) */}
-        {!isDestroyed && (
-          <div className="space-y-1">
-            <div
-              data-testid="battle-player-hp-shield-bar"
-              className="relative h-2.5 w-full rounded-full bg-slate-900 border border-slate-800 overflow-hidden"
-            >
-              <div
-                data-testid="battle-player-hp-fill"
-                style={{ width: `${hpPct}%` }}
-                className={`h-full transition-all duration-200 ${hpFillClass}`}
-              />
-              {shieldOverlayPct > 0 && (
-                <div
-                  data-testid="battle-player-shield-overlay"
-                  style={{ width: `${shieldOverlayPct}%` }}
-                  className="absolute inset-y-0 left-0 bg-sky-400/70 border-r border-cyan-200 transition-all duration-200"
-                />
-              )}
-            </div>
-            <div
-              data-testid="battle-player-sp-bar"
-              className="h-1.5 w-full rounded-full bg-slate-900 border border-slate-800/80 overflow-hidden"
-            >
-              <div
-                style={{ width: `${spPct}%` }}
-                className="h-full transition-all duration-200 bg-purple-400"
-              />
-            </div>
-          </div>
-        )}
-
         <FixedStatusArea
-          statuses={isDestroyed ? [] : ownUnit.statuses}
+          statuses={ownUnit.statuses}
           rows={activePlayerRows}
           unit={ownUnit}
           unitTitle={ownUnit.name}
@@ -1551,31 +1599,12 @@ export function BattleScreen() {
     );
   };
 
-  const renderCameraSlot = (compactPhone: boolean) => {
-    if (!layoutPrefs.showActionCamera) return null;
-    return (
-      <div
-        data-testid="battle-camera-slot"
-        data-camera-size={compactPhone ? 'phone' : 'desktop'}
-        className={
-          compactPhone
-            ? 'h-[120px] shrink-0 mx-1.5 mt-1 rounded-lg border border-dashed border-slate-700/80 bg-[#070C14]/80 flex items-center justify-center px-3'
-            : 'h-[160px] shrink-0 rounded-lg border border-dashed border-slate-700/80 bg-[#070C14]/80 flex items-center justify-center px-4'
-        }
-      >
-        <span className="text-[12px] font-medium tracking-wide text-slate-500 select-none">
-          {t('battle.actionCamera')}
-        </span>
-      </div>
-    );
-  };
-
   return (
     <div
       className={
         isPhonePortrait
           ? 'relative flex-1 flex flex-col bg-tactical-grid'
-          : 'relative flex-1 min-h-0 flex flex-col bg-tactical-grid overflow-hidden'
+          : 'relative flex-1 min-h-0 flex flex-col bg-tactical-grid overflow-y-auto overflow-x-hidden'
       }
     >
       {isPhonePortrait ? (
@@ -1694,7 +1723,6 @@ export function BattleScreen() {
             </span>
           </div>
           {renderPlayerStatusBar(true)}
-          {renderCameraSlot(true)}
 
           {/* Safety Pause Notice (when Auto paused on Low HP / Boss / Elite) */}
           {battle.autoStopNotice && !battle.summary && (
@@ -1853,170 +1881,178 @@ export function BattleScreen() {
         /* ==================== TABLET (600-1023) & PC (>= 1024) & LANDSCAPE PHONE LAYOUT ==================== */
         <div
           data-testid="battle-desktop-layout"
-          className="flex-1 min-h-0 grid grid-cols-[minmax(0,65fr)_minmax(260px,35fr)] gap-2 p-2 overflow-hidden"
+          className="flex-1 min-h-full w-full max-w-full grid grid-cols-[minmax(0,65fr)_minmax(260px,35fr)] gap-2 px-2.5 py-2 overflow-x-hidden"
         >
-          {/* LEFT COLUMN (~65%): Controls + Balance Bar + Field + Action Bar under field */}
-          <div className="min-w-0 min-h-0 flex flex-col gap-2 overflow-hidden">
-            {/* Single-Row Unified Control Bar (Manual/Auto + Speed + Radar/Card + "..." overflow menu) */}
+          {/* LEFT COLUMN (~65%): Controls + Balance Bar + Player Status + Field + Action Bar under field */}
+          <div
+            data-testid="battle-main-column"
+            className="min-w-0 max-w-full flex flex-col gap-1.5 overflow-x-hidden"
+          >
+            {/* Header stack: control row + force bar + player block (hard cap 150px alive with 1 status row) */}
             <div
-              data-testid="battle-desktop-controls"
-              className="shrink-0 rounded-lg border border-slate-800/90 bg-[#0A0F18]/95 px-2 py-1 flex items-center justify-between gap-2 flex-nowrap"
+              data-testid="battle-main-header"
+              className={`shrink-0 min-w-0 max-w-full flex flex-col gap-1.5 ${
+                activePlayerRows <= 1 ? 'max-h-[150px]' : ''
+              }`}
             >
-              <div className="flex items-center gap-2 min-w-0 flex-nowrap">
-                {/* Manual | Auto */}
-                <div
-                  className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-950 p-0.5 shrink-0"
-                  role="group"
-                  title={t('auto.hotkeyHint')}
-                >
-                  <button
-                    type="button"
-                    data-testid="battle-manual-toggle"
-                    aria-pressed={!autoBattleEnabled}
-                    onClick={() => setAutoBattleEnabled(false)}
-                    className={`min-h-[44px] px-2.5 rounded-md text-[13px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                      !autoBattleEnabled
-                        ? 'bg-slate-200 text-slate-950'
-                        : 'text-slate-400 hover:text-slate-100'
-                    }`}
+              {/* Single-Row Unified Control Bar (Manual/Auto + Speed + Radar/Card + Loop + "..." overflow menu) */}
+              <div
+                data-testid="battle-desktop-controls"
+                className="shrink-0 min-w-0 max-w-full max-h-[48px] overflow-x-hidden rounded-lg border border-slate-800/90 bg-[#0A0F18]/95 px-2 py-1 flex items-center justify-between gap-1.5 flex-nowrap"
+              >
+                <div className="flex items-center gap-1.5 min-w-0 flex-nowrap overflow-hidden">
+                  {/* Manual | Auto */}
+                  <div
+                    className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-950 p-0.5 shrink-0"
+                    role="group"
+                    title={t('auto.hotkeyHint')}
                   >
-                    {t('auto.manual')}
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="battle-auto-toggle"
-                    aria-pressed={autoBattleEnabled}
-                    onClick={() => setAutoBattleEnabled(true)}
-                    className={`min-h-[44px] px-2.5 rounded-md text-[13px] font-bold transition-colors cursor-pointer inline-flex items-center gap-1 whitespace-nowrap ${
-                      autoBattleEnabled
-                        ? 'bg-emerald-500 text-slate-950 shadow-[0_0_10px_rgba(16,185,129,0.45)]'
-                        : 'text-slate-400 hover:text-slate-100'
-                    }`}
-                  >
-                    <Bot className="w-4 h-4 shrink-0" />
-                    <span>{t('auto.auto')}</span>
-                    <kbd className="font-mono-nums text-[12px] px-1 rounded bg-black/20">
-                      A
-                    </kbd>
-                  </button>
-                </div>
-
-                {/* Speeds 1x 2x 3x 5x 10x */}
-                <div
-                  data-testid="battle-speed-selector"
-                  className="inline-flex items-center rounded-lg border border-slate-800 bg-slate-950 p-0.5 shrink-0"
-                  role="group"
-                  aria-label={t('battle.speedLabel')}
-                >
-                  {BATTLE_SPEEDS.map((spd) => (
                     <button
-                      key={spd}
                       type="button"
-                      onClick={() => setBattleSpeed(spd)}
-                      title={`${spd}x`}
-                      className={`min-h-[44px] px-2 rounded-md text-[13px] font-mono-nums font-bold transition-colors cursor-pointer whitespace-nowrap ${
-                        spd >= 5 ? 'hidden lg:inline-flex items-center justify-center' : 'inline-flex items-center justify-center'
-                      } ${
-                        battleSpeed === spd
+                      data-testid="battle-manual-toggle"
+                      aria-pressed={!autoBattleEnabled}
+                      onClick={() => setAutoBattleEnabled(false)}
+                      className={`h-[34px] min-h-[34px] px-2 rounded-md text-[12px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                        !autoBattleEnabled
+                          ? 'bg-slate-200 text-slate-950'
+                          : 'text-slate-400 hover:text-slate-100'
+                      }`}
+                    >
+                      {t('auto.manual')}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="battle-auto-toggle"
+                      aria-pressed={autoBattleEnabled}
+                      onClick={() => setAutoBattleEnabled(true)}
+                      className={`h-[34px] min-h-[34px] px-2 rounded-md text-[12px] font-bold transition-colors cursor-pointer inline-flex items-center gap-1 whitespace-nowrap ${
+                        autoBattleEnabled
+                          ? 'bg-emerald-500 text-slate-950 shadow-[0_0_10px_rgba(16,185,129,0.45)]'
+                          : 'text-slate-400 hover:text-slate-100'
+                      }`}
+                    >
+                      <Bot className="w-3.5 h-3.5 shrink-0" />
+                      <span>{t('auto.auto')}</span>
+                      <kbd className="font-mono-nums text-[11px] px-1 rounded bg-black/20">
+                        A
+                      </kbd>
+                    </button>
+                  </div>
+
+                  {/* Speeds 1x 2x 3x 5x 10x */}
+                  <div
+                    data-testid="battle-speed-selector"
+                    className="inline-flex items-center rounded-lg border border-slate-800 bg-slate-950 p-0.5 shrink-0"
+                    role="group"
+                    aria-label={t('battle.speedLabel')}
+                  >
+                    {BATTLE_SPEEDS.map((spd) => (
+                      <button
+                        key={spd}
+                        type="button"
+                        onClick={() => setBattleSpeed(spd)}
+                        title={`${spd}x`}
+                        className={`h-[34px] min-h-[34px] px-1.5 rounded-md text-[12px] font-mono-nums font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                          spd >= 5 ? 'hidden lg:inline-flex items-center justify-center' : 'inline-flex items-center justify-center'
+                        } ${
+                          battleSpeed === spd
+                            ? 'bg-sky-500 text-slate-950'
+                            : 'text-slate-400 hover:text-slate-100'
+                        }`}
+                      >
+                        {spd}x
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Radar | Card View Switch */}
+                  <div
+                    data-testid="battle-view-switch"
+                    className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-950 p-0.5 shrink-0"
+                    role="group"
+                    aria-label={t('battle.viewModeLabel')}
+                  >
+                    <button
+                      type="button"
+                      data-testid="battle-view-radar"
+                      aria-pressed={effectiveViewMode === 'radar'}
+                      onClick={() => setBattleViewMode('radar')}
+                      title={t('battle.viewRadar')}
+                      className={`h-[34px] min-h-[34px] px-2 rounded-md text-[12px] font-semibold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+                        effectiveViewMode === 'radar'
                           ? 'bg-sky-500 text-slate-950'
                           : 'text-slate-400 hover:text-slate-100'
                       }`}
                     >
-                      {spd}x
+                      <Radar className="w-3.5 h-3.5 shrink-0" />
+                      <span>{t('battle.viewRadar')}</span>
                     </button>
-                  ))}
+                    <button
+                      type="button"
+                      data-testid="battle-view-card"
+                      aria-pressed={effectiveViewMode === 'card'}
+                      onClick={() => setBattleViewMode('card')}
+                      title={t('battle.viewCard')}
+                      className={`h-[34px] min-h-[34px] px-2 rounded-md text-[12px] font-semibold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+                        effectiveViewMode === 'card'
+                          ? 'bg-sky-500 text-slate-950'
+                          : 'text-slate-400 hover:text-slate-100'
+                      }`}
+                    >
+                      <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
+                      <span>{t('battle.viewCard')}</span>
+                    </button>
+                  </div>
+                  {/* Loop Button / Active Progress Chip directly next to Radar/Card */}
+                  {renderLoopControl(false)}
                 </div>
 
-                {/* Radar | Card View Switch */}
-                <div
-                  data-testid="battle-view-switch"
-                  className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-950 p-0.5 shrink-0"
-                  role="group"
-                  aria-label={t('battle.viewModeLabel')}
-                >
+                <div className="flex items-center gap-1 shrink-0">
                   <button
                     type="button"
-                    data-testid="battle-view-radar"
-                    aria-pressed={effectiveViewMode === 'radar'}
-                    onClick={() => setBattleViewMode('radar')}
-                    title={t('battle.viewRadar')}
-                    className={`min-h-[44px] px-2.5 rounded-md text-[13px] font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
-                      effectiveViewMode === 'radar'
-                        ? 'bg-sky-500 text-slate-950'
-                        : 'text-slate-400 hover:text-slate-100'
-                    }`}
+                    data-testid="battle-more-btn"
+                    onClick={() => setMoreActionsOpen(true)}
+                    aria-label={t('battle.moreActions')}
+                    title={t('battle.moreActions')}
+                    className="h-[34px] min-h-[34px] min-w-[36px] px-2 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 inline-flex items-center justify-center gap-1 cursor-pointer shrink-0"
                   >
-                    <Radar className="w-4 h-4 shrink-0" />
-                    <span>{t('battle.viewRadar')}</span>
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="battle-view-card"
-                    aria-pressed={effectiveViewMode === 'card'}
-                    onClick={() => setBattleViewMode('card')}
-                    title={t('battle.viewCard')}
-                    className={`min-h-[44px] px-2.5 rounded-md text-[13px] font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
-                      effectiveViewMode === 'card'
-                        ? 'bg-sky-500 text-slate-950'
-                        : 'text-slate-400 hover:text-slate-100'
-                    }`}
-                  >
-                    <LayoutGrid className="w-4 h-4 shrink-0" />
-                    <span>{t('battle.viewCard')}</span>
+                    <MoreHorizontal className="w-4 h-4" />
                   </button>
                 </div>
-                {/* Loop Button / Active Progress Chip directly next to Radar/Card */}
-                {renderLoopControl(false)}
               </div>
 
-              <div className="flex items-center gap-1.5 shrink-0">
-                <button
-                  type="button"
-                  data-testid="battle-more-btn"
-                  onClick={() => setMoreActionsOpen(true)}
-                  aria-label={t('battle.moreActions')}
-                  title={t('battle.moreActions')}
-                  className="min-h-[44px] min-w-[44px] px-2.5 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 inline-flex items-center justify-center gap-1 cursor-pointer shrink-0"
-                >
-                  <MoreHorizontal className="w-5 h-5" />
-                </button>
+              {/* Compact Balance of Power Meter */}
+              <div
+                data-testid="battle-force-ratio-bar"
+                className="shrink-0 min-w-0 h-[20px] max-h-[22px] px-1 flex items-center gap-2 text-[11px] font-mono-nums"
+              >
+                <span className="font-bold text-sky-300 w-9 text-left shrink-0">
+                  {aliveAlliesCount}/{allies.length}
+                </span>
+                <div className="flex-1 min-w-0 h-2 rounded-full bg-slate-900 border border-slate-800 overflow-hidden flex">
+                  <div
+                    style={{ width: `${allySharePct}%` }}
+                    className="h-full bg-gradient-to-r from-emerald-500 to-sky-400 transition-all duration-300"
+                  />
+                  <div
+                    style={{ width: `${enemySharePct}%` }}
+                    className="h-full bg-gradient-to-r from-orange-500 to-red-500 transition-all duration-300"
+                  />
+                </div>
+                <span className="px-1.5 py-0.2 rounded bg-slate-900 border border-slate-700 font-bold text-amber-300 shrink-0">
+                  {battle.squadSize}v{battle.squadSize}
+                </span>
+                <span className="font-bold text-red-400 w-9 text-right shrink-0">
+                  {aliveEnemiesCount}/{enemies.length}
+                </span>
               </div>
+
+              {/* Player Own Ship Status Bar (directly under Balance of Power) */}
+              {renderPlayerStatusBar(false)}
             </div>
-
-            {/* Compact Balance of Power Meter */}
-            <div
-              data-testid="battle-force-ratio-bar"
-              className="shrink-0 px-1 flex items-center gap-2 text-[12px] font-mono-nums"
-            >
-              <span className="font-bold text-sky-300 w-10 text-left">
-                {aliveAlliesCount}/{allies.length}
-              </span>
-              <div className="flex-1 h-2 rounded-full bg-slate-900 border border-slate-800 overflow-hidden flex">
-                <div
-                  style={{ width: `${allySharePct}%` }}
-                  className="h-full bg-gradient-to-r from-emerald-500 to-sky-400 transition-all duration-300"
-                />
-                <div
-                  style={{ width: `${enemySharePct}%` }}
-                  className="h-full bg-gradient-to-r from-orange-500 to-red-500 transition-all duration-300"
-                />
-              </div>
-              <span className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 font-bold text-amber-300 shrink-0">
-                {battle.squadSize}v{battle.squadSize}
-              </span>
-              <span className="font-bold text-red-400 w-10 text-right">
-                {aliveEnemiesCount}/{enemies.length}
-              </span>
-            </div>
-
-            {/* Player Own Ship Status Bar (directly under Balance of Power) */}
-            {renderPlayerStatusBar(false)}
-
-            {/* Reserved Action Camera Slot (placeholder for G4b) */}
-            {renderCameraSlot(false)}
 
             {battle.autoStopNotice && !battle.summary && (
-              <div className="shrink-0 rounded-lg border border-orange-500/40 bg-orange-500/12 px-3 py-1.5 flex items-center justify-between gap-2 text-[13px] text-orange-200">
+              <div className="shrink-0 min-w-0 rounded-lg border border-orange-500/40 bg-orange-500/12 px-3 py-1.5 flex items-center justify-between gap-2 text-[13px] text-orange-200">
                 <div className="flex items-center gap-2 min-w-0">
                   <AlertTriangle className="w-4 h-4 text-orange-400 shrink-0" />
                   <span className="truncate">
@@ -2028,7 +2064,7 @@ export function BattleScreen() {
                 <button
                   type="button"
                   onClick={() => setAutoBattleEnabled(true)}
-                  className="min-h-[36px] px-3 rounded border border-emerald-400/60 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 text-[12px] font-semibold cursor-pointer shrink-0"
+                  className="min-h-[32px] px-3 rounded border border-emerald-400/60 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 text-[12px] font-semibold cursor-pointer shrink-0"
                 >
                   {t('auto.auto')}
                 </button>
@@ -2036,7 +2072,10 @@ export function BattleScreen() {
             )}
 
             {/* Main Field */}
-            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            <div
+              data-testid="battle-main-field"
+              className="flex-1 min-w-0 min-h-[420px] flex flex-col overflow-hidden"
+            >
               {renderFieldContent()}
             </div>
 
@@ -2096,7 +2135,7 @@ export function BattleScreen() {
                   {/* Single-Row Core + Skill Controls */}
                   <div
                     data-testid="battle-manual-dock"
-                    className="flex items-stretch gap-2"
+                    className="flex items-stretch gap-2 min-w-0"
                   >
                     {/* Basic Attack / Defend / Item */}
                     <div className="flex items-stretch gap-1.5 shrink-0">
@@ -2190,22 +2229,22 @@ export function BattleScreen() {
                                 lang,
                                 skill.id
                               )}${reasonText ? ` [${reasonText}]` : ''}`}
-                              className={`min-h-[44px] px-2 py-1 rounded-lg border text-left transition-colors flex flex-col justify-between gap-0.5 ${borderClass} ${
+                              className={`min-w-0 min-h-[44px] px-2 py-1 rounded-lg border text-left transition-colors flex flex-col justify-between gap-0.5 overflow-hidden ${borderClass} ${
                                 clickable
                                   ? 'cursor-pointer'
                                   : 'cursor-not-allowed'
                               }`}
                             >
-                              <div className="flex items-center justify-between gap-1">
+                              <div className="flex items-center justify-between gap-1 min-w-0">
                                 <SkillIcon
                                   icon={skill.icon}
                                   className="w-3.5 h-3.5 shrink-0"
                                 />
                                 <span
-                                  className={`font-mono-nums text-[12px] font-bold ${
+                                  className={`font-mono-nums text-[12px] font-bold truncate ${
                                     usability.cooldownRemaining > 0
                                       ? 'text-red-300'
-                                      : 'text-amber-300'
+                                      : SP_COLOR_TOKENS.textClass
                                   }`}
                                 >
                                   {isToggleOn
@@ -2587,7 +2626,7 @@ export function BattleScreen() {
                     className={`text-right font-mono-nums text-[12px] font-bold shrink-0 ${
                       usability.cooldownRemaining > 0
                         ? 'text-red-300'
-                        : 'text-amber-300'
+                        : SP_COLOR_TOKENS.textClass
                     }`}
                   >
                     {isToggleOn

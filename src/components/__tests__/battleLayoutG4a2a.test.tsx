@@ -8,19 +8,11 @@ import {
   CURRENT_SAVE_VERSION,
   migrateSaveData,
 } from '../../engine/migration';
-import { buildExportEnvelope } from '../../engine/saveExport';
 import { EN_TRANSLATIONS } from '../../i18n/en';
 import { VI_TRANSLATIONS } from '../../i18n/vi';
 import { useGameStore } from '../../store/useGameStore';
 import type { BattleState, CombatUnit } from '../../types/game';
 import { getBattleLayoutMode } from '../../utils/battleDisplay';
-import {
-  BATTLE_LAYOUT_PREFS_STORAGE_KEY,
-  DEFAULT_BATTLE_LAYOUT_PREFS,
-  readBattleLayoutPrefs,
-  resetBattleLayoutPrefs,
-  writeBattleLayoutPrefs,
-} from '../../utils/battleLayoutPrefs';
 import App from '../../App';
 import { BattleScreen } from '../BattleScreen';
 import { EffectsSettingsPanel } from '../EffectsSettingsPanel';
@@ -119,13 +111,12 @@ function setViewport(w: number, h: number) {
   window.dispatchEvent(new Event('resize'));
 }
 
-describe('TASK G4a-2a v2 — Battle layout, Camera slot, battleLayoutPrefs, Loop row & Sound default OFF', () => {
+describe('TASK G4a-2a / G4a-L1 — Battle layout, camera slot removal, Loop row & Sound default OFF', () => {
   let container: HTMLDivElement | null = null;
   let root: Root | null = null;
 
   beforeEach(() => {
     window.localStorage.clear();
-    resetBattleLayoutPrefs();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -154,86 +145,8 @@ describe('TASK G4a-2a v2 — Battle layout, Camera slot, battleLayoutPrefs, Loop
     window.localStorage.clear();
   });
 
-  it('1) battleLayoutPrefs read/write/default/reset & SV1a export isolation', async () => {
-    window.localStorage.removeItem(BATTLE_LAYOUT_PREFS_STORAGE_KEY);
-    expect(readBattleLayoutPrefs()).toEqual(DEFAULT_BATTLE_LAYOUT_PREFS);
-    expect(readBattleLayoutPrefs().showActionCamera).toBe(true);
-
-    // Corrupted JSON falls back cleanly to default ON
-    window.localStorage.setItem(BATTLE_LAYOUT_PREFS_STORAGE_KEY, '{bad-json');
-    expect(readBattleLayoutPrefs()).toEqual({ showActionCamera: true });
-
-    // Write OFF & read back
-    const written = writeBattleLayoutPrefs({ showActionCamera: false });
-    expect(written).toEqual({ showActionCamera: false });
-    expect(readBattleLayoutPrefs()).toEqual({ showActionCamera: false });
-    expect(
-      JSON.parse(
-        window.localStorage.getItem(BATTLE_LAYOUT_PREFS_STORAGE_KEY) || '{}'
-      )
-    ).toEqual({ showActionCamera: false });
-
-    // Reset restores default ON
-    expect(resetBattleLayoutPrefs()).toEqual({ showActionCamera: true });
-    expect(readBattleLayoutPrefs()).toEqual({ showActionCamera: true });
-
-    // SV1a export remains isolated from dreamAce.layout.v1
-    const s = useGameStore.getState();
-    const envelope = await buildExportEnvelope({
-      pilot: s.pilot,
-      shopStock: s.shopStock,
-      wpMarketOffers: s.wpMarketOffers,
-      battlesUntilRestock: s.battlesUntilRestock,
-      inventoryFilterState: s.inventoryFilterState,
-      quickSellConfig: s.quickSellConfig,
-      selectedSectorId: s.selectedSectorId,
-      hasSaveData: s.hasSaveData,
-      muted: s.muted,
-      battleSpeed: s.battleSpeed,
-      skipAnimations: s.skipAnimations,
-      battleViewMode: s.battleViewMode,
-      language: s.language,
-      adminConfig: s.adminConfig,
-      autoRepeatStopOnDefeat: s.autoRepeatStopOnDefeat,
-    });
-    expect(JSON.stringify(envelope)).not.toContain('showActionCamera');
-    expect(JSON.stringify(envelope)).not.toContain(
-      BATTLE_LAYOUT_PREFS_STORAGE_KEY
-    );
-  });
-
-  it('2) Camera slot shows by default (120px phone / 160px desktop) and hides cleanly when OFF via EffectsSettingsPanel', () => {
+  it('1) No battle-camera-slot on phone or desktop and no Action Camera toggle in EffectsSettingsPanel', () => {
     setViewport(390, 844);
-    act(() => {
-      root!.render(createElement(BattleScreen));
-    });
-
-    const phoneCam = container!.querySelector(
-      '[data-testid="battle-camera-slot"]'
-    ) as HTMLElement;
-    expect(phoneCam).not.toBeNull();
-    expect(phoneCam.getAttribute('data-camera-size')).toBe('phone');
-    expect(phoneCam.className).toContain('h-[120px]');
-    expect(phoneCam.textContent).toContain('Camera hành động');
-
-    // Camera slot sits directly under player status bar
-    const playerBar = container!.querySelector(
-      '[data-testid="battle-player-status-bar"]'
-    ) as HTMLElement;
-    expect(playerBar.nextElementSibling).toBe(phoneCam);
-
-    // Desktop size = 160px
-    act(() => {
-      setViewport(1280, 800);
-    });
-    const desktopCam = container!.querySelector(
-      '[data-testid="battle-camera-slot"]'
-    ) as HTMLElement;
-    expect(desktopCam).not.toBeNull();
-    expect(desktopCam.getAttribute('data-camera-size')).toBe('desktop');
-    expect(desktopCam.className).toContain('h-[160px]');
-
-    // Render BattleScreen + EffectsSettingsPanel together to verify live toggle
     act(() => {
       root!.render(
         createElement(
@@ -244,24 +157,21 @@ describe('TASK G4a-2a v2 — Battle layout, Camera slot, battleLayoutPrefs, Loop
         )
       );
     });
-
-    const toggleBtn = container!.querySelector(
-      '[data-testid="battle-toggle-action-camera"]'
-    ) as HTMLButtonElement;
-    expect(toggleBtn).not.toBeNull();
-    expect(toggleBtn.getAttribute('aria-pressed')).toBe('true');
-    expect(toggleBtn.textContent).toContain('Camera hành động');
-    expect(toggleBtn.textContent).toContain('ON');
-
-    act(() => {
-      toggleBtn.click();
-    });
-
-    expect(toggleBtn.getAttribute('aria-pressed')).toBe('false');
-    expect(toggleBtn.textContent).toContain('OFF');
-    expect(readBattleLayoutPrefs().showActionCamera).toBe(false);
     expect(
       container!.querySelector('[data-testid="battle-camera-slot"]')
+    ).toBeNull();
+    expect(
+      container!.querySelector('[data-testid="battle-toggle-action-camera"]')
+    ).toBeNull();
+
+    act(() => {
+      setViewport(1440, 900);
+    });
+    expect(
+      container!.querySelector('[data-testid="battle-camera-slot"]')
+    ).toBeNull();
+    expect(
+      container!.querySelector('[data-testid="battle-toggle-action-camera"]')
     ).toBeNull();
   });
 
@@ -402,9 +312,9 @@ describe('TASK G4a-2a v2 — Battle layout, Camera slot, battleLayoutPrefs, Loop
     ).toBe(true);
   });
 
-  it('6) Translation keys exist in both vi.ts and en.ts', () => {
-    expect(VI_TRANSLATIONS['battle.actionCamera']).toBe('Camera hành động');
-    expect(EN_TRANSLATIONS['battle.actionCamera']).toBe('Action Camera');
+  it('6) Translation keys exist in both vi.ts and en.ts (and battle.actionCamera is removed)', () => {
+    expect('battle.actionCamera' in VI_TRANSLATIONS).toBe(false);
+    expect('battle.actionCamera' in EN_TRANSLATIONS).toBe(false);
     expect(VI_TRANSLATIONS['battle.loopRunningTag']).toBeTruthy();
     expect(EN_TRANSLATIONS['battle.loopRunningTag']).toBeTruthy();
   });

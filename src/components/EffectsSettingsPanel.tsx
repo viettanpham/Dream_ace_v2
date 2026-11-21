@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Grid, Info, Play, RotateCcw, Sparkles, Tag, Video } from 'lucide-react';
+import { Grid, Info, Play, RotateCcw, Sparkles, Tag } from 'lucide-react';
 import { useI18n } from '../i18n';
 import { useGameStore } from '../store/useGameStore';
 import type { StatusBadgeLayout } from '../types/game';
 import { usePrefersReducedMotion } from '../utils/battleDisplay';
-import { useBattleLayoutPrefs } from '../utils/battleLayoutPrefs';
 import {
   resolveEffectiveVfxConfig,
   resolveReducedMotion,
@@ -28,7 +27,6 @@ interface EffectsSettingsPanelProps {
 export function EffectsSettingsPanel({ compact = false }: EffectsSettingsPanelProps) {
   const { t } = useI18n();
   const [fxSettings, updateFxSettings] = useFxSettings();
-  const [layoutPrefs, updateLayoutPrefs] = useBattleLayoutPrefs();
   const adminStatusDefaults = useGameStore(
     (s) => s.adminConfig.statusDisplayDefaults
   );
@@ -200,30 +198,6 @@ export function EffectsSettingsPanel({ compact = false }: EffectsSettingsPanelPr
           </span>
           <span className="font-mono-nums text-[12px]">
             {fxSettings.effectsDebug ? 'ON' : 'OFF'}
-          </span>
-        </button>
-
-        <button
-          type="button"
-          data-testid="battle-toggle-action-camera"
-          onClick={() =>
-            updateLayoutPrefs({
-              showActionCamera: !layoutPrefs.showActionCamera,
-            })
-          }
-          aria-pressed={layoutPrefs.showActionCamera}
-          className={`w-full min-h-[42px] px-3.5 rounded-lg border text-[13px] font-semibold flex items-center justify-between cursor-pointer ${
-            layoutPrefs.showActionCamera
-              ? 'border-sky-400 bg-sky-500/20 text-sky-200'
-              : 'border-slate-700 bg-slate-900 text-slate-300'
-          }`}
-        >
-          <span className="inline-flex items-center gap-2.5">
-            <Video className="w-4 h-4 text-sky-400" />
-            <span>{t('battle.actionCamera')}</span>
-          </span>
-          <span className="font-mono-nums text-[12px]">
-            {layoutPrefs.showActionCamera ? 'ON' : 'OFF'}
           </span>
         </button>
       </div>

@@ -19,6 +19,15 @@ import type {
   TurnQueueEntry,
 } from '../types/game';
 
+export const SP_COLOR_HEX = '#EF9F27' as const;
+
+export const SP_COLOR_TOKENS = {
+  hex: SP_COLOR_HEX,
+  barFillClass: 'bg-[#EF9F27]',
+  textClass: 'text-[#EF9F27]',
+  badgeClass: 'bg-[#EF9F27]/12 border-[#EF9F27]/35 text-[#EF9F27]',
+} as const;
+
 export type BattleLayoutMode = 'phone-portrait' | 'tablet' | 'pc';
 
 export type RowExposureState = 'exposed' | 'protected' | 'empty';

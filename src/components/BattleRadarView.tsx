@@ -1792,7 +1792,7 @@ export function BattleRadarView({
       className={
         layoutMode === 'phone-portrait'
           ? 'relative w-full aspect-[380/500] flex items-center justify-center rounded-lg border border-slate-800/90 bg-[#050A12] select-none touch-pan-y'
-          : 'relative flex-1 min-h-0 w-full h-full flex items-center justify-center overflow-hidden rounded-lg border border-slate-800/90 bg-[#050A12] select-none touch-pan-y'
+          : 'relative flex-1 min-w-0 w-full min-h-[420px] aspect-[12/7] flex items-center justify-center overflow-hidden rounded-lg border border-slate-800/90 bg-[#050A12] select-none touch-pan-y'
       }
     >
       {/* Main Tactical 3-Row Radar SVG — static geometry only (zero animated SVG transforms) */}

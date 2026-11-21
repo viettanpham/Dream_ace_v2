@@ -29,6 +29,9 @@
   --turn-active-text: #fefce8;
   --turn-active-bg: rgba(254, 240, 138, 0.18);
   --turn-active-glow: rgba(254, 240, 138, 0.5);
+
+  /* Single shared SP accent color token (Orange #EF9F27) */
+  --sp-color: #EF9F27;
 }
 
 @layer base {
